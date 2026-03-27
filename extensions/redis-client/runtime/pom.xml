@@ -36,6 +36,11 @@
             <artifactId>smallrye-mutiny-vertx-redis-client</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.lettuce</groupId>
+            <artifactId>lettuce-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-devservices</artifactId>
         </dependency>
