@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -15,6 +16,7 @@ import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.netty.channel.EventLoopGroup;
 import io.smallrye.mutiny.Uni;
+import io.vertx.core.impl.VertxInternal;
 import io.vertx.mutiny.core.Vertx;
 
 /**
@@ -44,7 +46,9 @@ class LettuceClientResourcesTest {
         REDIS.start();
         vertx = Vertx.vertx();
 
-        EventLoopGroup vertxEventLoops = vertx.getDelegate().nettyEventLoopGroup();
+        // Cast to VertxInternal to access getEventLoopGroup() — the non-deprecated replacement
+        // for the deprecated nettyEventLoopGroup() method (removed from public API in Vert.x 5).
+        EventLoopGroup vertxEventLoops = ((VertxInternal) vertx.getDelegate()).getEventLoopGroup();
         lettuceResources = new LettuceClientResources(vertxEventLoops);
 
         String redisUri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
@@ -72,7 +76,7 @@ class LettuceClientResourcesTest {
             RedisAsyncCommands<String, String> async = connection.async();
 
             CompletionStage<String> result = async.ping().toCompletableFuture();
-            String pong = result.toCompletableFuture().get();
+            String pong = result.toCompletableFuture().get(5, TimeUnit.SECONDS);
 
             assertThat(pong).isEqualTo("PONG");
         }
@@ -115,7 +119,7 @@ class LettuceClientResourcesTest {
 
             future.thenAccept(result -> {
                 callbackThreadName[0] = Thread.currentThread().getName();
-            }).toCompletableFuture().get();
+            }).toCompletableFuture().get(5, TimeUnit.SECONDS);
 
             assertThat(callbackThreadName[0])
                     .as("Lettuce callback should execute on a Vert.x event loop thread")
