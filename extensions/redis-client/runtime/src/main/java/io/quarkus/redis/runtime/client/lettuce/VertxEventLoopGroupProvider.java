@@ -37,6 +37,11 @@ public class VertxEventLoopGroupProvider implements EventLoopGroupProvider {
     @SuppressWarnings("unchecked")
     public <T extends EventLoopGroup> T allocate(Class<T> type) {
         LOGGER.debugf("Allocating event loop group for type %s — returning shared Vert.x event loop group", type.getName());
+        if (!type.isInstance(eventLoopGroup)) {
+            throw new IllegalArgumentException("Requested EventLoopGroup type " +
+                    type.getName() + " is not compatible with provided instance of type " +
+                    eventLoopGroup.getClass().getName());
+        }
         return (T) eventLoopGroup;
     }
 
