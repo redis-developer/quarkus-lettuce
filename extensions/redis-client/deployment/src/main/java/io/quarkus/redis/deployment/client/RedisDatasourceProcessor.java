@@ -34,6 +34,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.codecs.Codec;
 import io.quarkus.redis.runtime.client.RedisClientRecorder;
+import io.quarkus.redis.runtime.client.lettuce.LettuceRecorder;
 import io.quarkus.tls.deployment.spi.TlsRegistryBuildItem;
 import io.quarkus.vertx.deployment.VertxBuildItem;
 
@@ -45,7 +46,9 @@ public class RedisDatasourceProcessor {
 
     @BuildStep
     public void detectUsage(BuildProducer<RequestedRedisClientBuildItem> request,
+            BuildProducer<RequestedLettuceClientBuildItem> lettuceRequest,
             RedisBuildTimeConfig buildTimeConfig,
+            RedisBackendBuildItem backend,
             BeanArchiveIndexBuildItem indexBuildItem,
             BeanDiscoveryFinishedBuildItem beans) {
         // Collect the used redis datasource, the unused clients will not be instantiated.
@@ -70,6 +73,9 @@ public class RedisDatasourceProcessor {
 
         for (String name : names) {
             request.produce(new RequestedRedisClientBuildItem(name));
+            if (backend.isLettuce()) {
+                lettuceRequest.produce(new RequestedLettuceClientBuildItem(name));
+            }
         }
     }
 
@@ -85,6 +91,8 @@ public class RedisDatasourceProcessor {
     @BuildStep
     @Record(ExecutionTime.RUNTIME_INIT)
     public void init(RedisClientRecorder recorder,
+            LettuceRecorder lettuceRecorder,
+            RedisBackendBuildItem backend,
             List<RequestedRedisClientBuildItem> clients,
             ShutdownContextBuildItem shutdown,
             BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
@@ -106,11 +114,17 @@ public class RedisDatasourceProcessor {
         // Create the supplier and define the beans.
         for (String name : names) {
             Supplier<ActiveResult> checkActive = recorder.checkActive(name);
-            // Data sources
+            // Data sources — pick supplier based on the resolved backend.
+            Supplier<RedisDataSource> blockingSupplier = backend.isLettuce()
+                    ? lettuceRecorder.getBlockingDataSource(name)
+                    : recorder.getBlockingDataSource(name);
+            Supplier<ReactiveRedisDataSource> reactiveSupplier = backend.isLettuce()
+                    ? lettuceRecorder.getReactiveDataSource(name)
+                    : recorder.getReactiveDataSource(name);
             syntheticBeans.produce(configureAndCreateSyntheticBean(name, RedisDataSource.class,
-                    checkActive, recorder.getBlockingDataSource(name)));
+                    checkActive, blockingSupplier));
             syntheticBeans.produce(configureAndCreateSyntheticBean(name, ReactiveRedisDataSource.class,
-                    checkActive, recorder.getReactiveDataSource(name)));
+                    checkActive, reactiveSupplier));
         }
 
         recorder.cleanup(shutdown);
