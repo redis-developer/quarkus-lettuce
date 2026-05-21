@@ -36,6 +36,7 @@ import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionalRedisDataSource;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
+import io.quarkus.redis.runtime.client.lettuce.key.LettuceBlockingKeyCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceBlockingValueCommandsImpl;
 import io.vertx.mutiny.redis.client.Command;
 import io.vertx.mutiny.redis.client.Response;
@@ -153,12 +154,12 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K> KeyCommands<K> key(Class<K> redisKeyType) {
-        throw groupNotImplemented("key");
+        return new LettuceBlockingKeyCommandsImpl<>(this, reactive.key(redisKeyType), timeout);
     }
 
     @Override
     public <K> KeyCommands<K> key(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("key");
+        throw groupNotImplemented("key(TypeReference)");
     }
 
     @Override

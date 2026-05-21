@@ -39,6 +39,7 @@ import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSo
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
+import io.quarkus.redis.runtime.client.lettuce.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveValueCommandsImpl;
 import io.smallrye.mutiny.Uni;
 import io.vertx.mutiny.core.Vertx;
@@ -207,12 +208,15 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K> ReactiveKeyCommands<K> key(Class<K> redisKeyType) {
-        throw groupNotImplemented("key");
+        nonNull(redisKeyType, "redisKeyType");
+        @SuppressWarnings({ "unchecked", "rawtypes" })
+        StatefulRedisConnection<K, Object> typedConnection = (StatefulRedisConnection) connection;
+        return new LettuceReactiveKeyCommandsImpl<>(this, typedConnection);
     }
 
     @Override
     public <K> ReactiveKeyCommands<K> key(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("key");
+        throw groupNotImplemented("key(TypeReference)");
     }
 
     @Override

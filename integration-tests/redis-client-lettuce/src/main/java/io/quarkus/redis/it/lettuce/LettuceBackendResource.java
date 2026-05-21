@@ -1,5 +1,8 @@
 package io.quarkus.redis.it.lettuce;
 
+import java.util.HashSet;
+import java.util.Set;
+
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DELETE;
@@ -7,9 +10,14 @@ import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.QueryParam;
 
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.keys.KeyCommands;
+import io.quarkus.redis.datasource.keys.KeyScanArgs;
+import io.quarkus.redis.datasource.keys.KeyScanCursor;
+import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.smallrye.mutiny.Uni;
@@ -23,12 +31,16 @@ public class LettuceBackendResource {
     private final RedisDataSource blocking;
     private final ValueCommands<String, String> values;
     private final ReactiveValueCommands<String, String> reactiveValues;
+    private final KeyCommands<String> keys;
+    private final ReactiveKeyCommands<String> reactiveKeys;
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs) {
         this.blocking = ds;
         this.values = ds.value(String.class);
         this.reactiveValues = reactiveDs.value(String.class);
+        this.keys = ds.key(String.class);
+        this.reactiveKeys = reactiveDs.key(String.class);
     }
 
     @GET
@@ -73,5 +85,74 @@ public class LettuceBackendResource {
     @Path("/reactive/{key}")
     public Uni<String> getReactive(@PathParam("key") String key) {
         return reactiveValues.get(key);
+    }
+
+    @GET
+    @Path("/key/exists/{key}")
+    public boolean keyExists(@PathParam("key") String key) {
+        return keys.exists(key);
+    }
+
+    @DELETE
+    @Path("/key/{key}")
+    public int keyDel(@PathParam("key") String key) {
+        return keys.del(key);
+    }
+
+    @POST
+    @Path("/key/expire/{key}/{seconds}")
+    public boolean keyExpire(@PathParam("key") String key, @PathParam("seconds") long seconds) {
+        return keys.expire(key, seconds);
+    }
+
+    @GET
+    @Path("/key/ttl/{key}")
+    public long keyTtl(@PathParam("key") String key) {
+        return keys.ttl(key);
+    }
+
+    @POST
+    @Path("/key/persist/{key}")
+    public boolean keyPersist(@PathParam("key") String key) {
+        return keys.persist(key);
+    }
+
+    @POST
+    @Path("/key/rename/{key}/{newkey}")
+    public void keyRename(@PathParam("key") String key, @PathParam("newkey") String newkey) {
+        keys.rename(key, newkey);
+    }
+
+    @POST
+    @Path("/key/copy/{src}/{dst}")
+    public boolean keyCopy(@PathParam("src") String src, @PathParam("dst") String dst) {
+        return keys.copy(src, dst);
+    }
+
+    @GET
+    @Path("/key/type/{key}")
+    public String keyType(@PathParam("key") String key) {
+        return keys.type(key).name();
+    }
+
+    @GET
+    @Path("/key/scan")
+    public Set<String> keyScan(@QueryParam("match") String match) {
+        KeyScanArgs args = new KeyScanArgs();
+        if (match != null) {
+            args.match(match);
+        }
+        KeyScanCursor<String> cursor = keys.scan(args);
+        Set<String> collected = new HashSet<>();
+        while (cursor.hasNext()) {
+            collected.addAll(cursor.next());
+        }
+        return collected;
+    }
+
+    @GET
+    @Path("/key/reactive/ttl/{key}")
+    public Uni<Long> keyTtlReactive(@PathParam("key") String key) {
+        return reactiveKeys.ttl(key);
     }
 }
