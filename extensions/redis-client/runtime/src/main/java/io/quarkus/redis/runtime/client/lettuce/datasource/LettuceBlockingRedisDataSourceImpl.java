@@ -38,6 +38,7 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceBlockingKeyCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceBlockingValueCommandsImpl;
+import io.smallrye.mutiny.Uni;
 import io.vertx.mutiny.redis.client.Command;
 import io.vertx.mutiny.redis.client.Response;
 
@@ -45,17 +46,27 @@ import io.vertx.mutiny.redis.client.Response;
  * Blocking wrapper around {@link LettuceReactiveRedisDataSourceImpl}.
  * <p>
  * Each method awaits the reactive result for the configured {@code timeout}. Must not be
- * invoked from an event loop thread. Mirrors the support matrix of the reactive variant —
- * {@code value} is implemented, the rest throw {@link UnsupportedOperationException}.
+ * invoked from an event loop thread. {@code withConnection(...)} runs the user block on a
+ * dedicated connection borrowed from the underlying reactive data source.
  */
 public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     private final LettuceReactiveRedisDataSourceImpl reactive;
     private final Duration timeout;
+    private final boolean pinned;
 
     public LettuceBlockingRedisDataSourceImpl(LettuceReactiveRedisDataSourceImpl reactive, Duration timeout) {
+        this(reactive, timeout, false);
+    }
+
+    private LettuceBlockingRedisDataSourceImpl(LettuceReactiveRedisDataSourceImpl reactive, Duration timeout, boolean pinned) {
         this.reactive = nonNull(reactive, "reactive");
         this.timeout = nonNull(timeout, "timeout");
+        this.pinned = pinned;
+    }
+
+    static LettuceBlockingRedisDataSourceImpl pinnedTo(LettuceReactiveRedisDataSourceImpl pinnedReactive, Duration timeout) {
+        return new LettuceBlockingRedisDataSourceImpl(pinnedReactive, timeout, true);
     }
 
     @Override
@@ -90,7 +101,16 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public void withConnection(Consumer<RedisDataSource> consumer) {
-        throw transactionsNotSupported();
+        if (pinned) {
+            consumer.accept(this);
+            return;
+        }
+        reactive.withConnection(rds -> {
+            LettuceReactiveRedisDataSourceImpl pinnedReactive = (LettuceReactiveRedisDataSourceImpl) rds;
+            LettuceBlockingRedisDataSourceImpl pinnedBlocking = pinnedTo(pinnedReactive, timeout);
+            consumer.accept(pinnedBlocking);
+            return Uni.createFrom().voidItem();
+        }).await().atMost(timeout);
     }
 
     @Override

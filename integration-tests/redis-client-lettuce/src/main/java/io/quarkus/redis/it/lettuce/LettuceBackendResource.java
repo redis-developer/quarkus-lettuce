@@ -29,6 +29,7 @@ import io.vertx.mutiny.redis.client.Response;
 public class LettuceBackendResource {
 
     private final RedisDataSource blocking;
+    private final ReactiveRedisDataSource reactive;
     private final ValueCommands<String, String> values;
     private final ReactiveValueCommands<String, String> reactiveValues;
     private final KeyCommands<String> keys;
@@ -37,6 +38,7 @@ public class LettuceBackendResource {
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs) {
         this.blocking = ds;
+        this.reactive = reactiveDs;
         this.values = ds.value(String.class);
         this.reactiveValues = reactiveDs.value(String.class);
         this.keys = ds.key(String.class);
@@ -154,5 +156,41 @@ public class LettuceBackendResource {
     @Path("/key/reactive/ttl/{key}")
     public Uni<Long> keyTtlReactive(@PathParam("key") String key) {
         return reactiveKeys.ttl(key);
+    }
+
+    @GET
+    @Path("/with-connection/client-ids")
+    public String withConnectionClientIds() {
+        long outside = blocking.execute("CLIENT", "ID").toLong();
+        long[] inside = new long[2];
+        blocking.withConnection(ds -> {
+            inside[0] = ds.execute("CLIENT", "ID").toLong();
+            inside[1] = ds.execute("CLIENT", "ID").toLong();
+        });
+        return inside[0] + "," + inside[1] + "," + outside;
+    }
+
+    @GET
+    @Path("/with-connection/reactive/client-ids")
+    public Uni<String> withConnectionClientIdsReactive() {
+        long[] inside = new long[2];
+        return reactive.execute("CLIENT", "ID").map(Response::toLong)
+                .chain(outside -> reactive.withConnection(ds -> ds.execute("CLIENT", "ID").map(Response::toLong)
+                        .invoke(id -> inside[0] = id)
+                        .chain(() -> ds.execute("CLIENT", "ID").map(Response::toLong))
+                        .invoke(id -> inside[1] = id)
+                        .replaceWithVoid())
+                        .map(ignored -> inside[0] + "," + inside[1] + "," + outside));
+    }
+
+    @GET
+    @Path("/with-connection/nested")
+    public String withConnectionNested() {
+        long[] ids = new long[2];
+        blocking.withConnection(outer -> {
+            ids[0] = outer.execute("CLIENT", "ID").toLong();
+            outer.withConnection(inner -> ids[1] = inner.execute("CLIENT", "ID").toLong());
+        });
+        return ids[0] + "," + ids[1];
     }
 }

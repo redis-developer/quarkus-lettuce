@@ -1,5 +1,9 @@
 package io.quarkus.redis.it.lettuce;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import org.hamcrest.CoreMatchers;
 import org.junit.jupiter.api.Test;
 
@@ -213,5 +217,41 @@ class LettuceBackendTest {
         RestAssured.given().queryParam("match", prefix + "*").when().get("/lettuce/key/scan").then()
                 .statusCode(200)
                 .body("$", CoreMatchers.hasItems(prefix + "0", prefix + "1", prefix + "2", prefix + "3", prefix + "4"));
+    }
+
+    @Test
+    public void withConnectionBlockingClientIds() {
+        String body = RestAssured.given().when().get("/lettuce/with-connection/client-ids")
+                .then().statusCode(200).extract().asString();
+        String[] parts = body.split(",");
+        long inside1 = Long.parseLong(parts[0]);
+        long inside2 = Long.parseLong(parts[1]);
+        long outside = Long.parseLong(parts[2]);
+        assertTrue(inside1 > 0 && inside2 > 0 && outside > 0, () -> "expected positive ids, got " + body);
+        assertEquals(inside1, inside2, () -> "expected stable id inside block, got " + body);
+        assertNotEquals(inside1, outside, () -> "expected fresh connection inside block, got " + body);
+    }
+
+    @Test
+    public void withConnectionReactiveClientIds() {
+        String body = RestAssured.given().when().get("/lettuce/with-connection/reactive/client-ids")
+                .then().statusCode(200).extract().asString();
+        String[] parts = body.split(",");
+        long inside1 = Long.parseLong(parts[0]);
+        long inside2 = Long.parseLong(parts[1]);
+        long outside = Long.parseLong(parts[2]);
+        assertTrue(inside1 > 0 && inside2 > 0 && outside > 0, () -> "expected positive ids, got " + body);
+        assertEquals(inside1, inside2, () -> "expected stable id inside block, got " + body);
+        assertNotEquals(inside1, outside, () -> "expected fresh connection inside block, got " + body);
+    }
+
+    @Test
+    public void withConnectionNestedReusesConnection() {
+        String body = RestAssured.given().when().get("/lettuce/with-connection/nested")
+                .then().statusCode(200).extract().asString();
+        String[] parts = body.split(",");
+        long outer = Long.parseLong(parts[0]);
+        long inner = Long.parseLong(parts[1]);
+        assertEquals(outer, inner, () -> "expected nested withConnection to reuse outer connection, got " + body);
     }
 }

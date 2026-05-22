@@ -5,6 +5,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
@@ -52,17 +53,32 @@ import io.vertx.mutiny.redis.client.Response;
  * <p>
  * Wires the {@code value} command group to {@link LettuceReactiveValueCommandsImpl} and
  * implements {@code execute(...)}, {@code flushall()} and {@code select(...)} on top of the
- * Lettuce async API. {@code getRedis()} and the {@code withConnection}/{@code withTransaction}
- * blocks throw {@link UnsupportedOperationException} for now.
+ * Lettuce async API. {@code withConnection(...)} runs the user block on a freshly opened
+ * connection obtained from the supplied {@code connector}. {@code getRedis()} and
+ * {@code withTransaction(...)} throw {@link UnsupportedOperationException} for now.
  */
 public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSource {
 
     private final Vertx vertx;
     private final StatefulRedisConnection<String, String> connection;
+    private final Supplier<StatefulRedisConnection<String, String>> connector;
+    private final boolean pinned;
 
-    public LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<String, String> connection) {
+    public LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<String, String> connection,
+            Supplier<StatefulRedisConnection<String, String>> connector) {
+        this(vertx, connection, connector, false);
+    }
+
+    private LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<String, String> connection,
+            Supplier<StatefulRedisConnection<String, String>> connector, boolean pinned) {
         this.vertx = nonNull(vertx, "vertx");
         this.connection = nonNull(connection, "connection");
+        this.connector = connector;
+        this.pinned = pinned;
+    }
+
+    static LettuceReactiveRedisDataSourceImpl pinnedTo(Vertx vertx, StatefulRedisConnection<String, String> connection) {
+        return new LettuceReactiveRedisDataSourceImpl(vertx, connection, null, true);
     }
 
     public Vertx getVertx() {
@@ -138,7 +154,15 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public Uni<Void> withConnection(Function<ReactiveRedisDataSource, Uni<Void>> function) {
-        throw transactionsNotSupported();
+        if (pinned) {
+            return function.apply(this);
+        }
+        return Uni.createFrom().item(connector::get)
+                .onItem().transformToUni(conn -> {
+                    LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn);
+                    return Uni.createFrom().deferred(() -> function.apply(pinnedDs))
+                            .onTermination().call(() -> LettuceResult.toUni(conn::closeAsync).replaceWithVoid());
+                });
     }
 
     @Override
