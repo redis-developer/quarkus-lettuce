@@ -131,10 +131,15 @@ public class LettuceProcessor {
     }
 
     @BuildStep
-    public void registerNativeImageHints(RedisBackendBuildItem backend,
+    public void registerNativeImageHints(
             BuildProducer<ExcludeConfigBuildItem> excludeConfig,
             BuildProducer<RuntimeInitializedClassBuildItem> runtimeInit) {
-        if (!backend.isLettuce()) {
+        // Gate on classpath presence rather than backend selection: native-image auto-detects
+        // Lettuce's shipped native-image.properties whenever lettuce-core is on the classpath,
+        // even if the selected backend is Vert.x. Without our overrides the vendor file pins
+        // classes that conflict with Quarkus's runtime-init policy for the Netty DNS resolver
+        // and references the optional LatencyUtils dependency.
+        if (!QuarkusClassLoader.isClassPresentAtRuntime("io.lettuce.core.RedisClient")) {
             return;
         }
         // Lettuce ships a native-image.properties that pins DefaultCommandLatencyCollector and its
