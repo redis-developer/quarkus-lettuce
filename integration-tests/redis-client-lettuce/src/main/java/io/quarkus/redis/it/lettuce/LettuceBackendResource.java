@@ -18,6 +18,9 @@ import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.keys.KeyScanArgs;
 import io.quarkus.redis.datasource.keys.KeyScanCursor;
 import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
+import io.quarkus.redis.datasource.keys.RedisValueType;
+import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
+import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.smallrye.mutiny.Uni;
@@ -192,5 +195,63 @@ public class LettuceBackendResource {
             outer.withConnection(inner -> ids[1] = inner.execute("CLIENT", "ID").toLong());
         });
         return ids[0] + "," + ids[1];
+    }
+
+    @POST
+    @Path("/with-transaction/blocking/{key}")
+    public String withTransactionBlocking(@PathParam("key") String key, String value) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var v = tx.value(String.class, String.class);
+            v.set(key, value);
+            v.get(key);
+        });
+        return result.discarded() + "," + result.size() + "," + result.get(1);
+    }
+
+    @POST
+    @Path("/with-transaction/reactive/{key}")
+    public Uni<String> withTransactionReactive(@PathParam("key") String key, String value) {
+        return reactive.withTransaction(tx -> {
+            var v = tx.value(String.class, String.class);
+            return v.set(key, value).chain(() -> v.get(key));
+        }).map(result -> result.discarded() + "," + result.size() + "," + result.get(1));
+    }
+
+    @POST
+    @Path("/with-transaction/discard/{key}")
+    public String withTransactionDiscard(@PathParam("key") String key, String value) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            tx.value(String.class, String.class).set(key, value);
+            tx.discard();
+        });
+        return result.discarded() + "," + values.get(key);
+    }
+
+    @POST
+    @Path("/with-transaction/optimistic/{key}")
+    public String withTransactionOptimistic(@PathParam("key") String key, String suffix) {
+        OptimisticLockingTransactionResult<String> result = blocking.withTransaction(
+                preTx -> preTx.value(String.class, String.class).get(key),
+                (current, tx) -> tx.value(String.class, String.class).set(key, current + suffix),
+                key);
+        return result.discarded() + "," + result.getPreTransactionResult() + "," + values.get(key);
+    }
+
+    @POST
+    @Path("/with-transaction/key/{key}")
+    public String withTransactionKey(@PathParam("key") String key) {
+        values.set(key, "v");
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var k = tx.key(String.class);
+            k.exists(key);
+            k.expire(key, 100);
+            k.ttl(key);
+            k.type(key);
+        });
+        boolean exists = result.get(0);
+        boolean expired = result.get(1);
+        long ttl = result.get(2);
+        RedisValueType type = result.get(3);
+        return result.discarded() + "," + result.size() + "," + exists + "," + expired + "," + (ttl > 0) + "," + type;
     }
 }

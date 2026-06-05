@@ -11,6 +11,7 @@ import io.quarkus.redis.datasource.keys.CopyArgs;
 import io.quarkus.redis.datasource.keys.ExpireArgs;
 import io.quarkus.redis.datasource.keys.KeyScanArgs;
 import io.quarkus.redis.datasource.keys.RedisValueType;
+import io.quarkus.redis.runtime.client.lettuce.LettuceConverterRegistry;
 
 /**
  * Unit tests for {@link LettuceKeyCommandsConverters}.
@@ -102,6 +103,19 @@ class LettuceKeyCommandsConvertersTest {
         LettuceKeyCommandsConverters.register();
         // No exception, no duplicate registration side effects.
         assertThat(renderExpireArgs(new ExpireArgs().nx())).containsExactly("NX");
+    }
+
+    @Test
+    void registerReinstatesConvertersAfterRegistryCleared() {
+        LettuceKeyCommandsConverters.register();
+        assertThat(LettuceConverterRegistry.getArgConverter(ExpireArgs.class)).isNotNull();
+        // Simulate the registry being cleared (e.g. by another test) and verify register() self-heals.
+        LettuceConverterRegistry.clear();
+        assertThat(LettuceConverterRegistry.getArgConverter(ExpireArgs.class)).isNull();
+        LettuceKeyCommandsConverters.register();
+        assertThat(LettuceConverterRegistry.getArgConverter(ExpireArgs.class)).isNotNull();
+        assertThat(LettuceConverterRegistry.getArgConverter(CopyArgs.class)).isNotNull();
+        assertThat(LettuceConverterRegistry.getArgConverter(KeyScanArgs.class)).isNotNull();
     }
 
     @Test

@@ -15,12 +15,7 @@ import io.quarkus.redis.runtime.client.lettuce.LettuceConverterRegistry;
 public final class LettuceKeyCommandsConverters {
 
     static {
-        LettuceConverterRegistry.registerArgConverter(ExpireArgs.class,
-                LettuceKeyCommandsConverters::toLettuceExpireArgs);
-        LettuceConverterRegistry.registerArgConverter(CopyArgs.class,
-                LettuceKeyCommandsConverters::toLettuceCopyArgs);
-        LettuceConverterRegistry.registerArgConverter(KeyScanArgs.class,
-                LettuceKeyCommandsConverters::toLettuceKeyScanArgs);
+        registerAll();
     }
 
     private LettuceKeyCommandsConverters() {
@@ -30,12 +25,24 @@ public final class LettuceKeyCommandsConverters {
     /**
      * Ensures the Key Command converters are registered with {@link LettuceConverterRegistry}.
      * <p>
-     * The registration itself runs in this class's static initializer; calling this method simply
-     * forces class initialization at a well-defined point. It is therefore idempotent and
-     * thread-safe by virtue of the JVM's class-initialization guarantees.
+     * Registration normally happens in this class's static initializer; this method re-registers
+     * the converters if the registry has been cleared since (e.g. by tests), keyed on the
+     * registry's actual state. Idempotent and thread-safe: the registry uses concurrent maps and
+     * re-registering an equivalent converter is harmless.
      */
     public static void register() {
-        // No-op: registration is performed in the static initializer.
+        if (LettuceConverterRegistry.getArgConverter(ExpireArgs.class) == null) {
+            registerAll();
+        }
+    }
+
+    private static void registerAll() {
+        LettuceConverterRegistry.registerArgConverter(ExpireArgs.class,
+                LettuceKeyCommandsConverters::toLettuceExpireArgs);
+        LettuceConverterRegistry.registerArgConverter(CopyArgs.class,
+                LettuceKeyCommandsConverters::toLettuceCopyArgs);
+        LettuceConverterRegistry.registerArgConverter(KeyScanArgs.class,
+                LettuceKeyCommandsConverters::toLettuceKeyScanArgs);
     }
 
     /**

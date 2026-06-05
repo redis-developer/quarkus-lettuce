@@ -254,4 +254,50 @@ class LettuceBackendTest {
         long inner = Long.parseLong(parts[1]);
         assertEquals(outer, inner, () -> "expected nested withConnection to reuse outer connection, got " + body);
     }
+
+    @Test
+    public void withTransactionBlocking() {
+        String key = getKey("tx-blocking");
+        String body = RestAssured.given().body("v1").when().post("/lettuce/with-transaction/blocking/" + key)
+                .then().statusCode(200).extract().asString();
+        assertEquals("false,2,v1", body);
+        RestAssured.given().when().get("/lettuce/value/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("v1"));
+    }
+
+    @Test
+    public void withTransactionReactive() {
+        String key = getKey("tx-reactive");
+        String body = RestAssured.given().body("rv1").when().post("/lettuce/with-transaction/reactive/" + key)
+                .then().statusCode(200).extract().asString();
+        assertEquals("false,2,rv1", body);
+        RestAssured.given().when().get("/lettuce/value/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("rv1"));
+    }
+
+    @Test
+    public void withTransactionDiscard() {
+        String key = getKey("tx-discard");
+        String body = RestAssured.given().body("v").when().post("/lettuce/with-transaction/discard/" + key)
+                .then().statusCode(200).extract().asString();
+        assertEquals("true,null", body);
+        RestAssured.given().when().get("/lettuce/value/" + key).then().statusCode(204);
+    }
+
+    @Test
+    public void withTransactionOptimistic() {
+        String key = getKey("tx-optimistic");
+        RestAssured.given().body("10").when().post("/lettuce/value/" + key).then().statusCode(204);
+        String body = RestAssured.given().body("0").when().post("/lettuce/with-transaction/optimistic/" + key)
+                .then().statusCode(200).extract().asString();
+        assertEquals("false,10,100", body);
+    }
+
+    @Test
+    public void withTransactionKey() {
+        String key = getKey("tx-key");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/key/" + key)
+                .then().statusCode(200).extract().asString();
+        assertEquals("false,4,true,true,true,STRING", body);
+    }
 }
