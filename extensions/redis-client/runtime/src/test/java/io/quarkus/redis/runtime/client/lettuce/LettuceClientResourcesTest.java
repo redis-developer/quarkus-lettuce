@@ -52,7 +52,7 @@ class LettuceClientResourcesTest {
         lettuceResources = new LettuceClientResources(vertxEventLoops);
 
         String redisUri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
-        connectionFactory = new LettuceConnectionFactory(lettuceResources.get(), redisUri);
+        connectionFactory = new LettuceConnectionFactory(lettuceResources.clientResources(), redisUri);
     }
 
     @AfterAll

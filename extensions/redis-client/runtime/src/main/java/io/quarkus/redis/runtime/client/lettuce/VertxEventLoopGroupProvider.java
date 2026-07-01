@@ -27,10 +27,20 @@ public class VertxEventLoopGroupProvider implements EventLoopGroupProvider {
 
     public VertxEventLoopGroupProvider(EventLoopGroup eventLoopGroup) {
         this.eventLoopGroup = eventLoopGroup;
-        // Vert.x event loop group doesn't expose size directly; use available processors as a reasonable value
-        this.threadPoolSize = Runtime.getRuntime().availableProcessors();
-        LOGGER.debugf("Created VertxEventLoopGroupProvider with external event loop group: %s",
-                eventLoopGroup.getClass().getName());
+        // EventLoopGroup extends Iterable<EventExecutor>; count its executors to report the actual
+        // event loop thread count rather than guessing from the number of available processors.
+        this.threadPoolSize = countEventLoops(eventLoopGroup);
+        LOGGER.debugf("Created VertxEventLoopGroupProvider with external event loop group: %s (%d event loops)",
+                eventLoopGroup.getClass().getName(), threadPoolSize);
+    }
+
+    private static int countEventLoops(EventLoopGroup eventLoopGroup) {
+        int count = 0;
+        for (@SuppressWarnings("unused")
+        var executor : eventLoopGroup) {
+            count++;
+        }
+        return count;
     }
 
     @Override

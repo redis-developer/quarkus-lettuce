@@ -38,7 +38,7 @@ public class LettuceClientResources {
     /**
      * Returns the configured {@link ClientResources} instance.
      */
-    public ClientResources get() {
+    public ClientResources clientResources() {
         return clientResources;
     }
 
