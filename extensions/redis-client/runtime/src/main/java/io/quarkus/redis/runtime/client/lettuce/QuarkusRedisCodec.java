@@ -33,7 +33,9 @@ public class QuarkusRedisCodec<K, V> implements RedisCodec<K, V> {
     @Override
     @SuppressWarnings("unchecked")
     public K decodeKey(ByteBuffer bytes) {
-        if (bytes == null || !bytes.hasRemaining()) {
+        // Only a nil reply (null buffer) decodes to null. An empty but non-null buffer is a stored
+        // empty string, a valid Redis key/value, and must round-trip as such rather than as null.
+        if (bytes == null) {
             return null;
         }
         return (K) keyCodec.decode(toBytes(bytes));
@@ -42,7 +44,7 @@ public class QuarkusRedisCodec<K, V> implements RedisCodec<K, V> {
     @Override
     @SuppressWarnings("unchecked")
     public V decodeValue(ByteBuffer bytes) {
-        if (bytes == null || !bytes.hasRemaining()) {
+        if (bytes == null) {
             return null;
         }
         return (V) valueCodec.decode(toBytes(bytes));

@@ -46,7 +46,7 @@ class LettuceProxyInfrastructureTest {
         lettuceResources = new LettuceClientResources(vertxEventLoops);
 
         String redisUri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
-        redisClient = RedisClient.create(lettuceResources.get(), redisUri);
+        redisClient = RedisClient.create(lettuceResources.clientResources(), redisUri);
 
         // Default String/String connection using QuarkusRedisCodec
         RedisCodec<String, String> stringCodec = new QuarkusRedisCodec<>(String.class, String.class);
@@ -85,6 +85,23 @@ class LettuceProxyInfrastructureTest {
 
         Uni<String> get = LettuceResult.toUni(() -> defaultConnection.async().get("codec-key"));
         assertThat(get.await().atMost(Duration.ofSeconds(5))).isEqualTo("codec-value");
+    }
+
+    @Test
+    void emptyStringValueRoundTripsAsEmptyNotNull() {
+        // An empty string is a valid Redis value and must round-trip as "" — it must not be
+        // conflated with a nil reply. A genuinely missing key still decodes to null.
+        String set = LettuceResult.toBlocking(
+                defaultConnection.async().set("empty-key", ""), Duration.ofSeconds(5));
+        assertThat(set).isEqualTo("OK");
+
+        String value = LettuceResult.toBlocking(
+                defaultConnection.async().get("empty-key"), Duration.ofSeconds(5));
+        assertThat(value).isEmpty();
+
+        String missing = LettuceResult.toBlocking(
+                defaultConnection.async().get("no-such-key"), Duration.ofSeconds(5));
+        assertThat(missing).isNull();
     }
 
     @Test

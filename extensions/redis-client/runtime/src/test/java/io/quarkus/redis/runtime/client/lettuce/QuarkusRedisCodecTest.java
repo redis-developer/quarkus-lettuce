@@ -51,9 +51,11 @@ class QuarkusRedisCodecTest {
     }
 
     @Test
-    void decodeEmptyBufferShouldReturnNull() {
-        assertThat(stringCodec.decodeKey(ByteBuffer.allocate(0))).isNull();
-        assertThat(stringCodec.decodeValue(ByteBuffer.allocate(0))).isNull();
+    void decodeEmptyBufferShouldReturnEmptyString() {
+        // An empty (non-null) buffer is a stored empty string — a valid Redis key/value.
+        // It must not be conflated with a nil reply, which arrives as a null buffer.
+        assertThat(stringCodec.decodeKey(ByteBuffer.allocate(0))).isEmpty();
+        assertThat(stringCodec.decodeValue(ByteBuffer.allocate(0))).isEmpty();
     }
 
     @Test
