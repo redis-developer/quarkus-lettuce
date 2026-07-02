@@ -5,10 +5,10 @@ import static io.quarkus.redis.runtime.client.config.RedisConfig.HOSTS_PROVIDER_
 import static io.quarkus.redis.runtime.client.config.RedisConfig.getPropertyName;
 
 import java.net.URI;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import org.jboss.logging.Logger;
@@ -41,8 +41,8 @@ public class LettuceRecorder {
     private final RuntimeValue<RedisConfig> runtimeConfig;
 
     private static volatile LettuceClientResources sharedResources;
-    private static final Map<String, LettuceConnectionFactory> factories = new HashMap<>();
-    private static final Map<String, StatefulRedisConnection<String, String>> connections = new HashMap<>();
+    private static final Map<String, LettuceConnectionFactory> factories = new ConcurrentHashMap<>();
+    private static final Map<String, StatefulRedisConnection<String, String>> connections = new ConcurrentHashMap<>();
 
     public LettuceRecorder(RuntimeValue<RedisConfig> runtimeConfig) {
         this.runtimeConfig = runtimeConfig;
@@ -67,13 +67,13 @@ public class LettuceRecorder {
                 String redisUri = hosts.get().iterator().next().toString();
 
                 LOGGER.infof("Creating Lettuce RedisClient '%s' for %s", name, redisUri);
-                factories.putIfAbsent(name, new LettuceConnectionFactory(sharedResources.get(), redisUri));
+                factories.putIfAbsent(name, new LettuceConnectionFactory(sharedResources.clientResources(), redisUri));
             }
         }
     }
 
     public Supplier<Object> getClientResources() {
-        return () -> sharedResources.get();
+        return () -> sharedResources.clientResources();
     }
 
     public Supplier<Object> getRedisClient(String name) {

@@ -63,8 +63,7 @@ public class LettuceProcessor {
             LETTUCE_CLIENT_RESOURCES);
 
     @BuildStep
-    public void detectLettuceUsage(BuildProducer<RequestedRedisClientBuildItem> requestRedis,
-            BuildProducer<RequestedLettuceClientBuildItem> requestLettuce,
+    public void detectLettuceUsage(BuildProducer<RequestedLettuceClientBuildItem> requestLettuce,
             BeanDiscoveryFinishedBuildItem beans) {
 
         Set<String> names = new HashSet<>();
@@ -81,8 +80,11 @@ public class LettuceProcessor {
             }
         }
 
+        // Produce only the Lettuce request item. We deliberately do NOT produce a
+        // RequestedRedisClientBuildItem here: that item drives the Vert.x processors, which would
+        // otherwise create a parallel Vert.x Redis client (and a Vert.x-backed RedisDataSource) for
+        // every Lettuce injection. The Lettuce backend owns its own beans.
         for (String name : names) {
-            requestRedis.produce(new RequestedRedisClientBuildItem(name));
             requestLettuce.produce(new RequestedLettuceClientBuildItem(name));
         }
     }
