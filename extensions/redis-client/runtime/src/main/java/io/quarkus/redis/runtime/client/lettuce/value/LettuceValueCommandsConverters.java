@@ -1,6 +1,6 @@
 package io.quarkus.redis.runtime.client.lettuce.value;
 
-import java.util.List;
+import java.util.Iterator;
 
 import io.quarkus.redis.datasource.value.GetExArgs;
 import io.quarkus.redis.datasource.value.SetArgs;
@@ -9,34 +9,30 @@ import io.quarkus.redis.runtime.client.lettuce.LettuceConverterRegistry;
 /**
  * Converters bridging Quarkus Value Command argument types to their Lettuce equivalents.
  * <p>
- * Registers itself with {@link LettuceConverterRegistry} on first use.
+ * Registration with {@link LettuceConverterRegistry} happens in this class's static initializer.
  */
 public final class LettuceValueCommandsConverters {
 
-    private static volatile boolean registered;
+    static {
+        LettuceConverterRegistry.registerArgConverter(SetArgs.class,
+                LettuceValueCommandsConverters::toLettuceSetArgs);
+        LettuceConverterRegistry.registerArgConverter(GetExArgs.class,
+                LettuceValueCommandsConverters::toLettuceGetExArgs);
+    }
 
     private LettuceValueCommandsConverters() {
         // Utility class
     }
 
     /**
-     * Register all Value Command converters with {@link LettuceConverterRegistry}.
-     * Idempotent and thread-safe.
+     * Ensures the Value Command converters are registered with {@link LettuceConverterRegistry}.
+     * <p>
+     * The registration itself runs in this class's static initializer; calling this method simply
+     * forces class initialization at a well-defined point. It is therefore idempotent and
+     * thread-safe by virtue of the JVM's class-initialization guarantees.
      */
     public static void register() {
-        if (registered) {
-            return;
-        }
-        synchronized (LettuceValueCommandsConverters.class) {
-            if (registered) {
-                return;
-            }
-            LettuceConverterRegistry.registerArgConverter(SetArgs.class,
-                    LettuceValueCommandsConverters::toLettuceSetArgs);
-            LettuceConverterRegistry.registerArgConverter(GetExArgs.class,
-                    LettuceValueCommandsConverters::toLettuceGetExArgs);
-            registered = true;
-        }
+        // No-op: registration is performed in the static initializer.
     }
 
     /**
@@ -49,36 +45,21 @@ public final class LettuceValueCommandsConverters {
      */
     public static io.lettuce.core.SetArgs toLettuceSetArgs(SetArgs quarkus) {
         io.lettuce.core.SetArgs lettuce = new io.lettuce.core.SetArgs();
-        List<Object> tokens = quarkus.toArgs();
-        for (int i = 0; i < tokens.size(); i++) {
-            String token = tokens.get(i).toString();
+        Iterator<Object> tokens = quarkus.toArgs().iterator();
+        while (tokens.hasNext()) {
+            String token = tokens.next().toString();
             switch (token) {
-                case "EX":
-                    lettuce.ex(Long.parseLong(tokens.get(++i).toString()));
-                    break;
-                case "EXAT":
-                    lettuce.exAt(Long.parseLong(tokens.get(++i).toString()));
-                    break;
-                case "PX":
-                    lettuce.px(Long.parseLong(tokens.get(++i).toString()));
-                    break;
-                case "PXAT":
-                    lettuce.pxAt(Long.parseLong(tokens.get(++i).toString()));
-                    break;
-                case "NX":
-                    lettuce.nx();
-                    break;
-                case "XX":
-                    lettuce.xx();
-                    break;
-                case "KEEPTTL":
-                    lettuce.keepttl();
-                    break;
-                case "GET":
-                    // Handled via the dedicated setGet() method on the Lettuce API
-                    break;
-                default:
-                    throw new IllegalStateException("Unexpected SetArgs token: " + token);
+                case "EX" -> lettuce.ex(nextLong(tokens, token));
+                case "EXAT" -> lettuce.exAt(nextLong(tokens, token));
+                case "PX" -> lettuce.px(nextLong(tokens, token));
+                case "PXAT" -> lettuce.pxAt(nextLong(tokens, token));
+                case "NX" -> lettuce.nx();
+                case "XX" -> lettuce.xx();
+                case "KEEPTTL" -> lettuce.keepttl();
+                // GET is handled via the dedicated setGet() method on the Lettuce API.
+                case "GET" -> {
+                }
+                default -> throw new IllegalStateException("Unexpected SetArgs token: " + token);
             }
         }
         return lettuce;
@@ -89,29 +70,28 @@ public final class LettuceValueCommandsConverters {
      */
     public static io.lettuce.core.GetExArgs toLettuceGetExArgs(GetExArgs quarkus) {
         io.lettuce.core.GetExArgs lettuce = new io.lettuce.core.GetExArgs();
-        List<Object> tokens = quarkus.toArgs();
-        for (int i = 0; i < tokens.size(); i++) {
-            String token = tokens.get(i).toString();
+        Iterator<Object> tokens = quarkus.toArgs().iterator();
+        while (tokens.hasNext()) {
+            String token = tokens.next().toString();
             switch (token) {
-                case "EX":
-                    lettuce.ex(Long.parseLong(tokens.get(++i).toString()));
-                    break;
-                case "EXAT":
-                    lettuce.exAt(Long.parseLong(tokens.get(++i).toString()));
-                    break;
-                case "PX":
-                    lettuce.px(Long.parseLong(tokens.get(++i).toString()));
-                    break;
-                case "PXAT":
-                    lettuce.pxAt(Long.parseLong(tokens.get(++i).toString()));
-                    break;
-                case "PERSIST":
-                    lettuce.persist();
-                    break;
-                default:
-                    throw new IllegalStateException("Unexpected GetExArgs token: " + token);
+                case "EX" -> lettuce.ex(nextLong(tokens, token));
+                case "EXAT" -> lettuce.exAt(nextLong(tokens, token));
+                case "PX" -> lettuce.px(nextLong(tokens, token));
+                case "PXAT" -> lettuce.pxAt(nextLong(tokens, token));
+                case "PERSIST" -> lettuce.persist();
+                default -> throw new IllegalStateException("Unexpected GetExArgs token: " + token);
             }
         }
         return lettuce;
+    }
+
+    /**
+     * Consume and parse the value token that follows a keyword (e.g. the seconds after {@code EX}).
+     */
+    private static long nextLong(Iterator<Object> tokens, String token) {
+        if (!tokens.hasNext()) {
+            throw new IllegalStateException("Missing value for token: " + token);
+        }
+        return Long.parseLong(tokens.next().toString());
     }
 }

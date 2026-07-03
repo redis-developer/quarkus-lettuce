@@ -103,7 +103,6 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     }
 
     @Override
-    @SuppressWarnings("deprecation")
     public Uni<V> getset(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
@@ -167,13 +166,13 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
 
     @Override
     public Uni<Void> mset(Map<K, V> map) {
-        requireNonEmpty(map, "map");
+        requireNonEmpty(map);
         return LettuceResult.toUni(() -> async.mset(map)).replaceWithVoid();
     }
 
     @Override
     public Uni<Boolean> msetnx(Map<K, V> map) {
-        requireNonEmpty(map, "map");
+        requireNonEmpty(map);
         return LettuceResult.toUni(() -> async.msetnx(map));
     }
 
@@ -267,9 +266,9 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return "OK".equals(response);
     }
 
-    private static <K, V> void requireNonEmpty(Map<K, V> map, String name) {
+    private static <K, V> void requireNonEmpty(Map<K, V> map) {
         if (map == null || map.isEmpty()) {
-            throw new IllegalArgumentException("`" + name + "` must not be null or empty");
+            throw new IllegalArgumentException("`map` must not be null or empty");
         }
     }
 }
