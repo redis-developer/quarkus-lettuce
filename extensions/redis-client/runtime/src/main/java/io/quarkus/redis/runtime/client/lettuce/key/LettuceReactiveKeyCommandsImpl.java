@@ -161,7 +161,7 @@ public class LettuceReactiveKeyCommandsImpl<K, V> extends AbstractLettuceCommand
     public Uni<List<K>> keys(String pattern) {
         nonNull(pattern, "pattern");
         if (pattern.isBlank()) {
-            return Uni.createFrom().failure(new IllegalArgumentException("`pattern` must not be blank"));
+            throw new IllegalArgumentException("`pattern` must not be blank");
         }
         // Lettuce's keys(K) accepts a K-typed pattern; the connection codec encodes it. For
         // typical String-keyed connections this is a no-op cast.

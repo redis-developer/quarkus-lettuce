@@ -1,6 +1,6 @@
 package io.quarkus.redis.runtime.client.lettuce.key;
 
-import java.util.List;
+import java.util.Iterator;
 
 import io.quarkus.redis.datasource.keys.CopyArgs;
 import io.quarkus.redis.datasource.keys.ExpireArgs;
@@ -10,36 +10,32 @@ import io.quarkus.redis.runtime.client.lettuce.LettuceConverterRegistry;
 /**
  * Converters bridging Quarkus Key Command argument types to their Lettuce equivalents.
  * <p>
- * Registers itself with {@link LettuceConverterRegistry} on first use.
+ * Registration with {@link LettuceConverterRegistry} happens in this class's static initializer.
  */
 public final class LettuceKeyCommandsConverters {
 
-    private static volatile boolean registered;
+    static {
+        LettuceConverterRegistry.registerArgConverter(ExpireArgs.class,
+                LettuceKeyCommandsConverters::toLettuceExpireArgs);
+        LettuceConverterRegistry.registerArgConverter(CopyArgs.class,
+                LettuceKeyCommandsConverters::toLettuceCopyArgs);
+        LettuceConverterRegistry.registerArgConverter(KeyScanArgs.class,
+                LettuceKeyCommandsConverters::toLettuceKeyScanArgs);
+    }
 
     private LettuceKeyCommandsConverters() {
         // Utility class
     }
 
     /**
-     * Register all Key Command converters with {@link LettuceConverterRegistry}.
-     * Idempotent and thread-safe.
+     * Ensures the Key Command converters are registered with {@link LettuceConverterRegistry}.
+     * <p>
+     * The registration itself runs in this class's static initializer; calling this method simply
+     * forces class initialization at a well-defined point. It is therefore idempotent and
+     * thread-safe by virtue of the JVM's class-initialization guarantees.
      */
     public static void register() {
-        if (registered) {
-            return;
-        }
-        synchronized (LettuceKeyCommandsConverters.class) {
-            if (registered) {
-                return;
-            }
-            LettuceConverterRegistry.registerArgConverter(ExpireArgs.class,
-                    LettuceKeyCommandsConverters::toLettuceExpireArgs);
-            LettuceConverterRegistry.registerArgConverter(CopyArgs.class,
-                    LettuceKeyCommandsConverters::toLettuceCopyArgs);
-            LettuceConverterRegistry.registerArgConverter(KeyScanArgs.class,
-                    LettuceKeyCommandsConverters::toLettuceKeyScanArgs);
-            registered = true;
-        }
+        // No-op: registration is performed in the static initializer.
     }
 
     /**
@@ -52,20 +48,11 @@ public final class LettuceKeyCommandsConverters {
         io.lettuce.core.ExpireArgs lettuce = new io.lettuce.core.ExpireArgs();
         for (Object token : quarkus.toArgs()) {
             switch (token.toString()) {
-                case "NX":
-                    lettuce.nx();
-                    break;
-                case "XX":
-                    lettuce.xx();
-                    break;
-                case "GT":
-                    lettuce.gt();
-                    break;
-                case "LT":
-                    lettuce.lt();
-                    break;
-                default:
-                    throw new IllegalStateException("Unexpected ExpireArgs token: " + token);
+                case "NX" -> lettuce.nx();
+                case "XX" -> lettuce.xx();
+                case "GT" -> lettuce.gt();
+                case "LT" -> lettuce.lt();
+                default -> throw new IllegalStateException("Unexpected ExpireArgs token: " + token);
             }
         }
         return lettuce;
@@ -76,18 +63,13 @@ public final class LettuceKeyCommandsConverters {
      */
     public static io.lettuce.core.CopyArgs toLettuceCopyArgs(CopyArgs quarkus) {
         io.lettuce.core.CopyArgs lettuce = new io.lettuce.core.CopyArgs();
-        List<Object> tokens = quarkus.toArgs();
-        for (int i = 0; i < tokens.size(); i++) {
-            String token = tokens.get(i).toString();
+        Iterator<Object> tokens = quarkus.toArgs().iterator();
+        while (tokens.hasNext()) {
+            String token = tokens.next().toString();
             switch (token) {
-                case "DB":
-                    lettuce.destinationDb(Long.parseLong(tokens.get(++i).toString()));
-                    break;
-                case "REPLACE":
-                    lettuce.replace(true);
-                    break;
-                default:
-                    throw new IllegalStateException("Unexpected CopyArgs token: " + token);
+                case "DB" -> lettuce.destinationDb(nextLong(tokens, token));
+                case "REPLACE" -> lettuce.replace(true);
+                default -> throw new IllegalStateException("Unexpected CopyArgs token: " + token);
             }
         }
         return lettuce;
@@ -98,23 +80,33 @@ public final class LettuceKeyCommandsConverters {
      */
     public static io.lettuce.core.KeyScanArgs toLettuceKeyScanArgs(KeyScanArgs quarkus) {
         io.lettuce.core.KeyScanArgs lettuce = new io.lettuce.core.KeyScanArgs();
-        List<String> tokens = quarkus.toArgs();
-        for (int i = 0; i < tokens.size(); i++) {
-            String token = tokens.get(i);
+        Iterator<String> tokens = quarkus.toArgs().iterator();
+        while (tokens.hasNext()) {
+            String token = tokens.next();
             switch (token) {
-                case "MATCH":
-                    lettuce.match(tokens.get(++i));
-                    break;
-                case "COUNT":
-                    lettuce.limit(Long.parseLong(tokens.get(++i)));
-                    break;
-                case "TYPE":
-                    lettuce.type(tokens.get(++i).toLowerCase());
-                    break;
-                default:
-                    throw new IllegalStateException("Unexpected KeyScanArgs token: " + token);
+                case "MATCH" -> lettuce.match(nextToken(tokens, token));
+                case "COUNT" -> lettuce.limit(nextLong(tokens, token));
+                case "TYPE" -> lettuce.type(nextToken(tokens, token).toLowerCase());
+                default -> throw new IllegalStateException("Unexpected KeyScanArgs token: " + token);
             }
         }
         return lettuce;
+    }
+
+    /**
+     * Consume and return the value token that follows a keyword (e.g. the pattern after {@code MATCH}).
+     */
+    private static String nextToken(Iterator<?> tokens, String token) {
+        if (!tokens.hasNext()) {
+            throw new IllegalStateException("Missing value for token: " + token);
+        }
+        return tokens.next().toString();
+    }
+
+    /**
+     * Consume and parse the numeric value token that follows a keyword (e.g. the count after {@code COUNT}).
+     */
+    private static long nextLong(Iterator<?> tokens, String token) {
+        return Long.parseLong(nextToken(tokens, token));
     }
 }
