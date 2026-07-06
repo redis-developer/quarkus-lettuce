@@ -3,6 +3,7 @@ package io.quarkus.redis.runtime.client.lettuce.datasource;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 
+import java.util.concurrent.CompletionStage;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -61,16 +62,16 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     private final Vertx vertx;
     private final StatefulRedisConnection<String, String> connection;
-    private final Supplier<StatefulRedisConnection<String, String>> connector;
+    private final Supplier<CompletionStage<StatefulRedisConnection<String, String>>> connector;
     private final boolean pinned;
 
     public LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<String, String> connection,
-            Supplier<StatefulRedisConnection<String, String>> connector) {
+            Supplier<CompletionStage<StatefulRedisConnection<String, String>>> connector) {
         this(vertx, connection, connector, false);
     }
 
     private LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<String, String> connection,
-            Supplier<StatefulRedisConnection<String, String>> connector, boolean pinned) {
+            Supplier<CompletionStage<StatefulRedisConnection<String, String>>> connector, boolean pinned) {
         this.vertx = nonNull(vertx, "vertx");
         this.connection = nonNull(connection, "connection");
         this.connector = connector;
@@ -152,12 +153,19 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                         + "or set quarkus.redis.backend=vertx to use the Vert.x backend.");
     }
 
+    /**
+     * Opens a fresh connection from the connector, without blocking the caller.
+     */
+    Uni<StatefulRedisConnection<String, String>> openConnection() {
+        return LettuceResult.toUni(connector::get);
+    }
+
     @Override
     public Uni<Void> withConnection(Function<ReactiveRedisDataSource, Uni<Void>> function) {
         if (pinned) {
             return function.apply(this);
         }
-        return Uni.createFrom().item(connector::get)
+        return openConnection()
                 .onItem().transformToUni(conn -> {
                     LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn);
                     return Uni.createFrom().deferred(() -> function.apply(pinnedDs))

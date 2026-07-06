@@ -9,6 +9,7 @@ import java.util.function.Function;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
+import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.autosuggest.AutoSuggestCommands;
@@ -38,7 +39,6 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceBlockingKeyCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceBlockingValueCommandsImpl;
-import io.smallrye.mutiny.Uni;
 import io.vertx.mutiny.redis.client.Command;
 import io.vertx.mutiny.redis.client.Response;
 
@@ -105,12 +105,17 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
             consumer.accept(this);
             return;
         }
-        reactive.withConnection(rds -> {
-            LettuceReactiveRedisDataSourceImpl pinnedReactive = (LettuceReactiveRedisDataSourceImpl) rds;
-            LettuceBlockingRedisDataSourceImpl pinnedBlocking = pinnedTo(pinnedReactive, timeout);
-            consumer.accept(pinnedBlocking);
-            return Uni.createFrom().voidItem();
-        }).await().atMost(timeout);
+        // Await the connection and run the user block on the calling (worker) thread. Running it
+        // inside the reactive withConnection pipeline would execute it on the event loop thread
+        // that completed the connect, where the block's blocking calls would deadlock.
+        StatefulRedisConnection<String, String> conn = reactive.openConnection().await().atMost(timeout);
+        try {
+            LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl
+                    .pinnedTo(reactive.getVertx(), conn);
+            consumer.accept(pinnedTo(pinnedReactive, timeout));
+        } finally {
+            conn.close();
+        }
     }
 
     @Override

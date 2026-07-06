@@ -1,6 +1,7 @@
 package io.quarkus.redis.runtime.client.lettuce;
 
 import java.net.URI;
+import java.util.concurrent.CompletionStage;
 
 import org.jboss.logging.Logger;
 
@@ -21,6 +22,7 @@ public class LettuceConnectionFactory {
     private static final Logger LOGGER = Logger.getLogger(LettuceConnectionFactory.class);
 
     private final RedisClient redisClient;
+    private final RedisURI redisUri;
 
     /**
      * Creates a Lettuce {@link RedisClient} using the given shared resources and Redis URI.
@@ -32,6 +34,7 @@ public class LettuceConnectionFactory {
         RedisURI lettuceUri = RedisURI.create(redisUri);
         LOGGER.infof("Creating Lettuce RedisClient for %s:%d", lettuceUri.getHost(), lettuceUri.getPort());
         this.redisClient = RedisClient.create(clientResources, lettuceUri);
+        this.redisUri = lettuceUri;
     }
 
     /**
@@ -51,6 +54,18 @@ public class LettuceConnectionFactory {
      */
     public StatefulRedisConnection<String, String> connect() {
         return redisClient.connect(StringCodec.UTF8);
+    }
+
+    /**
+     * Opens a new stateful connection to Redis asynchronously using String codec.
+     * <p>
+     * Unlike {@link #connect()}, this never blocks the calling thread and is therefore safe to
+     * invoke from an event loop; the returned stage completes once the connection is established.
+     *
+     * @return a {@link CompletionStage} completing with a new {@link StatefulRedisConnection}
+     */
+    public CompletionStage<StatefulRedisConnection<String, String>> connectAsync() {
+        return redisClient.connectAsync(StringCodec.UTF8, redisUri);
     }
 
     /**

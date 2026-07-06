@@ -14,6 +14,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.StringCodec;
 import io.netty.channel.EventLoopGroup;
@@ -45,7 +46,7 @@ class LettuceWithConnectionBlockingIntegrationTest {
         redisClient = RedisClient.create(lettuceResources.clientResources(), uri);
         sharedConnection = redisClient.connect(StringCodec.UTF8);
         LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, sharedConnection,
-                () -> redisClient.connect(StringCodec.UTF8));
+                () -> redisClient.connectAsync(StringCodec.UTF8, RedisURI.create(uri)));
         ds = new LettuceBlockingRedisDataSourceImpl(reactive, TIMEOUT);
     }
 
