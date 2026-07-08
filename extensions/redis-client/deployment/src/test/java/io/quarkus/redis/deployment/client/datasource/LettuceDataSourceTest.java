@@ -117,11 +117,13 @@ public class LettuceDataSourceTest {
     }
 
     @Test
-    public void testWithConnectionThrowsUnsupported() {
-        assertThatThrownBy(() -> blocking.withConnection(ds -> {
-        }))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Lettuce backend");
+    public void testWithConnection() {
+        blocking.withConnection(ds -> {
+            ds.value(String.class).set("lettuce:ds:withconn", "v1");
+            assertThat(ds.value(String.class).get("lettuce:ds:withconn")).isEqualTo("v1");
+        });
+        // Writes made on the dedicated connection are visible on the shared one afterwards.
+        assertThat(blocking.value(String.class).get("lettuce:ds:withconn")).isEqualTo("v1");
     }
 
     @Test
