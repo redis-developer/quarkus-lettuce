@@ -320,12 +320,7 @@ public class RedisClientProcessor {
     }
 
     private static boolean isLettuceOnClasspath() {
-        try {
-            Class.forName("io.lettuce.core.RedisClient", false, Thread.currentThread().getContextClassLoader());
-            return true;
-        } catch (ClassNotFoundException e) {
-            return false;
-        }
+        return new IsLettuceOnClasspath().getAsBoolean();
     }
 
     public static final String NO_REDIS_SCRIPT_FILE = "no-file";
