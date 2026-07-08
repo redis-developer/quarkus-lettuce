@@ -24,6 +24,7 @@ import io.quarkus.arc.processor.InjectionPointInfo;
 import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
+import io.quarkus.deployment.annotations.BuildSteps;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Produce;
 import io.quarkus.deployment.annotations.Record;
@@ -47,8 +48,10 @@ import io.quarkus.vertx.deployment.VertxBuildItem;
  * And a shared {@code io.lettuce.core.resource.ClientResources} backed by Vert.x event loops.
  * <p>
  * Lettuce classes are referenced by {@link DotName} because Lettuce is an optional
- * runtime dependency, not available on the deployment module classpath.
+ * runtime dependency, not available on the deployment module classpath. All build steps are
+ * skipped entirely when {@code lettuce-core} is absent from the application classpath.
  */
+@BuildSteps(onlyIf = IsLettuceOnClasspath.class)
 public class LettuceProcessor {
 
     private static final DotName LETTUCE_REDIS_CLIENT = DotName.createSimple("io.lettuce.core.RedisClient");
