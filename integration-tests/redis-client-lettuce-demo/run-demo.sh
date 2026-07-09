@@ -31,12 +31,12 @@ build() {
   local backend="$1"
   echo "==> Packaging quarkus.redis.backend=$backend ($MODE)"
   if [[ "$MODE" == "native" ]]; then
-    mvn -q -pl "$MODULE_DIR" package -Pnative -DskipTests -Dquarkus.build.skip=false \
+    mvn -q -f "$MODULE_DIR/pom.xml" package -Pnative -DskipTests -Dquarkus.build.skip=false \
         -DskipDocs -Dformat.skip -Dquarkus.redis.backend="$backend"
     rm -f "$TARGET/runner-$backend"
     mv "$TARGET"/quarkus-integration-test-*-runner "$TARGET/runner-$backend"
   else
-    mvn -q -pl "$MODULE_DIR" package -DskipTests -Dquarkus.build.skip=false \
+    mvn -q -f "$MODULE_DIR/pom.xml" package -DskipTests -Dquarkus.build.skip=false \
         -DskipDocs -Dformat.skip -Dquarkus.redis.backend="$backend"
     rm -rf "$TARGET/quarkus-app-$backend"
     mv "$TARGET/quarkus-app" "$TARGET/quarkus-app-$backend"
