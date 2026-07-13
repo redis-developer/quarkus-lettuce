@@ -113,7 +113,7 @@ Walk through the rows. Expected categories:
 | `name=redisinsight-browser-…` | RedisInsight key browser |
 | `name=redisinsight-cli-…` | this Workbench query |
 | `flags=O cmd=monitor` | Profiler (if open) |
-| `lib-name=Lettuce 6.5.5.RELEASE` | demo `:8081` |
+| `lib-name=Lettuce` (`lib-ver=7.6.0.RELEASE`) | demo `:8081` |
 | empty `lib-name`, RESP3, not a `redisinsight-…` name | demo `:8080` |
 
 > "`lib-name=Lettuce` is the unambiguous tag — Lettuce sends `CLIENT SETINFO`
