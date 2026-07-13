@@ -191,7 +191,7 @@ class LettuceValueCommandsIntegrationTest {
     }
 
     @Test
-    void lcsThrowsUntilLettuce7Upgrade() {
+    void lcsNotYetImplemented() {
         assertThatThrownBy(() -> blocking.lcs("a", "b")).isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> blocking.lcsLength("a", "b")).isInstanceOf(UnsupportedOperationException.class);
     }

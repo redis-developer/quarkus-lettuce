@@ -179,6 +179,6 @@ public class LettuceReactiveTransactionalValueCommandsImpl<K, V>
 
     private static UnsupportedOperationException lcsUnsupported() {
         return new UnsupportedOperationException(
-                "LCS is not supported on the Lettuce backend with Lettuce 6.5.x.");
+                "LCS is not yet implemented on the Lettuce backend.");
     }
 }
