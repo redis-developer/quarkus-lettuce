@@ -49,9 +49,9 @@ import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImp
 import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
 import io.smallrye.mutiny.Uni;
 import io.vertx.mutiny.core.Vertx;
-import io.vertx.mutiny.redis.client.Command;
 import io.vertx.mutiny.redis.client.Redis;
-import io.vertx.mutiny.redis.client.Response;
+import io.vertx.redis.client.Command;
+import io.vertx.redis.client.Response;
 
 /**
  * Lettuce-backed implementation of {@link ReactiveRedisDataSource}.
@@ -106,12 +106,6 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         return dispatch(resolve(command.toString()), args);
     }
 
-    @Override
-    public Uni<Response> execute(io.vertx.redis.client.Command command, String... args) {
-        nonNull(command, "command");
-        return dispatch(resolve(command.toString()), args);
-    }
-
     private Uni<Response> dispatch(ProtocolKeyword type, String... args) {
         LettuceVertxResponseOutput<String, String> output = new LettuceVertxResponseOutput<>(StringCodec.UTF8);
         CommandArgs<String, String> commandArgs = new CommandArgs<>(StringCodec.UTF8);
@@ -123,10 +117,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
             }
         }
         return LettuceResult.toUni(() -> connection.async().dispatch(type, output, commandArgs))
-                .map(ignored -> {
-                    io.vertx.redis.client.Response raw = output.toVertxResponse();
-                    return raw == null ? null : Response.newInstance(raw);
-                });
+                .map(ignored -> output.toVertxResponse());
     }
 
     static ProtocolKeyword resolve(String name) {

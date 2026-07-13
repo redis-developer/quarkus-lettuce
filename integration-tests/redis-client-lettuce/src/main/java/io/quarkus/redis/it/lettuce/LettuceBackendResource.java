@@ -24,8 +24,8 @@ import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.smallrye.mutiny.Uni;
-import io.vertx.mutiny.redis.client.Command;
-import io.vertx.mutiny.redis.client.Response;
+import io.vertx.redis.client.Command;
+import io.vertx.redis.client.Response;
 
 @Path("/lettuce")
 @ApplicationScoped
@@ -56,8 +56,8 @@ public class LettuceBackendResource {
     }
 
     @GET
-    @Path("/ping/mutiny")
-    public String pingMutiny() {
+    @Path("/ping/command")
+    public String pingCommand() {
         Response response = blocking.execute(Command.PING);
         return response.toString();
     }
