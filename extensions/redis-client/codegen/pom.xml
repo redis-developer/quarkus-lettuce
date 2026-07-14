@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.quarkus.redis</groupId>
+    <artifactId>quarkus-redis-client-codegen</artifactId>
+    <version>999-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>Quarkus - Redis Client - Blocking Codegen (build tool, not published)</name>
+    <description>Derives the Lettuce blocking command implementations from the reactive interfaces.
+        Not part of the Quarkus reactor.</description>
+
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <javaparser.version>3.28.0</javaparser.version>
+        <version.exec.plugin>3.6.3</version.exec.plugin>
+        <version.formatter.plugin>2.27.0</version.formatter.plugin>
+        <version.impsort.plugin>1.13.0</version.impsort.plugin>
+
+        <!-- Where the generator writes; the formatter/impsort plugins format the same directory.
+             Command groups and the runtime source path are hardcoded in BlockingCommandsGenerator. -->
+        <codegen.out>${project.basedir}/target/generated</codegen.out>
+
+        <codegen.formatConfig>${project.basedir}/../../../independent-projects/ide-config/src/main/resources/eclipse-format.xml</codegen.formatConfig>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.github.javaparser</groupId>
+            <artifactId>javaparser-core</artifactId>
+            <version>${javaparser.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>${version.exec.plugin}</version>
+                <configuration>
+                    <mainClass>io.quarkus.redis.codegen.BlockingCommandsGenerator</mainClass>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>net.revelc.code.formatter</groupId>
+                <artifactId>formatter-maven-plugin</artifactId>
+                <version>${version.formatter.plugin}</version>
+                <configuration>
+                    <configFile>${codegen.formatConfig}</configFile>
+                    <lineEnding>LF</lineEnding>
+                    <sourceDirectory>${codegen.out}</sourceDirectory>
+                    <directories>
+                        <directory>${codegen.out}</directory>
+                    </directories>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>net.revelc.code</groupId>
+                <artifactId>impsort-maven-plugin</artifactId>
+                <version>${version.impsort.plugin}</version>
+                <configuration>
+                    <groups>java.,javax.,jakarta.,org.,com.</groups>
+                    <staticGroups>*</staticGroups>
+                    <removeUnused>true</removeUnused>
+                    <sourceDirectory>${codegen.out}</sourceDirectory>
+                    <directories>
+                        <directory>${codegen.out}</directory>
+                    </directories>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
