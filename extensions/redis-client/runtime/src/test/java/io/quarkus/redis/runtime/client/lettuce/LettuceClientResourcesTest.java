@@ -12,11 +12,12 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import io.lettuce.core.KeyValue;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.netty.channel.EventLoopGroup;
 import io.smallrye.mutiny.Uni;
-import io.vertx.core.impl.VertxInternal;
+import io.vertx.core.internal.VertxInternal;
 import io.vertx.mutiny.core.Vertx;
 
 /**
@@ -46,9 +47,9 @@ class LettuceClientResourcesTest {
         REDIS.start();
         vertx = Vertx.vertx();
 
-        // Cast to VertxInternal to access getEventLoopGroup() — the non-deprecated replacement
-        // for the deprecated nettyEventLoopGroup() method (removed from public API in Vert.x 5).
-        EventLoopGroup vertxEventLoops = ((VertxInternal) vertx.getDelegate()).getEventLoopGroup();
+        // Cast to VertxInternal to access eventLoopGroup() — Vert.x 5 removed the public
+        // nettyEventLoopGroup() accessor; the internal API is the supported replacement.
+        EventLoopGroup vertxEventLoops = ((VertxInternal) vertx.getDelegate()).eventLoopGroup();
         lettuceResources = new LettuceClientResources(vertxEventLoops);
 
         String redisUri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
@@ -113,8 +114,14 @@ class LettuceClientResourcesTest {
         try (StatefulRedisConnection<String, String> connection = connectionFactory.connect()) {
             RedisAsyncCommands<String, String> async = connection.async();
 
-            // Execute a command and capture the thread name from the completion callback
-            CompletionStage<String> future = async.ping().toCompletableFuture();
+            // Execute a command and capture the thread name from the completion callback.
+            // BLPOP on a missing key blocks server-side (~200ms), guaranteeing the future is
+            // still pending when the callback is attached below. With an instant command like
+            // PING, the response can arrive before thenAccept registers, and a callback added
+            // to an already-completed future runs inline on the test thread — seen as a flaky
+            // failure ("main" instead of an event-loop thread) on slower CI JVMs.
+            CompletionStage<KeyValue<String, String>> future = async
+                    .blpop(0.2, "lettuce-event-loop-test-missing-key").toCompletableFuture();
             String[] callbackThreadName = new String[1];
 
             future.thenAccept(result -> {
