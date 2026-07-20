@@ -1078,6 +1078,52 @@ public static class MyExampleCustomizer implements RedisOptionsCustomizer {
 
 See xref:redis-dev-services.adoc[Redis Dev Service].
 
+[[lettuce-backend]]
+== Select the Lettuce backend
+
+By default, `RedisDataSource` and `ReactiveRedisDataSource` are backed by the Vert.x Redis client.
+The extension can alternatively route both data sources through https://lettuce.io/[Lettuce] by setting:
+
+[source,properties]
+----
+quarkus.redis.backend=lettuce
+----
+
+The Lettuce backend is opt-in and requires an explicit `io.lettuce:lettuce-core` dependency on
+your application, since the extension declares it `optional`:
+
+[source,xml]
+----
+<dependency>
+    <groupId>io.lettuce</groupId>
+    <artifactId>lettuce-core</artifactId>
+</dependency>
+----
+
+=== Native-image requirements
+
+Lettuce's `DefaultCommandLatencyCollector` references `org.LatencyUtils.PauseDetector` and
+`org.HdrHistogram.Histogram` in method signatures. Both libraries are declared `optional` by
+Lettuce, so they are silently absent in JVM mode (Lettuce disables latency tracking). The
+native-image link-at-build-time analysis, however, rejects the unresolved references, so when
+building a native image with `quarkus.redis.backend=lettuce` you must add both dependencies to
+your application:
+
+[source,xml]
+----
+<dependency>
+    <groupId>org.latencyutils</groupId>
+    <artifactId>LatencyUtils</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.hdrhistogram</groupId>
+    <artifactId>HdrHistogram</artifactId>
+</dependency>
+----
+
+If either dependency is missing, the native build fails early during augmentation with a
+`ConfigurationException` listing the missing artifacts and the exact snippet to add.
+
 == Configure Redis observability
 
 [[redis-health-check]]
