@@ -28,11 +28,9 @@ import io.smallrye.mutiny.Uni;
  * Delegates every command to Lettuce async APIs and adapts the resulting
  * {@link java.util.concurrent.CompletionStage} to {@link Uni} via {@link LettuceResult#toUni}.
  * <p>
- * <strong>Note on {@code LCS}</strong>: Lettuce 6.5.x only exposes the deprecated
- * {@code STRALGO LCS} command, which was removed in Redis 7.0. {@link #lcs} and
- * {@link #lcsLength} therefore throw {@link UnsupportedOperationException} on this
- * Lettuce version. Native {@code lcs(LcsArgs)} support will be wired in with the
- * Quarkus 4 / Lettuce 7 upgrade.
+ * <strong>Note on {@code LCS}</strong>: not yet implemented. Lettuce 7 exposes native
+ * {@code lcs(LcsArgs)} support, so {@link #lcs} and {@link #lcsLength} can now be wired
+ * up; until then they throw {@link UnsupportedOperationException}.
  *
  * @param <K> the key type
  * @param <V> the value type
@@ -182,9 +180,8 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
 
     private static UnsupportedOperationException lcsUnsupported() {
         return new UnsupportedOperationException(
-                "LCS is not supported on the Lettuce backend with Lettuce 6.5.x: the only available API "
-                        + "emits the deprecated STRALGO command, which was removed in Redis 7.0. "
-                        + "Native LCS support will be enabled with the Quarkus 4 / Lettuce 7 upgrade.");
+                "LCS is not yet implemented on the Lettuce backend. "
+                        + "Set quarkus.redis.backend=vertx if you need LCS.");
     }
 
     @SafeVarargs

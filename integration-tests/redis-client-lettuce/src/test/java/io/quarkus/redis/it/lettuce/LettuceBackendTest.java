@@ -28,10 +28,10 @@ class LettuceBackendTest {
     }
 
     @Test
-    public void pingMutiny() {
+    public void pingCommand() {
         RestAssured.given()
                 .when()
-                .get("/lettuce/ping/mutiny")
+                .get("/lettuce/ping/command")
                 .then()
                 .statusCode(200)
                 .body(CoreMatchers.is("PONG"));

@@ -24,7 +24,7 @@ import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResu
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.runtime.client.lettuce.LettuceClientResources;
 import io.smallrye.mutiny.Uni;
-import io.vertx.core.impl.VertxInternal;
+import io.vertx.core.internal.VertxInternal;
 import io.vertx.mutiny.core.Vertx;
 
 @SuppressWarnings("resource")
@@ -45,7 +45,7 @@ class LettuceWithTransactionReactiveIntegrationTest {
     static void setUp() {
         REDIS.start();
         vertx = Vertx.vertx();
-        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).getEventLoopGroup();
+        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).eventLoopGroup();
         lettuceResources = new LettuceClientResources(loops);
         String uri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
         redisClient = RedisClient.create(lettuceResources.clientResources(), uri);

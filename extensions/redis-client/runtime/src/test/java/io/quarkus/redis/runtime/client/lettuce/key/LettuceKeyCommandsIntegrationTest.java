@@ -26,7 +26,7 @@ import io.quarkus.redis.datasource.keys.RedisKeyNotFoundException;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.runtime.client.lettuce.LettuceClientResources;
 import io.quarkus.redis.runtime.client.lettuce.QuarkusRedisCodec;
-import io.vertx.core.impl.VertxInternal;
+import io.vertx.core.internal.VertxInternal;
 import io.vertx.mutiny.core.Vertx;
 
 /**
@@ -53,7 +53,7 @@ class LettuceKeyCommandsIntegrationTest {
     static void setUp() {
         REDIS.start();
         vertx = Vertx.vertx();
-        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).getEventLoopGroup();
+        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).eventLoopGroup();
         lettuceResources = new LettuceClientResources(loops);
 
         String uri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());

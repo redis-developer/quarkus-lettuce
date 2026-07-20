@@ -227,15 +227,13 @@ public class LettuceReactiveKeyCommandsImpl<K, V> extends AbstractLettuceCommand
         return LettuceResult.toUni(_keys(pattern));
     }
 
-    @SuppressWarnings("unchecked")
     public Supplier<RedisFuture<List<K>>> _keys(String pattern) {
         nonNull(pattern, "pattern");
         if (pattern.isBlank()) {
             throw new IllegalArgumentException("`pattern` must not be blank");
         }
-        // Lettuce's keys(K) accepts a K-typed pattern; the connection codec encodes it. For
-        // typical String-keyed connections this is a no-op cast.
-        return () -> async.keys((K) pattern);
+        // Since Lettuce 7, KEYS takes the pattern as a String directly (keys(K) became keysLegacy).
+        return () -> async.keys(pattern);
     }
 
     @Override

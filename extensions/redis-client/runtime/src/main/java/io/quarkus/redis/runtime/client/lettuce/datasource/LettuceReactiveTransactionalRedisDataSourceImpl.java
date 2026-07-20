@@ -31,8 +31,7 @@ import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveValueCommandsImpl;
 import io.smallrye.mutiny.Uni;
-import io.vertx.mutiny.redis.client.Command;
-import io.vertx.mutiny.redis.client.Response;
+import io.vertx.redis.client.Command;
 
 /**
  * Lettuce-backed implementation of {@link ReactiveTransactionalRedisDataSource}.
@@ -105,12 +104,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public Uni<Void> execute(Command command, String... args) {
-        nonNull(command, "command");
-        return enqueueRaw(LettuceReactiveRedisDataSourceImpl.resolve(command.toString()), args);
-    }
-
-    @Override
-    public Uni<Void> execute(io.vertx.redis.client.Command command, String... args) {
         nonNull(command, "command");
         return enqueueRaw(LettuceReactiveRedisDataSourceImpl.resolve(command.toString()), args);
     }
@@ -212,10 +205,8 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
                 }
             }
         }
-        return tx.enqueue(() -> connection.async().dispatch(type, output, commandArgs), ignored -> {
-            io.vertx.redis.client.Response raw = output.toVertxResponse();
-            return raw == null ? null : Response.newInstance(raw);
-        });
+        return tx.enqueue(() -> connection.async().dispatch(type, output, commandArgs),
+                ignored -> output.toVertxResponse());
     }
 
     private static UnsupportedOperationException groupNotImplemented(String group) {

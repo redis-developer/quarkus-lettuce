@@ -19,8 +19,8 @@ import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.deployment.client.RedisTestResource;
 import io.quarkus.test.QuarkusUnitTest;
 import io.quarkus.test.common.QuarkusTestResource;
-import io.vertx.mutiny.redis.client.Command;
-import io.vertx.mutiny.redis.client.Response;
+import io.vertx.redis.client.Command;
+import io.vertx.redis.client.Response;
 
 /**
  * Integration test for the Lettuce-backed {@link RedisDataSource} / {@link ReactiveRedisDataSource}.
@@ -66,15 +66,8 @@ public class LettuceDataSourceTest {
     }
 
     @Test
-    public void testExecuteMutinyCommand() {
+    public void testExecuteCommand() {
         Response response = blocking.execute(Command.PING);
-        assertThat(response).isNotNull();
-        assertThat(response.toString()).isEqualTo("PONG");
-    }
-
-    @Test
-    public void testExecuteVertxCommand() {
-        Response response = blocking.execute(io.vertx.redis.client.Command.PING);
         assertThat(response).isNotNull();
         assertThat(response.toString()).isEqualTo("PONG");
     }

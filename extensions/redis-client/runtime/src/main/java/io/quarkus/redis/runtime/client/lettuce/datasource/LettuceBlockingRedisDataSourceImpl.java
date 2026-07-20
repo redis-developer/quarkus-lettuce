@@ -45,8 +45,8 @@ import io.quarkus.redis.runtime.client.lettuce.value.LettuceBlockingValueCommand
 import io.quarkus.redis.runtime.datasource.BlockingTransactionalRedisDataSourceImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
 import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
-import io.vertx.mutiny.redis.client.Command;
-import io.vertx.mutiny.redis.client.Response;
+import io.vertx.redis.client.Command;
+import io.vertx.redis.client.Response;
 
 /**
  * Blocking wrapper around {@link LettuceReactiveRedisDataSourceImpl}.
@@ -87,11 +87,6 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public Response execute(Command command, String... args) {
-        return reactive.execute(command, args).await().atMost(timeout);
-    }
-
-    @Override
-    public Response execute(io.vertx.redis.client.Command command, String... args) {
         return reactive.execute(command, args).await().atMost(timeout);
     }
 
