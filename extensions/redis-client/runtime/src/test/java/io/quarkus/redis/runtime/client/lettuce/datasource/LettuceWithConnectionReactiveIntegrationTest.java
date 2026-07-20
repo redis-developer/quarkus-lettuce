@@ -23,9 +23,9 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.runtime.client.lettuce.LettuceClientResources;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.Cancellable;
-import io.vertx.core.impl.VertxInternal;
+import io.vertx.core.internal.VertxInternal;
 import io.vertx.mutiny.core.Vertx;
-import io.vertx.mutiny.redis.client.Response;
+import io.vertx.redis.client.Response;
 
 @SuppressWarnings("resource")
 class LettuceWithConnectionReactiveIntegrationTest {
@@ -45,7 +45,7 @@ class LettuceWithConnectionReactiveIntegrationTest {
     static void setUp() {
         REDIS.start();
         vertx = Vertx.vertx();
-        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).getEventLoopGroup();
+        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).eventLoopGroup();
         lettuceResources = new LettuceClientResources(loops);
         String uri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
         redisClient = RedisClient.create(lettuceResources.clientResources(), uri);

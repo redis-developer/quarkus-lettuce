@@ -14,12 +14,13 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.deployment.client.RedisTestResource;
 import io.quarkus.test.QuarkusUnitTest;
 import io.quarkus.test.common.QuarkusTestResource;
-import io.vertx.mutiny.redis.client.Command;
-import io.vertx.mutiny.redis.client.Response;
+import io.vertx.redis.client.Command;
+import io.vertx.redis.client.Response;
 
 /**
  * Integration test for the Lettuce-backed {@link RedisDataSource} / {@link ReactiveRedisDataSource}.
@@ -65,15 +66,8 @@ public class LettuceDataSourceTest {
     }
 
     @Test
-    public void testExecuteMutinyCommand() {
+    public void testExecuteCommand() {
         Response response = blocking.execute(Command.PING);
-        assertThat(response).isNotNull();
-        assertThat(response.toString()).isEqualTo("PONG");
-    }
-
-    @Test
-    public void testExecuteVertxCommand() {
-        Response response = blocking.execute(io.vertx.redis.client.Command.PING);
         assertThat(response).isNotNull();
         assertThat(response.toString()).isEqualTo("PONG");
     }
@@ -127,11 +121,16 @@ public class LettuceDataSourceTest {
     }
 
     @Test
-    public void testWithTransactionThrowsUnsupported() {
-        assertThatThrownBy(() -> blocking.withTransaction(tx -> {
-        }))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Lettuce backend");
+    public void testWithTransaction() {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            tx.value(String.class).set("lettuce:ds:tx1", "a");
+            tx.value(String.class).set("lettuce:ds:tx2", "b");
+        });
+        assertThat(result.discarded()).isFalse();
+        assertThat(result.size()).isEqualTo(2);
+        // Both queued commands were applied atomically on EXEC.
+        assertThat(blocking.value(String.class).get("lettuce:ds:tx1")).isEqualTo("a");
+        assertThat(blocking.value(String.class).get("lettuce:ds:tx2")).isEqualTo("b");
     }
 
     @Test

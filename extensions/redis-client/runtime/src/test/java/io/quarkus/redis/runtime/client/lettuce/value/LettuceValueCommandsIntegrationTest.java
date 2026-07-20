@@ -21,7 +21,7 @@ import io.quarkus.redis.datasource.value.SetArgs;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceClientResources;
 import io.quarkus.redis.runtime.client.lettuce.QuarkusRedisCodec;
-import io.vertx.core.impl.VertxInternal;
+import io.vertx.core.internal.VertxInternal;
 import io.vertx.mutiny.core.Vertx;
 
 /**
@@ -48,7 +48,7 @@ class LettuceValueCommandsIntegrationTest {
     static void setUp() {
         REDIS.start();
         vertx = Vertx.vertx();
-        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).getEventLoopGroup();
+        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).eventLoopGroup();
         lettuceResources = new LettuceClientResources(loops);
 
         String uri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
@@ -191,7 +191,7 @@ class LettuceValueCommandsIntegrationTest {
     }
 
     @Test
-    void lcsThrowsUntilLettuce7Upgrade() {
+    void lcsNotYetImplemented() {
         assertThatThrownBy(() -> blocking.lcs("a", "b")).isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> blocking.lcsLength("a", "b")).isInstanceOf(UnsupportedOperationException.class);
     }

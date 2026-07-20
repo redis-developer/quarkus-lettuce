@@ -1,5 +1,7 @@
 package io.quarkus.redis.runtime.client.lettuce.datasource;
 
+import static io.quarkus.redis.runtime.datasource.Validation.notNullOrEmpty;
+import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 
@@ -43,11 +45,13 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveValueCommandsImpl;
+import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
+import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
 import io.smallrye.mutiny.Uni;
 import io.vertx.mutiny.core.Vertx;
-import io.vertx.mutiny.redis.client.Command;
 import io.vertx.mutiny.redis.client.Redis;
-import io.vertx.mutiny.redis.client.Response;
+import io.vertx.redis.client.Command;
+import io.vertx.redis.client.Response;
 
 /**
  * Lettuce-backed implementation of {@link ReactiveRedisDataSource}.
@@ -102,12 +106,6 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         return dispatch(resolve(command.toString()), args);
     }
 
-    @Override
-    public Uni<Response> execute(io.vertx.redis.client.Command command, String... args) {
-        nonNull(command, "command");
-        return dispatch(resolve(command.toString()), args);
-    }
-
     private Uni<Response> dispatch(ProtocolKeyword type, String... args) {
         LettuceVertxResponseOutput<String, String> output = new LettuceVertxResponseOutput<>(StringCodec.UTF8);
         CommandArgs<String, String> commandArgs = new CommandArgs<>(StringCodec.UTF8);
@@ -119,13 +117,10 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
             }
         }
         return LettuceResult.toUni(() -> connection.async().dispatch(type, output, commandArgs))
-                .map(ignored -> {
-                    io.vertx.redis.client.Response raw = output.toVertxResponse();
-                    return raw == null ? null : Response.newInstance(raw);
-                });
+                .map(ignored -> output.toVertxResponse());
     }
 
-    private static ProtocolKeyword resolve(String name) {
+    static ProtocolKeyword resolve(String name) {
         try {
             return CommandType.valueOf(name.toUpperCase());
         } catch (IllegalArgumentException e) {
@@ -175,13 +170,17 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public Uni<TransactionResult> withTransaction(Function<ReactiveTransactionalRedisDataSource, Uni<Void>> tx) {
-        throw transactionsNotSupported();
+        nonNull(tx, "tx");
+        return withTxConnection(conn -> runTx(conn, tx, null));
     }
 
     @Override
     public Uni<TransactionResult> withTransaction(Function<ReactiveTransactionalRedisDataSource, Uni<Void>> tx,
             String... watchedKeys) {
-        throw transactionsNotSupported();
+        nonNull(tx, "tx");
+        notNullOrEmpty(watchedKeys, "watchedKeys");
+        doesNotContainNull(watchedKeys, "watchedKeys");
+        return withTxConnection(conn -> runTx(conn, tx, watchedKeys));
     }
 
     @Override
@@ -189,13 +188,108 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
             Function<ReactiveRedisDataSource, Uni<I>> preTx,
             BiFunction<I, ReactiveTransactionalRedisDataSource, Uni<Void>> tx,
             String... watchedKeys) {
-        throw transactionsNotSupported();
+        nonNull(preTx, "preTx");
+        nonNull(tx, "tx");
+        notNullOrEmpty(watchedKeys, "watchedKeys");
+        doesNotContainNull(watchedKeys, "watchedKeys");
+        return withTxConnection(conn -> runOptimisticTx(conn, preTx, tx, watchedKeys));
     }
 
-    private static UnsupportedOperationException transactionsNotSupported() {
-        return new UnsupportedOperationException(
-                "Transactions and dedicated connections are not yet supported on the Lettuce backend. "
-                        + "Set quarkus.redis.backend=vertx to use the Vert.x backend.");
+    /**
+     * Runs {@code body} on a transaction-scoped connection. When this data source is already
+     * pinned (nested inside {@code withConnection}), the pinned connection is reused and left
+     * open for the outer scope to release. Otherwise a fresh connection is opened via the
+     * {@code connector} and closed on every termination path.
+     */
+    private <T> Uni<T> withTxConnection(Function<StatefulRedisConnection<String, String>, Uni<T>> body) {
+        if (pinned) {
+            return Uni.createFrom().deferred(() -> body.apply(connection));
+        }
+        return openConnection()
+                .onItem().transformToUni(conn -> Uni.createFrom().deferred(() -> body.apply(conn))
+                        .onTermination().call(() -> LettuceResult.toUni(conn::closeAsync).replaceWithVoid()));
+    }
+
+    private Uni<TransactionResult> runTx(StatefulRedisConnection<String, String> conn,
+            Function<ReactiveTransactionalRedisDataSource, Uni<Void>> tx, String[] watchedKeys) {
+        LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn);
+        LettuceTransactionHolder holder = new LettuceTransactionHolder();
+        LettuceReactiveTransactionalRedisDataSourceImpl txDs = new LettuceReactiveTransactionalRedisDataSourceImpl(
+                pinnedDs, holder);
+
+        Uni<Void> watch = watchedKeys == null ? Uni.createFrom().voidItem() : watch(conn, watchedKeys);
+        return watch
+                .chain(() -> LettuceResult.toUni(() -> conn.async().multi()).replaceWithVoid())
+                .chain(() -> Uni.createFrom().deferred(() -> tx.apply(txDs)))
+                .onItemOrFailure().transformToUni((x, failure) -> {
+                    if (failure != null) {
+                        return abort(conn, holder, failure);
+                    }
+                    if (holder.discarded()) {
+                        return Uni.createFrom().item(TransactionResultImpl.DISCARDED);
+                    }
+                    return LettuceResult.toUni(() -> conn.async().exec())
+                            .chain(execResult -> execResult == null || execResult.wasDiscarded()
+                                    ? Uni.createFrom().item(TransactionResultImpl.DISCARDED)
+                                    : holder.toResult());
+                });
+    }
+
+    private <I> Uni<OptimisticLockingTransactionResult<I>> runOptimisticTx(StatefulRedisConnection<String, String> conn,
+            Function<ReactiveRedisDataSource, Uni<I>> preTx,
+            BiFunction<I, ReactiveTransactionalRedisDataSource, Uni<Void>> tx, String[] watchedKeys) {
+        LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn);
+        LettuceTransactionHolder holder = new LettuceTransactionHolder();
+        LettuceReactiveTransactionalRedisDataSourceImpl txDs = new LettuceReactiveTransactionalRedisDataSourceImpl(
+                pinnedDs, holder);
+
+        return watch(conn, watchedKeys)
+                .chain(() -> Uni.createFrom().deferred(() -> preTx.apply(pinnedDs)))
+                .onFailure().recoverWithUni(failure -> LettuceResult.toUni(() -> conn.async().unwatch())
+                        .onItemOrFailure().transformToUni((r, f) -> {
+                            if (f != null) {
+                                failure.addSuppressed(f);
+                            }
+                            return Uni.createFrom().failure(failure);
+                        }))
+                .chain(input -> LettuceResult.toUni(() -> conn.async().multi()).replaceWithVoid()
+                        .chain(() -> Uni.createFrom().deferred(() -> tx.apply(input, txDs)))
+                        .onItemOrFailure().transformToUni((x, failure) -> {
+                            if (failure != null) {
+                                return abort(conn, holder, failure);
+                            }
+                            if (holder.discarded()) {
+                                return Uni.createFrom().item(OptimisticLockingTransactionResultImpl.discarded(input));
+                            }
+                            return LettuceResult.toUni(() -> conn.async().exec())
+                                    .chain(execResult -> execResult == null || execResult.wasDiscarded()
+                                            ? Uni.createFrom()
+                                                    .item(OptimisticLockingTransactionResultImpl.discarded(input))
+                                            : holder.toOptimisticLockingResult(input));
+                        }));
+    }
+
+    private Uni<Void> watch(StatefulRedisConnection<String, String> conn, String[] keys) {
+        return LettuceResult.toUni(() -> conn.async().watch(keys)).replaceWithVoid();
+    }
+
+    /**
+     * Aborts an in-flight transaction after the user block failed: issues {@code DISCARD}
+     * (unless the user already discarded) and re-propagates the original failure, attaching any
+     * {@code DISCARD} failure as suppressed. Mirrors the Vert.x backend's abort path.
+     */
+    private static <T> Uni<T> abort(StatefulRedisConnection<String, String> conn, LettuceTransactionHolder holder,
+            Throwable failure) {
+        if (holder.discarded()) {
+            return Uni.createFrom().failure(failure);
+        }
+        return LettuceResult.toUni(() -> conn.async().discard())
+                .onItemOrFailure().transformToUni((r, f) -> {
+                    if (f != null) {
+                        failure.addSuppressed(f);
+                    }
+                    return Uni.createFrom().failure(failure);
+                });
     }
 
     @Override

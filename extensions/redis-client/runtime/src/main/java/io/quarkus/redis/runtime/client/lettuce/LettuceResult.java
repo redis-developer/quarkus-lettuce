@@ -30,7 +30,7 @@ public final class LettuceResult {
      * @param supplier a supplier of the {@link CompletionStage} (typically a Lettuce async command call)
      * @return a {@link Uni} that completes with the result of the {@link CompletionStage}
      */
-    public static <T> Uni<T> toUni(java.util.function.Supplier<CompletionStage<T>> supplier) {
+    public static <T> Uni<T> toUni(java.util.function.Supplier<? extends CompletionStage<T>> supplier) {
         return Uni.createFrom().completionStage(supplier);
     }
 
