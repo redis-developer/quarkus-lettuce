@@ -140,6 +140,11 @@ public class RedisConfigClientNamesTest {
             public boolean healthEnabled() {
                 return false;
             }
+
+            @Override
+            public Optional<Backend> backend() {
+                return Optional.empty();
+            }
         };
     }
 
