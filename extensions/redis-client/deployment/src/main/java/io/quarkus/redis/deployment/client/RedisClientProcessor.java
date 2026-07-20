@@ -303,6 +303,26 @@ public class RedisClientProcessor {
                 buildTimeConfig.healthEnabled());
     }
 
+    @BuildStep
+    RedisBackendBuildItem resolveBackend(RedisBuildTimeConfig buildTimeConfig) {
+        RedisBackendBuildItem.Backend backend = buildTimeConfig.backend()
+                .map(b -> switch (b) {
+                    case VERTX -> RedisBackendBuildItem.Backend.VERTX;
+                    case LETTUCE -> RedisBackendBuildItem.Backend.LETTUCE;
+                })
+                .orElse(RedisBackendBuildItem.Backend.VERTX);
+        if (backend == RedisBackendBuildItem.Backend.LETTUCE && !isLettuceOnClasspath()) {
+            throw new ConfigurationException(
+                    "quarkus.redis.backend=lettuce was selected but 'lettuce-core' is not on the classpath. "
+                            + "Add 'io.lettuce:lettuce-core' as a runtime dependency or set quarkus.redis.backend=vertx.");
+        }
+        return new RedisBackendBuildItem(backend);
+    }
+
+    private static boolean isLettuceOnClasspath() {
+        return new IsLettuceOnClasspath().getAsBoolean();
+    }
+
     public static final String NO_REDIS_SCRIPT_FILE = "no-file";
 
     private static List<String> getRedisLoadScript(RedisClientBuildTimeConfig config, LaunchMode launchMode) {
