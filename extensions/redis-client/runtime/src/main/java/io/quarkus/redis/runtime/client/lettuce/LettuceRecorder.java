@@ -27,7 +27,7 @@ import io.quarkus.runtime.RuntimeValue;
 import io.quarkus.runtime.ShutdownContext;
 import io.quarkus.runtime.annotations.Recorder;
 import io.vertx.core.Vertx;
-import io.vertx.core.impl.VertxInternal;
+import io.vertx.core.internal.VertxInternal;
 
 /**
  * Quarkus recorder that manages the lifecycle of Lettuce Redis clients.
@@ -60,7 +60,7 @@ public class LettuceRecorder {
      * Only creates clients that pass the {@link #checkActive(String)} check.
      */
     public void initialize(RuntimeValue<Vertx> vertx, Set<String> names) {
-        EventLoopGroup eventLoopGroup = ((VertxInternal) vertx.getValue()).getEventLoopGroup();
+        EventLoopGroup eventLoopGroup = ((VertxInternal) vertx.getValue()).eventLoopGroup();
         sharedResources = new LettuceClientResources(eventLoopGroup);
         mutinyVertx = io.vertx.mutiny.core.Vertx.newInstance(vertx.getValue());
 
@@ -99,7 +99,8 @@ public class LettuceRecorder {
     public Supplier<ReactiveRedisDataSource> getReactiveDataSource(String name) {
         return () -> reactiveDataSources.computeIfAbsent(name, k -> {
             StatefulRedisConnection<String, String> conn = (StatefulRedisConnection<String, String>) getConnection(k).get();
-            return new LettuceReactiveRedisDataSourceImpl(mutinyVertx, conn);
+            LettuceConnectionFactory factory = factories.get(k);
+            return new LettuceReactiveRedisDataSourceImpl(mutinyVertx, conn, factory::connectAsync);
         });
     }
 

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Quarkus Redis — Vert.x vs Lettuce</title>
+<style>
+  :root { --bg: #0e1014; --fg: #e6e6e6; --muted: #8a8f98; --ok: #4ade80; --bad: #f87171; --panel: #161922; --accent: #60a5fa; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--fg); font: 14px/1.5 -apple-system, system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-weight: 600; font-size: 20px; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .panel { background: var(--panel); border: 1px solid #242a35; border-radius: 8px; padding: 16px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 4px; font-weight: 600; font-size: 12px; letter-spacing: 0.5px; }
+  .badge.vertx { background: #1e293b; color: var(--accent); }
+  .badge.lettuce { background: #1f2e1f; color: var(--ok); }
+  .section { margin: 24px 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  button { background: #1f2937; color: var(--fg); border: 1px solid #334155; padding: 6px 12px; border-radius: 4px; cursor: pointer; font: inherit; }
+  button:hover { background: #334155; }
+  input { background: #0b0e14; color: var(--fg); border: 1px solid #334155; padding: 6px 8px; border-radius: 4px; font: inherit; width: 120px; }
+  pre { background: #0b0e14; padding: 8px; border-radius: 4px; margin: 6px 0 0; white-space: pre-wrap; font-size: 12px; color: var(--muted); }
+  .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+  .check { font-weight: 600; }
+  .check.ok { color: var(--ok); }
+  .check.bad { color: var(--bad); }
+  .ids { font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<h1>Quarkus Redis — Vert.x vs Lettuce</h1>
+<div class="sub">Same code, same Redis, two backends. Left: <code>quarkus.redis.backend=vertx</code> on :8080 · Right: <code>quarkus.redis.backend=lettuce</code> on :8081</div>
+
+<div class="grid">
+  <div class="panel"><div id="badge-vertx" class="badge vertx">connecting…</div></div>
+  <div class="panel"><div id="badge-lettuce" class="badge lettuce">connecting…</div></div>
+</div>
+
+<div class="section">Basic ops</div>
+<div class="grid">
+  <div class="panel" id="ops-vertx"></div>
+  <div class="panel" id="ops-lettuce"></div>
+</div>
+
+<div class="section">withConnection — CLIENT ID pinning</div>
+<div class="grid">
+  <div class="panel" id="pin-vertx"></div>
+  <div class="panel" id="pin-lettuce"></div>
+</div>
+
+<div class="section">Nested withConnection — outer/inner reuse</div>
+<div class="grid">
+  <div class="panel" id="nest-vertx"></div>
+  <div class="panel" id="nest-lettuce"></div>
+</div>
+
+<div class="section">Cleanup</div>
+<div class="row"><button onclick="flushBoth()">FLUSHALL on both</button><span id="flush-out" class="ids"></span></div>
+
+<script>
+const BACKENDS = [
+  { id: "vertx",   url: "http://localhost:8080" },
+  { id: "lettuce", url: "http://localhost:8081" }
+];
+
+async function call(base, path, opts) {
+  const r = await fetch(base + "/api" + path, opts || {});
+  if (r.status === 204) return null;
+  const ct = r.headers.get("content-type") || "";
+  return ct.includes("json") ? r.json() : r.text();
+}
+
+async function init() {
+  for (const b of BACKENDS) {
+    try {
+      const info = await call(b.url, "/backend");
+      document.getElementById("badge-" + b.id).textContent = info.backend.toUpperCase() + " · " + new URL(b.url).port;
+    } catch (e) {
+      document.getElementById("badge-" + b.id).textContent = "OFFLINE · " + new URL(b.url).port;
+    }
+    renderOps(b);
+    renderPin(b);
+    renderNest(b);
+  }
+}
+
+function renderOps(b) {
+  document.getElementById("ops-" + b.id).innerHTML = `
+    <div class="row">SET <input id="k-${b.id}" value="demo:key" /> = <input id="v-${b.id}" value="hello" />
+      <button onclick="opSet('${b.id}')">set</button>
+      <button onclick="opGet('${b.id}')">get</button></div>
+    <div class="row">INCR <input id="c-${b.id}" value="demo:counter" /> <button onclick="opIncr('${b.id}')">incr</button></div>
+    <div class="row">EXPIRE <input id="ek-${b.id}" value="demo:key" /> <input id="es-${b.id}" value="60" /> sec <button onclick="opTtl('${b.id}')">expire</button></div>
+    <pre id="ops-out-${b.id}">—</pre>`;
+}
+async function opSet(id) {
+  const b = BACKENDS.find(x => x.id === id);
+  const k = document.getElementById("k-" + id).value, v = document.getElementById("v-" + id).value;
+  const r = await call(b.url, "/value/" + k, { method: "POST", body: v, headers: { "content-type": "text/plain" } });
+  document.getElementById("ops-out-" + id).textContent = "SET " + k + " = " + JSON.stringify(r);
+}
+async function opGet(id) {
+  const b = BACKENDS.find(x => x.id === id);
+  const k = document.getElementById("k-" + id).value;
+  const r = await call(b.url, "/value/" + k);
+  document.getElementById("ops-out-" + id).textContent = "GET " + k + " = " + JSON.stringify(r);
+}
+async function opIncr(id) {
+  const b = BACKENDS.find(x => x.id === id);
+  const k = document.getElementById("c-" + id).value;
+  const r = await call(b.url, "/counter/" + k, { method: "POST" });
+  document.getElementById("ops-out-" + id).textContent = "INCR " + k + " = " + JSON.stringify(r);
+}
+async function opTtl(id) {
+  const b = BACKENDS.find(x => x.id === id);
+  const k = document.getElementById("ek-" + id).value, s = document.getElementById("es-" + id).value;
+  const r = await call(b.url, "/key/ttl/" + k + "/" + s, { method: "POST" });
+  document.getElementById("ops-out-" + id).textContent = "EXPIRE " + k + " " + s + "s → ttl = " + JSON.stringify(r);
+}
+
+function renderPin(b) {
+  document.getElementById("pin-" + b.id).innerHTML = `
+    <div class="row"><button onclick="runPin('${b.id}')">run /with-connection/client-ids</button></div>
+    <pre id="pin-out-${b.id}">—</pre>`;
+}
+async function runPin(id) {
+  const b = BACKENDS.find(x => x.id === id);
+  const r = await call(b.url, "/with-connection/client-ids");
+  const same = r.inside1 === r.inside2, diff = r.inside1 !== r.outside;
+  document.getElementById("pin-out-" + id).innerHTML =
+    `<span class="ids">inside_1 = ${r.inside1}\ninside_2 = ${r.inside2}\noutside  = ${r.outside}</span>\n` +
+    `<span class="check ${same ? "ok" : "bad"}">${same ? "✓" : "✗"} inside_1 == inside_2 (pinned)</span>\n` +
+    `<span class="check ${diff ? "ok" : "bad"}">${diff ? "✓" : "✗"} inside != outside (fresh conn)</span>`;
+}
+
+function renderNest(b) {
+  document.getElementById("nest-" + b.id).innerHTML = `
+    <div class="row"><button onclick="runNest('${b.id}')">run /with-connection/nested</button></div>
+    <pre id="nest-out-${b.id}">—</pre>`;
+}
+async function runNest(id) {
+  const b = BACKENDS.find(x => x.id === id);
+  const r = await call(b.url, "/with-connection/nested");
+  const reused = r.outer === r.inner;
+  document.getElementById("nest-out-" + id).innerHTML =
+    `<span class="ids">outer = ${r.outer}\ninner = ${r.inner}</span>\n` +
+    `<span class="check ${reused ? "ok" : "bad"}">${reused ? "✓" : "✗"} nested reuses outer connection</span>`;
+}
+
+async function flushBoth() {
+  for (const b of BACKENDS) await call(b.url, "/flushall", { method: "DELETE" });
+  document.getElementById("flush-out").textContent = "flushed at " + new Date().toLocaleTimeString();
+}
+
+init();
+</script>
+</body>
+</html>
