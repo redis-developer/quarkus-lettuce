@@ -15,7 +15,7 @@ import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.RedisCodec;
 import io.netty.channel.EventLoopGroup;
 import io.smallrye.mutiny.Uni;
-import io.vertx.core.impl.VertxInternal;
+import io.vertx.core.internal.VertxInternal;
 import io.vertx.mutiny.core.Vertx;
 
 /**
@@ -42,7 +42,7 @@ class LettuceProxyInfrastructureTest {
         REDIS.start();
         vertx = Vertx.vertx();
 
-        EventLoopGroup vertxEventLoops = ((VertxInternal) vertx.getDelegate()).getEventLoopGroup();
+        EventLoopGroup vertxEventLoops = ((VertxInternal) vertx.getDelegate()).eventLoopGroup();
         lettuceResources = new LettuceClientResources(vertxEventLoops);
 
         String redisUri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
