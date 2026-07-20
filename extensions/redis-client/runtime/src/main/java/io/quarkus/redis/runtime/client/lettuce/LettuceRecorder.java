@@ -5,6 +5,7 @@ import static io.quarkus.redis.runtime.client.config.RedisConfig.HOSTS_PROVIDER_
 import static io.quarkus.redis.runtime.client.config.RedisConfig.getPropertyName;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -16,13 +17,17 @@ import org.jboss.logging.Logger;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.netty.channel.EventLoopGroup;
 import io.quarkus.arc.ActiveResult;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
+import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.runtime.client.config.RedisClientConfig;
 import io.quarkus.redis.runtime.client.config.RedisConfig;
+import io.quarkus.redis.runtime.client.lettuce.datasource.LettuceBlockingRedisDataSourceImpl;
+import io.quarkus.redis.runtime.client.lettuce.datasource.LettuceReactiveRedisDataSourceImpl;
 import io.quarkus.runtime.RuntimeValue;
 import io.quarkus.runtime.ShutdownContext;
 import io.quarkus.runtime.annotations.Recorder;
 import io.vertx.core.Vertx;
-import io.vertx.core.impl.VertxInternal;
+import io.vertx.core.internal.VertxInternal;
 
 /**
  * Quarkus recorder that manages the lifecycle of Lettuce Redis clients.
@@ -41,8 +46,10 @@ public class LettuceRecorder {
     private final RuntimeValue<RedisConfig> runtimeConfig;
 
     private static volatile LettuceClientResources sharedResources;
+    private static volatile io.vertx.mutiny.core.Vertx mutinyVertx;
     private static final Map<String, LettuceConnectionFactory> factories = new ConcurrentHashMap<>();
     private static final Map<String, StatefulRedisConnection<String, String>> connections = new ConcurrentHashMap<>();
+    private static final Map<String, LettuceReactiveRedisDataSourceImpl> reactiveDataSources = new ConcurrentHashMap<>();
 
     public LettuceRecorder(RuntimeValue<RedisConfig> runtimeConfig) {
         this.runtimeConfig = runtimeConfig;
@@ -53,8 +60,9 @@ public class LettuceRecorder {
      * Only creates clients that pass the {@link #checkActive(String)} check.
      */
     public void initialize(RuntimeValue<Vertx> vertx, Set<String> names) {
-        EventLoopGroup eventLoopGroup = ((VertxInternal) vertx.getValue()).getEventLoopGroup();
+        EventLoopGroup eventLoopGroup = ((VertxInternal) vertx.getValue()).eventLoopGroup();
         sharedResources = new LettuceClientResources(eventLoopGroup);
+        mutinyVertx = io.vertx.mutiny.core.Vertx.newInstance(vertx.getValue());
 
         for (String name : names) {
             if (checkActive(name).get().value()) {
@@ -85,6 +93,23 @@ public class LettuceRecorder {
             LOGGER.infof("Opening StatefulRedisConnection for client '%s'", k);
             return factories.get(k).connect();
         });
+    }
+
+    @SuppressWarnings("unchecked")
+    public Supplier<ReactiveRedisDataSource> getReactiveDataSource(String name) {
+        return () -> reactiveDataSources.computeIfAbsent(name, k -> {
+            StatefulRedisConnection<String, String> conn = (StatefulRedisConnection<String, String>) getConnection(k).get();
+            LettuceConnectionFactory factory = factories.get(k);
+            return new LettuceReactiveRedisDataSourceImpl(mutinyVertx, conn, factory::connectAsync);
+        });
+    }
+
+    public Supplier<RedisDataSource> getBlockingDataSource(String name) {
+        return () -> {
+            Duration timeout = runtimeConfig.getValue().clients().get(name).timeout();
+            return new LettuceBlockingRedisDataSourceImpl(
+                    (LettuceReactiveRedisDataSourceImpl) getReactiveDataSource(name).get(), timeout);
+        };
     }
 
     public Supplier<ActiveResult> checkActive(final String name) {
@@ -122,6 +147,7 @@ public class LettuceRecorder {
                 }
             }
             connections.clear();
+            reactiveDataSources.clear();
 
             for (Map.Entry<String, LettuceConnectionFactory> entry : factories.entrySet()) {
                 try {
@@ -136,6 +162,7 @@ public class LettuceRecorder {
                 sharedResources.shutdown();
                 sharedResources = null;
             }
+            mutinyVertx = null;
         });
     }
 }

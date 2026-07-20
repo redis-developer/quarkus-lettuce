@@ -21,12 +21,20 @@ import io.quarkus.arc.ActiveResult;
 import io.quarkus.arc.deployment.BeanDiscoveryFinishedBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
 import io.quarkus.arc.processor.InjectionPointInfo;
+import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
+import io.quarkus.deployment.annotations.BuildSteps;
 import io.quarkus.deployment.annotations.ExecutionTime;
+import io.quarkus.deployment.annotations.Produce;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.ShutdownContextBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.ExcludeConfigBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
+import io.quarkus.deployment.pkg.builditem.ArtifactResultBuildItem;
+import io.quarkus.deployment.pkg.steps.NativeOrNativeSourcesBuild;
 import io.quarkus.redis.runtime.client.lettuce.LettuceRecorder;
+import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.vertx.deployment.VertxBuildItem;
 
 /**
@@ -40,8 +48,10 @@ import io.quarkus.vertx.deployment.VertxBuildItem;
  * And a shared {@code io.lettuce.core.resource.ClientResources} backed by Vert.x event loops.
  * <p>
  * Lettuce classes are referenced by {@link DotName} because Lettuce is an optional
- * runtime dependency, not available on the deployment module classpath.
+ * runtime dependency, not available on the deployment module classpath. All build steps are
+ * skipped entirely when {@code lettuce-core} is absent from the application classpath.
  */
+@BuildSteps(onlyIf = IsLettuceOnClasspath.class)
 public class LettuceProcessor {
 
     private static final DotName LETTUCE_REDIS_CLIENT = DotName.createSimple("io.lettuce.core.RedisClient");
@@ -61,6 +71,106 @@ public class LettuceProcessor {
             LETTUCE_REDIS_CLIENT,
             LETTUCE_STATEFUL_CONNECTION,
             LETTUCE_CLIENT_RESOURCES);
+
+    /**
+     * The Lettuce backend pulls in {@code io.lettuce.core.metrics.DefaultCommandLatencyCollector},
+     * whose method signatures reference {@code org.LatencyUtils.PauseDetector} and
+     * {@code org.HdrHistogram.Histogram}. Both are declared {@code <optional>true</optional>} by
+     * Lettuce so they are absent from the application classpath unless the user adds them. In JVM
+     * mode Lettuce silently disables latency tracking, but native-image link-at-build-time analysis
+     * rejects the unresolved references. Fail early with an actionable message instead of letting
+     * the native-image build error out on a cryptic {@code NoClassDefFoundError}.
+     */
+    @BuildStep(onlyIf = NativeOrNativeSourcesBuild.class)
+    @Produce(ArtifactResultBuildItem.class)
+    public void validateLettuceNativeDependencies(RedisBackendBuildItem backend) {
+        validateNativeDependencies(backend.isLettuce(),
+                QuarkusClassLoader.isClassPresentAtRuntime("org.LatencyUtils.PauseDetector"),
+                QuarkusClassLoader.isClassPresentAtRuntime("org.HdrHistogram.Histogram"));
+    }
+
+    /**
+     * Throws {@link ConfigurationException} if the Lettuce backend is selected and one or both of
+     * the optional Lettuce metrics dependencies are missing. No-op for the Vert.x backend or when
+     * both dependencies are present. Package-private for testing.
+     */
+    static void validateNativeDependencies(boolean lettuceBackend, boolean latencyUtilsPresent,
+            boolean hdrHistogramPresent) {
+        if (!lettuceBackend) {
+            return;
+        }
+        String error = buildNativeDependenciesError(latencyUtilsPresent, hdrHistogramPresent);
+        if (error != null) {
+            throw new ConfigurationException(error);
+        }
+    }
+
+    /**
+     * Returns the actionable error message when one or both of the optional Lettuce metrics
+     * dependencies are missing from the application classpath, or {@code null} if both are
+     * present. Package-private for testing.
+     */
+    static String buildNativeDependenciesError(boolean latencyUtilsPresent, boolean hdrHistogramPresent) {
+        if (latencyUtilsPresent && hdrHistogramPresent) {
+            return null;
+        }
+        StringBuilder missing = new StringBuilder();
+        if (!latencyUtilsPresent) {
+            missing.append("\n            <dependency>\n")
+                    .append("                <groupId>org.latencyutils</groupId>\n")
+                    .append("                <artifactId>LatencyUtils</artifactId>\n")
+                    .append("            </dependency>");
+        }
+        if (!hdrHistogramPresent) {
+            missing.append("\n            <dependency>\n")
+                    .append("                <groupId>org.hdrhistogram</groupId>\n")
+                    .append("                <artifactId>HdrHistogram</artifactId>\n")
+                    .append("            </dependency>");
+        }
+        return "The Lettuce Redis backend requires the optional 'org.latencyutils:LatencyUtils' and "
+                + "'org.hdrhistogram:HdrHistogram' dependencies on the runtime classpath when building "
+                + "a native image. Add the following to your application pom.xml:"
+                + missing;
+    }
+
+    @BuildStep
+    public void registerNativeImageHints(
+            BuildProducer<ExcludeConfigBuildItem> excludeConfig,
+            BuildProducer<RuntimeInitializedClassBuildItem> runtimeInit) {
+        // Gate on classpath presence rather than backend selection: native-image auto-detects
+        // Lettuce's shipped native-image.properties whenever lettuce-core is on the classpath,
+        // even if the selected backend is Vert.x. Without our overrides the vendor file pins
+        // classes that conflict with Quarkus's runtime-init policy for the Netty DNS resolver
+        // and references the optional LatencyUtils dependency.
+        if (!QuarkusClassLoader.isClassPresentAtRuntime("io.lettuce.core.RedisClient")) {
+            return;
+        }
+        // Lettuce ships a native-image.properties that pins DefaultCommandLatencyCollector and its
+        // NoOpPauseDetectorWrapper for build-time initialization. That transitively triggers the
+        // DefaultPauseDetectorWrapper <clinit>, which references the optional LatencyUtils dependency
+        // (org.LatencyUtils.PauseDetector). LatencyUtils is not on our classpath, so the build fails.
+        // Drop the vendor file and pin the affected classes to runtime initialization instead.
+        excludeConfig.produce(new ExcludeConfigBuildItem("io\\.lettuce\\.lettuce-core",
+                "/META-INF/native-image/io\\.lettuce/lettuce-core/native-image\\.properties"));
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem(
+                "io.lettuce.core.metrics.DefaultCommandLatencyCollector"));
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem(
+                "io.lettuce.core.metrics.DefaultCommandLatencyCollector$DefaultPauseDetectorWrapper"));
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem(
+                "io.lettuce.core.metrics.DefaultCommandLatencyCollector$NoOpPauseDetectorWrapper"));
+        // RedisClient.create() is folded at build time, which transitively materializes a
+        // DefaultClientResources.Builder holding a DnsAddressResolverGroup (whose DnsNameResolverBuilder
+        // is runtime-init by default). Defer the factory and its supporting classes to runtime init.
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.RedisClient"));
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.DefaultClientResources"));
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.DefaultClientResources$Builder"));
+        // AddressResolverGroupProvider and its inner DefaultDnsAddressResolverGroupWrapper hold a static
+        // DnsAddressResolverGroup whose dnsResolverBuilder references io.netty.resolver.dns.DnsNameResolverBuilder
+        // (runtime-init by default).
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.AddressResolverGroupProvider"));
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem(
+                "io.lettuce.core.resource.AddressResolverGroupProvider$DefaultDnsAddressResolverGroupWrapper"));
+    }
 
     @BuildStep
     public void detectLettuceUsage(BuildProducer<RequestedLettuceClientBuildItem> requestLettuce,

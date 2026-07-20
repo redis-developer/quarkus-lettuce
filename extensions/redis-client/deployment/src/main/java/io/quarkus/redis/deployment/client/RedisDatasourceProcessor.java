@@ -34,6 +34,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.codecs.Codec;
 import io.quarkus.redis.runtime.client.RedisClientRecorder;
+import io.quarkus.redis.runtime.client.lettuce.LettuceRecorder;
 import io.quarkus.tls.deployment.spi.TlsRegistryBuildItem;
 import io.quarkus.vertx.deployment.VertxBuildItem;
 
@@ -45,7 +46,9 @@ public class RedisDatasourceProcessor {
 
     @BuildStep
     public void detectUsage(BuildProducer<RequestedRedisClientBuildItem> request,
+            BuildProducer<RequestedLettuceClientBuildItem> lettuceRequest,
             RedisBuildTimeConfig buildTimeConfig,
+            RedisBackendBuildItem backend,
             BeanArchiveIndexBuildItem indexBuildItem,
             BeanDiscoveryFinishedBuildItem beans) {
         // Collect the used redis datasource, the unused clients will not be instantiated.
@@ -70,6 +73,9 @@ public class RedisDatasourceProcessor {
 
         for (String name : names) {
             request.produce(new RequestedRedisClientBuildItem(name));
+            if (backend.isLettuce()) {
+                lettuceRequest.produce(new RequestedLettuceClientBuildItem(name));
+            }
         }
     }
 
@@ -85,6 +91,7 @@ public class RedisDatasourceProcessor {
     @BuildStep
     @Record(ExecutionTime.RUNTIME_INIT)
     public void init(RedisClientRecorder recorder,
+            RedisBackendBuildItem backend,
             List<RequestedRedisClientBuildItem> clients,
             ShutdownContextBuildItem shutdown,
             BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
@@ -95,24 +102,58 @@ public class RedisDatasourceProcessor {
         if (clients.isEmpty()) {
             return;
         }
-        Set<String> names = new HashSet<>();
-        for (RequestedRedisClientBuildItem client : clients) {
-            names.add(client.name);
-        }
+        Set<String> names = clientNames(clients);
         // Inject the creation of the client when the application starts.
         recorder.initialize(vertxBuildItem.getVertx(), names, tlsRegistryBuildItem.registry(),
                 proxyRegistryBuildItem.registry());
 
-        // Create the supplier and define the beans.
-        for (String name : names) {
-            Supplier<ActiveResult> checkActive = recorder.checkActive(name);
-            // Data sources
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, RedisDataSource.class,
-                    checkActive, recorder.getBlockingDataSource(name)));
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, ReactiveRedisDataSource.class,
-                    checkActive, recorder.getReactiveDataSource(name)));
+        if (!backend.isLettuce()) {
+            // Create the supplier and define the beans.
+            for (String name : names) {
+                Supplier<ActiveResult> checkActive = recorder.checkActive(name);
+                syntheticBeans.produce(configureAndCreateSyntheticBean(name, RedisDataSource.class,
+                        checkActive, recorder.getBlockingDataSource(name)));
+                syntheticBeans.produce(configureAndCreateSyntheticBean(name, ReactiveRedisDataSource.class,
+                        checkActive, recorder.getReactiveDataSource(name)));
+            }
         }
 
         recorder.cleanup(shutdown);
+    }
+
+    /**
+     * Defines the data source beans when the Lettuce backend is selected.
+     * <p>
+     * Kept separate from {@link #init} so that {@link LettuceRecorder} is only touched when
+     * {@code lettuce-core} is on the application classpath: recording proxies reflect over every
+     * declared method of an injected recorder, and {@code LettuceRecorder} signatures reference
+     * Lettuce types.
+     */
+    @BuildStep(onlyIf = IsLettuceOnClasspath.class)
+    @Record(ExecutionTime.RUNTIME_INIT)
+    public void initLettuceDataSources(RedisClientRecorder recorder,
+            LettuceRecorder lettuceRecorder,
+            RedisBackendBuildItem backend,
+            List<RequestedRedisClientBuildItem> clients,
+            BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
+
+        if (!backend.isLettuce() || clients.isEmpty()) {
+            return;
+        }
+        for (String name : clientNames(clients)) {
+            Supplier<ActiveResult> checkActive = recorder.checkActive(name);
+            syntheticBeans.produce(configureAndCreateSyntheticBean(name, RedisDataSource.class,
+                    checkActive, lettuceRecorder.getBlockingDataSource(name)));
+            syntheticBeans.produce(configureAndCreateSyntheticBean(name, ReactiveRedisDataSource.class,
+                    checkActive, lettuceRecorder.getReactiveDataSource(name)));
+        }
+    }
+
+    private static Set<String> clientNames(List<RequestedRedisClientBuildItem> clients) {
+        Set<String> names = new HashSet<>();
+        for (RequestedRedisClientBuildItem client : clients) {
+            names.add(client.name);
+        }
+        return names;
     }
 }
