@@ -42,10 +42,10 @@ public final class LettuceHashCommandsConverters {
         if (args.isEmpty()) {
             return lettuce;
         }
-        if (args.getFirst().equals("COUNT")) {
+        if (args.get(0).equals("COUNT")) {
             lettuce.limit(Long.parseLong(args.get(1)));
         }
-        if (args.getFirst().equals("MATCH")) {
+        if (args.get(0).equals("MATCH")) {
             lettuce.match(args.get(1));
         }
         if (args.size() > 2) {
