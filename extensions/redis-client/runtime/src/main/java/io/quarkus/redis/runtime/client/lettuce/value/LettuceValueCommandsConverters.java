@@ -4,42 +4,14 @@ import java.util.Iterator;
 
 import io.quarkus.redis.datasource.value.GetExArgs;
 import io.quarkus.redis.datasource.value.SetArgs;
-import io.quarkus.redis.runtime.client.lettuce.LettuceConverterRegistry;
 
 /**
  * Converters bridging Quarkus Value Command argument types to their Lettuce equivalents.
- * <p>
- * Registration with {@link LettuceConverterRegistry} happens in this class's static initializer.
  */
 public final class LettuceValueCommandsConverters {
 
-    static {
-        registerAll();
-    }
-
     private LettuceValueCommandsConverters() {
         // Utility class
-    }
-
-    /**
-     * Ensures the Value Command converters are registered with {@link LettuceConverterRegistry}.
-     * <p>
-     * Registration normally happens in this class's static initializer; this method re-registers
-     * the converters if the registry has been cleared since (e.g. by tests), keyed on the
-     * registry's actual state. Idempotent and thread-safe: the registry uses concurrent maps and
-     * re-registering an equivalent converter is harmless.
-     */
-    public static void register() {
-        if (LettuceConverterRegistry.getArgConverter(SetArgs.class) == null) {
-            registerAll();
-        }
-    }
-
-    private static void registerAll() {
-        LettuceConverterRegistry.registerArgConverter(SetArgs.class,
-                LettuceValueCommandsConverters::toLettuceSetArgs);
-        LettuceConverterRegistry.registerArgConverter(GetExArgs.class,
-                LettuceValueCommandsConverters::toLettuceGetExArgs);
     }
 
     /**

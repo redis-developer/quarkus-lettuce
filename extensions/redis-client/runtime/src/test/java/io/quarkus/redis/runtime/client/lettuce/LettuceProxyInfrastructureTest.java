@@ -21,7 +21,7 @@ import io.vertx.mutiny.core.Vertx;
 /**
  * Integration test for the Lettuce proxy infrastructure.
  * <p>
- * Validates that {@link QuarkusRedisCodec}, {@link LettuceConverterRegistry}, and
+ * Validates that {@link QuarkusRedisCodec} and
  * {@link LettuceResult} work together against a real Redis instance.
  */
 @SuppressWarnings("resource")
@@ -139,23 +139,5 @@ class LettuceProxyInfrastructureTest {
         String getResult = LettuceResult.toBlocking(
                 defaultConnection.async().get("blocking-key"), Duration.ofSeconds(5));
         assertThat(getResult).isEqualTo("blocking-value");
-    }
-
-    @Test
-    void converterRegistryIntegration() {
-        // Register a simple converter, use it to transform a Lettuce result
-        LettuceConverterRegistry.registerResultConverter(String.class, s -> ((String) s).toUpperCase());
-        try {
-            String raw = LettuceResult.toBlocking(
-                    defaultConnection.async().set("conv-key", "hello"), Duration.ofSeconds(5));
-            assertThat(raw).isEqualTo("OK");
-
-            String value = LettuceResult.toBlocking(
-                    defaultConnection.async().get("conv-key"), Duration.ofSeconds(5));
-            String converted = LettuceConverterRegistry.convertResult(value);
-            assertThat(converted).isEqualTo("HELLO");
-        } finally {
-            LettuceConverterRegistry.clear();
-        }
     }
 }
