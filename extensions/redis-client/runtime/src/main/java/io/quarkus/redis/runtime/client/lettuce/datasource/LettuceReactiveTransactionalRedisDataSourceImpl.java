@@ -29,6 +29,8 @@ import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSo
 import io.quarkus.redis.datasource.value.ReactiveTransactionalValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceReactiveKeyCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.list.LettuceReactiveListCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.list.LettuceReactiveTransactionalListCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveValueCommandsImpl;
 import io.smallrye.mutiny.Uni;
 import io.vertx.redis.client.Command;
@@ -131,7 +133,11 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalListCommands<K, V> list(Class<K> redisKeyType, Class<V> memberType) {
-        throw groupNotImplemented("list");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(memberType, "memberType");
+        LettuceReactiveListCommandsImpl<K, V> reactiveList = (LettuceReactiveListCommandsImpl<K, V>) reactive
+                .list(redisKeyType, memberType);
+        return new LettuceReactiveTransactionalListCommandsImpl<>(this, reactiveList, tx);
     }
 
     @Override
