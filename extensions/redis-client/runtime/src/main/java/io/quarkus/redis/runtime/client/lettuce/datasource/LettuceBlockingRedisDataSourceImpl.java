@@ -28,6 +28,7 @@ import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.list.ListCommands;
 import io.quarkus.redis.datasource.pubsub.PubSubCommands;
 import io.quarkus.redis.datasource.search.SearchCommands;
+import io.quarkus.redis.datasource.set.ReactiveSetCommands;
 import io.quarkus.redis.datasource.set.SetCommands;
 import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
 import io.quarkus.redis.datasource.stream.StreamCommands;
@@ -41,6 +42,7 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceBlockingKeyCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.set.LettuceBlockingSetCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceBlockingValueCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingTransactionalRedisDataSourceImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
@@ -312,12 +314,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, V> SetCommands<K, V> set(Class<K> redisKeyType, Class<V> memberType) {
-        throw groupNotImplemented("set");
+        ReactiveSetCommands<K, V> r = reactive.set(redisKeyType, memberType);
+        return new LettuceBlockingSetCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> SetCommands<K, V> set(TypeReference<K> redisKeyType, TypeReference<V> memberType) {
-        throw groupNotImplemented("set");
+        ReactiveSetCommands<K, V> r = reactive.set(redisKeyType, memberType);
+        return new LettuceBlockingSetCommandsImpl<>(this, r, timeout);
     }
 
     @Override
