@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
-import io.lettuce.core.Limit;
 import io.lettuce.core.RedisFuture;
 import io.lettuce.core.ZPopArgs;
 import io.lettuce.core.api.StatefulRedisConnection;
@@ -34,7 +33,6 @@ import io.quarkus.redis.datasource.sortedset.ZAggregateArgs;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
 import io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
-import io.quarkus.redis.runtime.client.lettuce.sortedset.LettuceSortedSetCommandsConverters.RangeOptions;
 import io.smallrye.mutiny.Uni;
 
 /**
@@ -46,35 +44,6 @@ import io.smallrye.mutiny.Uni;
  * emit the range boundaries in the opposite order, so a reversed range is handed over with its
  * boundaries swapped wherever needed to reproduce the exact bytes the Vert.x backend sends — see
  * {@link LettuceSortedSetCommandsConverters#toLettuceScoreRange}.
- * <p>
- * Deviations from the Vert.x backend:
- * <ul>
- * <li><strong>Lexicographical commands require a {@code String} member type.</strong> Lettuce takes the
- * boundaries of a lexicographical range as member values and encodes them with the connection codec's
- * value codec, which only reproduces the raw boundary bytes the Vert.x backend sends when the member
- * type is {@code String}. {@code ZLEXCOUNT}, {@code ZRANGEBYLEX}, {@code ZREMRANGEBYLEX} and
- * {@code ZRANGESTORE ... BYLEX} therefore reject any other member type with an
- * {@link IllegalArgumentException} pointing at {@code quarkus.redis.backend=vertx}, see
- * {@link #requireStringMembersFor}.</li>
- * <li><strong>{@code limit} is rejected on the index-based {@code ZRANGE} / {@code ZRANGESTORE}.</strong>
- * Redis only accepts {@code LIMIT} together with {@code BYSCORE} or {@code BYLEX}, and Lettuce's
- * index-based methods take no {@link Limit}. The Vert.x backend forwards the option and surfaces the
- * server's error; this backend fails the {@code Uni} on subscription instead, see
- * {@link #limitNotSupported}.</li>
- * <li>The multi-key {@code ZDIFF*}, {@code ZINTER*} commands reject fewer than two keys, as the Vert.x
- * backend does, and — like it — surface that failure on subscription rather than throwing from the call
- * itself, see {@link #requireAtLeastTwoKeys}. {@code ZUNION*} has no such restriction, again matching
- * the Vert.x backend.</li>
- * <li>Scores equal to {@link Double#MIN_VALUE} or {@link Double#MAX_VALUE} are sent as {@code -inf} and
- * {@code +inf}, as the Vert.x backend does, see {@link #normalizeScore}.</li>
- * <li>A reversed {@code ZRANGESTORE ... BYLEX} whose range has an unbounded boundary sends a range that
- * is empty by construction instead of the Vert.x backend's bytes, which Lettuce cannot reproduce. The
- * observable result is the same — such a query selects nothing under the Vert.x backend either — see
- * {@link LettuceSortedSetCommandsConverters#toLettuceLexRange}.</li>
- * <li>Validation uses the parameter names of the Vert.x backend, which for some commands differ from the
- * public API's: members are validated as {@code value} / {@code values}.</li>
- * <li>A {@code nil} list reply decodes to an empty list, see {@link #orEmpty}.</li>
- * </ul>
  *
  * @param <K> the key type
  * @param <V> the type of the scored member
@@ -82,16 +51,11 @@ import io.smallrye.mutiny.Uni;
 public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveSortedSetCommands<K, V> {
 
-    private static final ZAddArgs DEFAULT_ADD_ARGS = new ZAddArgs();
-    private static final ZAggregateArgs DEFAULT_AGGREGATE_ARGS = new ZAggregateArgs();
-    private static final ZRangeArgs DEFAULT_RANGE_ARGS = new ZRangeArgs();
-    private static final SortArgs DEFAULT_SORT_ARGS = new SortArgs();
+    private static final ZAggregateArgs DEFAULT_INSTANCE_AGG = new ZAggregateArgs();
+    private static final ZRangeArgs DEFAULT_INSTANCE_RANGE = new ZRangeArgs();
 
     private final ReactiveRedisDataSource dataSource;
 
-    /**
-     * The member type, kept to enforce the {@code String} requirement of the lexicographical commands.
-     */
     private final Type valueType;
 
     private final RedisSortedSetAsyncCommands<K, V> sortedSet = async;
@@ -115,23 +79,23 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Boolean> zadd(K key, double score, V value) {
-        return zadd(key, DEFAULT_ADD_ARGS, score, value);
+        return zadd(key, new ZAddArgs(), score, value);
     }
 
     @Override
     public Uni<Integer> zadd(K key, Map<V, Double> items) {
-        return zadd(key, DEFAULT_ADD_ARGS, items);
+        return zadd(key, new ZAddArgs(), items);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Integer> zadd(K key, ScoredValue<V>... items) {
-        return zadd(key, DEFAULT_ADD_ARGS, items);
+        return zadd(key, new ZAddArgs(), items);
     }
 
     @Override
     public Uni<Boolean> zadd(K key, ZAddArgs args, double score, V value) {
-        return LettuceResult.toUni(_zadd(key, args, score, value)).map(LettuceReactiveSortedSetCommandsImpl::addedOne);
+        return LettuceResult.toUni(_zadd(key, args, score, value)).map(LettuceReactiveSortedSetCommandsImpl::longAsBoolean);
     }
 
     Supplier<RedisFuture<Long>> _zadd(K key, ZAddArgs args, double score, V value) {
@@ -144,7 +108,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     }
 
     Supplier<RedisFuture<Long>> _zadd(K key, double score, V value) {
-        return _zadd(key, DEFAULT_ADD_ARGS, score, value);
+        return _zadd(key, new ZAddArgs(), score, value);
     }
 
     @Override
@@ -156,18 +120,21 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(items, "items");
         nonNull(args, "args");
+
         io.lettuce.core.ZAddArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(args);
         List<io.lettuce.core.ScoredValue<V>> entries = new ArrayList<>(items.size());
         for (Map.Entry<V, Double> entry : items.entrySet()) {
             nonNull(entry.getValue(), "value from items");
             entries.add(io.lettuce.core.ScoredValue.just(normalizeScore(entry.getValue()), entry.getKey()));
         }
-        io.lettuce.core.ScoredValue<V>[] array = toArray(entries);
+
+        @SuppressWarnings("unchecked")
+        io.lettuce.core.ScoredValue<V>[] array = entries.toArray(new io.lettuce.core.ScoredValue[0]);
         return () -> sortedSet.zadd(key, lettuceArgs, array);
     }
 
     Supplier<RedisFuture<Long>> _zadd(K key, Map<V, Double> items) {
-        return _zadd(key, DEFAULT_ADD_ARGS, items);
+        return _zadd(key, new ZAddArgs(), items);
     }
 
     @SafeVarargs
@@ -181,24 +148,27 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(items, "items");
         nonNull(args, "args");
+
         io.lettuce.core.ZAddArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(args);
         List<io.lettuce.core.ScoredValue<V>> entries = new ArrayList<>(items.length);
         for (ScoredValue<V> item : items) {
             nonNull(item.value, "value from scored value");
             entries.add(io.lettuce.core.ScoredValue.just(normalizeScore(item.score), item.value));
         }
-        io.lettuce.core.ScoredValue<V>[] array = toArray(entries);
+
+        @SuppressWarnings("unchecked")
+        io.lettuce.core.ScoredValue<V>[] array = entries.toArray(new io.lettuce.core.ScoredValue[0]);
         return () -> sortedSet.zadd(key, lettuceArgs, array);
     }
 
     @SafeVarargs
     final Supplier<RedisFuture<Long>> _zadd(K key, ScoredValue<V>... items) {
-        return _zadd(key, DEFAULT_ADD_ARGS, items);
+        return _zadd(key, new ZAddArgs(), items);
     }
 
     @Override
     public Uni<Double> zaddincr(K key, double score, V value) {
-        return zaddincr(key, DEFAULT_ADD_ARGS, score, value);
+        return zaddincr(key, new ZAddArgs(), score, value);
     }
 
     @Override
@@ -216,12 +186,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     }
 
     Supplier<RedisFuture<Double>> _zaddincr(K key, double score, V value) {
-        return _zaddincr(key, DEFAULT_ADD_ARGS, score, value);
+        return _zaddincr(key, new ZAddArgs(), score, value);
     }
 
     @Override
     public Uni<Long> zcard(K key) {
-        return LettuceResult.toUni(_zcard(key)).map(LettuceReactiveSortedSetCommandsImpl::orZero);
+        return LettuceResult.toUni(_zcard(key)).map(LettuceReactiveSortedSetCommandsImpl::longOrZero);
     }
 
     Supplier<RedisFuture<Long>> _zcard(K key) {
@@ -237,21 +207,26 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     Supplier<RedisFuture<Long>> _zcount(K key, ScoreRange<Double> range) {
         nonNull(key, "key");
         nonNull(range, "range");
-        io.lettuce.core.Range<Number> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceScoreRange(range, false);
+        io.lettuce.core.Range<Number> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceScoreRange(range);
         return () -> sortedSet.zcount(key, lettuceRange);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<V>> zdiff(K... keys) {
-        return LettuceResult.toUni(_zdiff(keys)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return LettuceResult.toUni(_zdiff(keys)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
     }
 
     @SafeVarargs
     final Supplier<RedisFuture<List<V>>> _zdiff(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> sortedSet.zdiff(keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("Need at least two keys");
+            };
+        }
+        return () -> sortedSet.zdiff(keys);
     }
 
     @SafeVarargs
@@ -264,7 +239,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     final Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<V>>>> _zdiffWithScores(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> sortedSet.zdiffWithScores(keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("Need at least two keys");
+            };
+        }
+        return () -> sortedSet.zdiffWithScores(keys);
     }
 
     @SafeVarargs
@@ -278,7 +258,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(destination, "destination");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> sortedSet.zdiffstore(destination, keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("Need at least two keys");
+            };
+        }
+        return () -> sortedSet.zdiffstore(destination, keys);
     }
 
     @Override
@@ -296,7 +281,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<List<V>> zinter(ZAggregateArgs args, K... keys) {
-        return LettuceResult.toUni(_zinter(args, keys)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return LettuceResult.toUni(_zinter(args, keys)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
     }
 
     @SafeVarargs
@@ -304,19 +289,24 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(args, "args");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("Need at least two keys");
+            };
+        }
         io.lettuce.core.ZAggregateArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAggregateArgs(args);
-        return requireAtLeastTwoKeys(keys.length, () -> sortedSet.zinter(lettuceArgs, keys));
+        return () -> sortedSet.zinter(lettuceArgs, keys);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<V>> zinter(K... keys) {
-        return zinter(DEFAULT_AGGREGATE_ARGS, keys);
+        return zinter(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
     final Supplier<RedisFuture<List<V>>> _zinter(K... keys) {
-        return _zinter(DEFAULT_AGGREGATE_ARGS, keys);
+        return _zinter(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
@@ -332,20 +322,25 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(arguments, "arguments");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("Need at least two keys");
+            };
+        }
         io.lettuce.core.ZAggregateArgs lettuceArgs = LettuceSortedSetCommandsConverters
                 .toLettuceZAggregateArgs(arguments);
-        return requireAtLeastTwoKeys(keys.length, () -> sortedSet.zinterWithScores(lettuceArgs, keys));
+        return () -> sortedSet.zinterWithScores(lettuceArgs, keys);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> zinterWithScores(K... keys) {
-        return zinterWithScores(DEFAULT_AGGREGATE_ARGS, keys);
+        return zinterWithScores(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
     final Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<V>>>> _zinterWithScores(K... keys) {
-        return _zinterWithScores(DEFAULT_AGGREGATE_ARGS, keys);
+        return _zinterWithScores(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
@@ -358,7 +353,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     final Supplier<RedisFuture<Long>> _zintercard(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> sortedSet.zintercard(keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("Need at least two keys");
+            };
+        }
+        return () -> sortedSet.zintercard(keys);
     }
 
     @SafeVarargs
@@ -372,8 +372,9 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            // The Vert.x backend returns its failure before validating `limit`; match that order.
-            return atLeastTwoKeysFailure();
+            return () -> {
+                throw new IllegalArgumentException("Need at least two keys");
+            };
         }
         positive(limit, "limit");
         return () -> sortedSet.zintercard(limit, keys);
@@ -391,19 +392,24 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         doesNotContainNull(keys, "keys");
         nonNull(arguments, "arguments");
         nonNull(destination, "destination");
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("Need at least two keys");
+            };
+        }
         io.lettuce.core.ZStoreArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZStoreArgs(arguments);
-        return requireAtLeastTwoKeys(keys.length, () -> sortedSet.zinterstore(destination, lettuceArgs, keys));
+        return () -> sortedSet.zinterstore(destination, lettuceArgs, keys);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Long> zinterstore(K destination, K... keys) {
-        return zinterstore(destination, DEFAULT_AGGREGATE_ARGS, keys);
+        return zinterstore(destination, DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
     final Supplier<RedisFuture<Long>> _zinterstore(K destination, K... keys) {
-        return _zinterstore(destination, DEFAULT_AGGREGATE_ARGS, keys);
+        return _zinterstore(destination, DEFAULT_INSTANCE_AGG, keys);
     }
 
     @Override
@@ -415,8 +421,9 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(range, "range");
         requireStringMembersFor("zlexcount");
-        io.lettuce.core.Range<V> lettuceRange = asMemberRange(
-                LettuceSortedSetCommandsConverters.toLettuceLexRange(range, false));
+        @SuppressWarnings("unchecked")
+        io.lettuce.core.Range<V> lettuceRange = (io.lettuce.core.Range<V>) LettuceSortedSetCommandsConverters
+                .toLettuceLexRange(range);
         return () -> sortedSet.zlexcount(key, lettuceRange);
     }
 
@@ -545,7 +552,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<List<Double>> zmscore(K key, V... values) {
-        return LettuceResult.toUni(_zmscore(key, values)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return LettuceResult.toUni(_zmscore(key, values)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
     }
 
     @SafeVarargs
@@ -609,7 +616,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<V>> zrandmember(K key, int count) {
-        return LettuceResult.toUni(_zrandmember(key, count)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return LettuceResult.toUni(_zrandmember(key, count)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
     }
 
     Supplier<RedisFuture<List<V>>> _zrandmember(K key, int count) {
@@ -676,24 +683,18 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<V>> zrange(K key, long start, long stop, ZRangeArgs args) {
-        return LettuceResult.toUni(_zrange(key, start, stop, args)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return LettuceResult.toUni(_zrange(key, start, stop, args)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
     }
 
     Supplier<RedisFuture<List<V>>> _zrange(K key, long start, long stop, ZRangeArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
-        RangeOptions options = LettuceSortedSetCommandsConverters.toLettuceRangeOptions(args);
-        if (options.hasLimit()) {
-            return limitNotSupported("zrange");
-        }
-        if (options.isReverse()) {
-            return () -> sortedSet.zrevrange(key, start, stop);
-        }
-        return () -> sortedSet.zrange(key, start, stop);
+        //TODO requires lettuce#3681
+        throw new UnsupportedOperationException("Operation not supported");
     }
 
     Supplier<RedisFuture<List<V>>> _zrange(K key, long start, long stop) {
-        return _zrange(key, start, stop, DEFAULT_RANGE_ARGS);
+        return _zrange(key, start, stop, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
@@ -706,34 +707,28 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
             ZRangeArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
-        RangeOptions options = LettuceSortedSetCommandsConverters.toLettuceRangeOptions(args);
-        if (options.hasLimit()) {
-            return limitNotSupported("zrangeWithScores");
-        }
-        if (options.isReverse()) {
-            return () -> sortedSet.zrevrangeWithScores(key, start, stop);
-        }
-        return () -> sortedSet.zrangeWithScores(key, start, stop);
+        //TODO requires lettuce#3681
+        throw new UnsupportedOperationException("Operation not supported");
     }
 
     Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<V>>>> _zrangeWithScores(K key, long start, long stop) {
-        return _zrangeWithScores(key, start, stop, DEFAULT_RANGE_ARGS);
+        return _zrangeWithScores(key, start, stop, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<List<V>> zrange(K key, long start, long stop) {
-        return zrange(key, start, stop, DEFAULT_RANGE_ARGS);
+        return zrange(key, start, stop, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<List<ScoredValue<V>>> zrangeWithScores(K key, long start, long stop) {
-        return zrangeWithScores(key, start, stop, DEFAULT_RANGE_ARGS);
+        return zrangeWithScores(key, start, stop, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<List<V>> zrangebylex(K key, Range<String> range, ZRangeArgs args) {
         return LettuceResult.toUni(_zrangebylex(key, range, args))
-                .map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
+                .map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
     }
 
     Supplier<RedisFuture<List<V>>> _zrangebylex(K key, Range<String> range, ZRangeArgs args) {
@@ -741,52 +736,35 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(args, "args");
         nonNull(range, "range");
         requireStringMembersFor("zrangebylex");
-        RangeOptions options = LettuceSortedSetCommandsConverters.toLettuceRangeOptions(args);
-        // ZREVRANGEBYLEX already emits the upper boundary first, exactly as the Vert.x backend does for a
-        // reversed lexicographical read, so the boundaries are handed over unswapped.
-        io.lettuce.core.Range<V> lettuceRange = asMemberRange(
-                LettuceSortedSetCommandsConverters.toLettuceLexRange(range, false));
-        Limit limit = options.limit();
-        if (options.isReverse()) {
-            return () -> sortedSet.zrevrangebylex(key, lettuceRange, limit);
-        }
-        return () -> sortedSet.zrangebylex(key, lettuceRange, limit);
+        //TODO requires lettuce#3681
+        throw new UnsupportedOperationException("Operation not supported");
     }
 
     Supplier<RedisFuture<List<V>>> _zrangebylex(K key, Range<String> range) {
-        return _zrangebylex(key, range, DEFAULT_RANGE_ARGS);
+        return _zrangebylex(key, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<List<V>> zrangebylex(K key, Range<String> range) {
-        return zrangebylex(key, range, DEFAULT_RANGE_ARGS);
+        return zrangebylex(key, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<List<V>> zrangebyscore(K key, ScoreRange<Double> range, ZRangeArgs args) {
         return LettuceResult.toUni(_zrangebyscore(key, range, args))
-                .map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
+                .map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
     }
 
     Supplier<RedisFuture<List<V>>> _zrangebyscore(K key, ScoreRange<Double> range, ZRangeArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
         nonNull(range, "range");
-        RangeOptions options = LettuceSortedSetCommandsConverters.toLettuceRangeOptions(args);
-        // The Vert.x backend emits a reversed BYSCORE read in declaration order — the caller supplies
-        // (max, min) — except for a fully unbounded range, whose boundaries it switches itself. Lettuce
-        // already emits the upper boundary first, so swap exactly when Vert.x does not switch.
-        io.lettuce.core.Range<Number> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceScoreRange(range,
-                options.isReverse() && !range.isUnbounded());
-        Limit limit = options.limit();
-        if (options.isReverse()) {
-            return () -> sortedSet.zrevrangebyscore(key, lettuceRange, limit);
-        }
-        return () -> sortedSet.zrangebyscore(key, lettuceRange, limit);
+        //TODO requires lettuce#3681
+        throw new UnsupportedOperationException("Operation not supported");
     }
 
     Supplier<RedisFuture<List<V>>> _zrangebyscore(K key, ScoreRange<Double> range) {
-        return _zrangebyscore(key, range, DEFAULT_RANGE_ARGS);
+        return _zrangebyscore(key, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
@@ -800,30 +778,23 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(args, "args");
         nonNull(range, "range");
-        RangeOptions options = LettuceSortedSetCommandsConverters.toLettuceRangeOptions(args);
-        // See _zrangebyscore for why a fully unbounded reversed range is not swapped.
-        io.lettuce.core.Range<Number> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceScoreRange(range,
-                options.isReverse() && !range.isUnbounded());
-        Limit limit = options.limit();
-        if (options.isReverse()) {
-            return () -> sortedSet.zrevrangebyscoreWithScores(key, lettuceRange, limit);
-        }
-        return () -> sortedSet.zrangebyscoreWithScores(key, lettuceRange, limit);
+        //TODO requires lettuce#3681
+        throw new UnsupportedOperationException("Operation not supported");
     }
 
     Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<V>>>> _zrangebyscoreWithScores(K key,
             ScoreRange<Double> range) {
-        return _zrangebyscoreWithScores(key, range, DEFAULT_RANGE_ARGS);
+        return _zrangebyscoreWithScores(key, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<List<V>> zrangebyscore(K key, ScoreRange<Double> range) {
-        return zrangebyscore(key, range, DEFAULT_RANGE_ARGS);
+        return zrangebyscore(key, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<List<ScoredValue<V>>> zrangebyscoreWithScores(K key, ScoreRange<Double> range) {
-        return zrangebyscoreWithScores(key, range, DEFAULT_RANGE_ARGS);
+        return zrangebyscoreWithScores(key, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
@@ -835,24 +806,17 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(dst, "dst");
         nonNull(src, "src");
         nonNull(args, "args");
-        RangeOptions options = LettuceSortedSetCommandsConverters.toLettuceRangeOptions(args);
-        if (options.hasLimit()) {
-            return limitNotSupported("zrangestore");
-        }
-        io.lettuce.core.Range<Long> indexes = io.lettuce.core.Range.create(min, max);
-        if (options.isReverse()) {
-            return () -> sortedSet.zrevrangestore(dst, src, indexes);
-        }
-        return () -> sortedSet.zrangestore(dst, src, indexes);
+        //TODO requires lettuce#3681
+        throw new UnsupportedOperationException("Operation not supported");
     }
 
     Supplier<RedisFuture<Long>> _zrangestore(K dst, K src, long min, long max) {
-        return _zrangestore(dst, src, min, max, DEFAULT_RANGE_ARGS);
+        return _zrangestore(dst, src, min, max, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<Long> zrangestore(K dst, K src, long min, long max) {
-        return zrangestore(dst, src, min, max, DEFAULT_RANGE_ARGS);
+        return zrangestore(dst, src, min, max, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
@@ -866,26 +830,17 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(range, "range");
         nonNull(args, "args");
         requireStringMembersFor("zrangestorebylex");
-        RangeOptions options = LettuceSortedSetCommandsConverters.toLettuceRangeOptions(args);
-        // Unlike its reversed read counterpart, the Vert.x backend does not switch the boundaries of a
-        // reversed ZRANGESTORE ... BYLEX, so they are swapped here to compensate for Lettuce emitting
-        // the upper boundary first.
-        io.lettuce.core.Range<V> lettuceRange = asMemberRange(
-                LettuceSortedSetCommandsConverters.toLettuceLexRange(range, options.isReverse()));
-        Limit limit = options.limit();
-        if (options.isReverse()) {
-            return () -> sortedSet.zrevrangestorebylex(dst, src, lettuceRange, limit);
-        }
-        return () -> sortedSet.zrangestorebylex(dst, src, lettuceRange, limit);
+        //TODO requires lettuce#3681
+        throw new UnsupportedOperationException("Operation not supported");
     }
 
     Supplier<RedisFuture<Long>> _zrangestorebylex(K dst, K src, Range<String> range) {
-        return _zrangestorebylex(dst, src, range, DEFAULT_RANGE_ARGS);
+        return _zrangestorebylex(dst, src, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<Long> zrangestorebylex(K dst, K src, Range<String> range) {
-        return zrangestorebylex(dst, src, range, DEFAULT_RANGE_ARGS);
+        return zrangestorebylex(dst, src, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
@@ -898,23 +853,17 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(src, "src");
         nonNull(range, "range");
         nonNull(args, "args");
-        RangeOptions options = LettuceSortedSetCommandsConverters.toLettuceRangeOptions(args);
-        io.lettuce.core.Range<Number> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceScoreRange(range,
-                options.isReverse());
-        Limit limit = options.limit();
-        if (options.isReverse()) {
-            return () -> sortedSet.zrevrangestorebyscore(dst, src, lettuceRange, limit);
-        }
-        return () -> sortedSet.zrangestorebyscore(dst, src, lettuceRange, limit);
+        //TODO requires lettuce#3681
+        throw new UnsupportedOperationException("Operation not supported");
     }
 
     Supplier<RedisFuture<Long>> _zrangestorebyscore(K dst, K src, ScoreRange<Double> range) {
-        return _zrangestorebyscore(dst, src, range, DEFAULT_RANGE_ARGS);
+        return _zrangestorebyscore(dst, src, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<Long> zrangestorebyscore(K dst, K src, ScoreRange<Double> range) {
-        return zrangestorebyscore(dst, src, range, DEFAULT_RANGE_ARGS);
+        return zrangestorebyscore(dst, src, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
@@ -951,8 +900,9 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(range, "range");
         requireStringMembersFor("zremrangebylex");
-        io.lettuce.core.Range<V> lettuceRange = asMemberRange(
-                LettuceSortedSetCommandsConverters.toLettuceLexRange(range, false));
+        @SuppressWarnings("unchecked")
+        io.lettuce.core.Range<V> lettuceRange = (io.lettuce.core.Range<V>) LettuceSortedSetCommandsConverters
+                .toLettuceLexRange(range);
         return () -> sortedSet.zremrangebylex(key, lettuceRange);
     }
 
@@ -974,7 +924,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     Supplier<RedisFuture<Long>> _zremrangebyscore(K key, ScoreRange<Double> range) {
         nonNull(key, "key");
         nonNull(range, "range");
-        io.lettuce.core.Range<Number> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceScoreRange(range, false);
+        io.lettuce.core.Range<Number> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceScoreRange(range);
         return () -> sortedSet.zremrangebyscore(key, lettuceRange);
     }
 
@@ -1017,7 +967,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<List<V>> zunion(ZAggregateArgs args, K... keys) {
-        return LettuceResult.toUni(_zunion(args, keys)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return LettuceResult.toUni(_zunion(args, keys)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
     }
 
     @SafeVarargs
@@ -1032,23 +982,23 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<List<V>> zunion(K... keys) {
-        return zunion(DEFAULT_AGGREGATE_ARGS, keys);
+        return zunion(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
     final Supplier<RedisFuture<List<V>>> _zunion(K... keys) {
-        return _zunion(DEFAULT_AGGREGATE_ARGS, keys);
+        return _zunion(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> zunionWithScores(K... keys) {
-        return zunionWithScores(DEFAULT_AGGREGATE_ARGS, keys);
+        return zunionWithScores(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
     final Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<V>>>> _zunionWithScores(K... keys) {
-        return _zunionWithScores(DEFAULT_AGGREGATE_ARGS, keys);
+        return _zunionWithScores(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
@@ -1086,22 +1036,22 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<Long> zunionstore(K destination, K... keys) {
-        return zunionstore(destination, DEFAULT_AGGREGATE_ARGS, keys);
+        return zunionstore(destination, DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
     final Supplier<RedisFuture<Long>> _zunionstore(K destination, K... keys) {
-        return _zunionstore(destination, DEFAULT_AGGREGATE_ARGS, keys);
+        return _zunionstore(destination, DEFAULT_INSTANCE_AGG, keys);
     }
 
     @Override
     public Uni<List<V>> sort(K key) {
-        return sort(key, DEFAULT_SORT_ARGS);
+        return sort(key, new SortArgs());
     }
 
     @Override
     public Uni<List<V>> sort(K key, SortArgs sortArguments) {
-        return LettuceResult.toUni(_sort(key, sortArguments)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return LettuceResult.toUni(_sort(key, sortArguments)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
     }
 
     Supplier<RedisFuture<List<V>>> _sort(K key, SortArgs sortArguments) {
@@ -1126,12 +1076,9 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Long> sortAndStore(K key, K destination) {
-        return sortAndStore(key, destination, DEFAULT_SORT_ARGS);
+        return sortAndStore(key, destination, new SortArgs());
     }
 
-    /**
-     * Rejects a lexicographical command when the member type is not {@code String}, see the class Javadoc.
-     */
     private void requireStringMembersFor(String command) {
         if (!String.class.equals(valueType)) {
             throw new IllegalArgumentException("The Lettuce backend can only run `" + command
@@ -1142,64 +1089,24 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         }
     }
 
-    /**
-     * Retypes a lexicographical range to the member type. The cast is safe because every caller has passed
-     * {@link #requireStringMembersFor} first, which rejects a member type other than {@code String}.
-     */
-    @SuppressWarnings("unchecked")
-    private io.lettuce.core.Range<V> asMemberRange(io.lettuce.core.Range<String> range) {
-        return (io.lettuce.core.Range<V>) (io.lettuce.core.Range<?>) range;
-    }
-
-    /**
-     * Guards a multi-key command with the Vert.x backend's "at least 2 keys" rule. That backend fails
-     * lazily — the caller gets a failed {@code Uni}, not an exception — so the check runs inside the
-     * returned supplier.
-     */
-    private static <T> Supplier<RedisFuture<T>> requireAtLeastTwoKeys(int keyCount, Supplier<RedisFuture<T>> command) {
-        return keyCount < 2 ? atLeastTwoKeysFailure() : command;
-    }
-
-    private static <T> Supplier<RedisFuture<T>> atLeastTwoKeysFailure() {
-        return () -> {
-            throw new IllegalArgumentException("Need at least two keys");
-        };
-    }
-
-    /**
-     * Rejects a {@code limit} the index-based commands cannot carry, on subscription, see the class Javadoc.
-     */
-    private static <T> Supplier<RedisFuture<T>> limitNotSupported(String command) {
-        return () -> {
-            throw new IllegalArgumentException("`args` must not carry a `limit` for `" + command
-                    + "`: LIMIT is only supported in combination with BYSCORE or BYLEX");
-        };
-    }
-
-    /**
-     * Maps the {@code ZADD} reply of a single-member add to a boolean, as the Vert.x backend does.
-     */
-    static Boolean addedOne(Long added) {
+    static Boolean longAsBoolean(Long added) {
         return added != null && added == 1L;
     }
 
-    /**
-     * A {@code nil} {@code ZCARD} reply decodes to zero, as in the Vert.x backend.
-     */
-    static Long orZero(Long value) {
-        return value == null ? 0L : value;
+    static Long longOrZero(Long value) {
+        if (value == null) {
+            return 0L;
+        }
+        return value;
     }
 
-    /**
-     * A {@code nil} multi-bulk reply decodes to an empty list, as in the Vert.x backend.
-     */
-    static <T> List<T> orEmpty(List<T> list) {
-        return list == null ? Collections.emptyList() : list;
+    static <T> List<T> listOrEmpty(List<T> list) {
+        if (list == null) {
+            return List.of();
+        }
+        return list;
     }
 
-    /**
-     * Converts one Lettuce scored value; a missing value decodes to {@code null}.
-     */
     static <V> ScoredValue<V> toScoredValue(io.lettuce.core.ScoredValue<V> value) {
         if (value == null || !value.hasValue()) {
             return null;
@@ -1207,18 +1114,17 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         return ScoredValue.of(value.getValue(), value.getScore());
     }
 
-    /**
-     * As {@link #toScoredValue}, but a missing value decodes to {@link ScoredValue#empty()} — the shape
-     * {@code ZPOPMIN}, {@code ZPOPMAX} and {@code ZRANDMEMBER ... WITHSCORES} return in the Vert.x backend.
-     */
     static <V> ScoredValue<V> poppedOrEmpty(io.lettuce.core.ScoredValue<V> value) {
         ScoredValue<V> converted = toScoredValue(value);
-        return converted == null ? ScoredValue.empty() : converted;
+        if (converted == null) {
+            return ScoredValue.empty();
+        }
+        return converted;
     }
 
     static <V> List<ScoredValue<V>> toScoredValues(List<io.lettuce.core.ScoredValue<V>> values) {
         if (values == null) {
-            return Collections.emptyList();
+            return List.of();
         }
         List<ScoredValue<V>> result = new ArrayList<>(values.size());
         for (io.lettuce.core.ScoredValue<V> value : values) {
@@ -1227,10 +1133,6 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         return result;
     }
 
-    /**
-     * Drops the key Lettuce reports alongside a {@code ZMPOP} / {@code BZMPOP} result — the Quarkus API
-     * exposes the popped member only. An exhausted or timed-out pop decodes to {@code null}.
-     */
     static <K, V> ScoredValue<V> popped(io.lettuce.core.KeyValue<K, io.lettuce.core.ScoredValue<V>> result) {
         if (result == null || !result.hasValue()) {
             return null;
@@ -1238,9 +1140,6 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         return toScoredValue(result.getValue());
     }
 
-    /**
-     * As {@link #popped}, for the counted variants, which return an empty list when nothing was popped.
-     */
     static <K, V> List<ScoredValue<V>> poppedList(
             io.lettuce.core.KeyValue<K, List<io.lettuce.core.ScoredValue<V>>> result) {
         if (result == null || !result.hasValue()) {
@@ -1249,9 +1148,6 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         return toScoredValues(result.getValue());
     }
 
-    /**
-     * Converts the {@code BZPOPMIN} / {@code BZPOPMAX} reply; a timeout decodes to {@code null}.
-     */
     static <K, V> KeyValue<K, ScoredValue<V>> toKeyValue(
             io.lettuce.core.KeyValue<K, io.lettuce.core.ScoredValue<V>> result) {
         if (result == null || !result.hasValue()) {
@@ -1260,11 +1156,6 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         return KeyValue.of(result.getKey(), toScoredValue(result.getValue()));
     }
 
-    /**
-     * Reproduces the Vert.x backend's score formatting: it sends {@link Double#MIN_VALUE} as {@code -inf}
-     * and {@link Double#MAX_VALUE} as {@code +inf}, on top of the infinities Lettuce already formats that
-     * way.
-     */
     static double normalizeScore(double score) {
         if (score == Double.MIN_VALUE) {
             return Double.NEGATIVE_INFINITY;
@@ -1273,14 +1164,5 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
             return Double.POSITIVE_INFINITY;
         }
         return score;
-    }
-
-    /**
-     * Lettuce's {@code ZADD} takes its members as a vararg array. The cast is safe: the array is created
-     * here, holds only the elements of {@code entries}, and never escapes to a caller that could widen it.
-     */
-    @SuppressWarnings("unchecked")
-    private static <V> io.lettuce.core.ScoredValue<V>[] toArray(List<io.lettuce.core.ScoredValue<V>> entries) {
-        return entries.toArray(new io.lettuce.core.ScoredValue[0]);
     }
 }
