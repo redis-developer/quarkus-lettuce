@@ -15,15 +15,6 @@ import io.quarkus.redis.datasource.sortedset.ZAggregateArgs;
  */
 public final class LettuceSortedSetCommandsConverters {
 
-    /**
-     * A range no member can fall into: nothing sorts below the empty string, so an upper boundary
-     * excluding it matches no member.
-     *
-     * @see toLettuceLexRange
-     */
-    private static final io.lettuce.core.Range<String> EMPTY_LEX_RANGE = io.lettuce.core.Range.from(
-            io.lettuce.core.Range.Boundary.excluding(""), io.lettuce.core.Range.Boundary.excluding(""));
-
     private LettuceSortedSetCommandsConverters() {
         // Utility class
     }
@@ -155,10 +146,7 @@ public final class LettuceSortedSetCommandsConverters {
     public static io.lettuce.core.Range<String> toLettuceLexRange(Range<String> range) {
         io.lettuce.core.Range.Boundary<String> lower = toLexBoundary(range.getLowerBound());
         io.lettuce.core.Range.Boundary<String> upper = toLexBoundary(range.getUpperBound());
-        if (lower.isUnbounded() || upper.isUnbounded()) {
-            return EMPTY_LEX_RANGE;
-        }
-        return io.lettuce.core.Range.from(upper, lower);
+        return io.lettuce.core.Range.from(lower, upper);
     }
 
     private static io.lettuce.core.Range.Boundary<String> toLexBoundary(String bound) {
