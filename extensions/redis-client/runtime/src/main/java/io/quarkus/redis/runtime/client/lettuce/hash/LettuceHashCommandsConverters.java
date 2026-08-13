@@ -19,7 +19,7 @@ public final class LettuceHashCommandsConverters {
         while (cursor.hasNext()) {
             String token = cursor.next();
             switch (token) {
-                case "MATCH" -> lettuce.match(cursor.next());
+                case "MATCH" -> lettuce.match(cursor.nextValue(token));
                 case "COUNT" -> lettuce.limit(cursor.nextLong(token));
                 default -> throw new IllegalStateException("Unexpected ScanArgs token: " + token);
             }
