@@ -1,4 +1,4 @@
-package io.quarkus.redis.runtime.client.lettuce.datasource;
+package io.quarkus.redis.runtime.client.lettuce.value;
 
 import java.util.Map;
 
@@ -6,7 +6,7 @@ import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSo
 import io.quarkus.redis.datasource.value.GetExArgs;
 import io.quarkus.redis.datasource.value.ReactiveTransactionalValueCommands;
 import io.quarkus.redis.datasource.value.SetArgs;
-import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveValueCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.datasource.LettuceTransactionHolder;
 import io.smallrye.mutiny.Uni;
 
 /**
