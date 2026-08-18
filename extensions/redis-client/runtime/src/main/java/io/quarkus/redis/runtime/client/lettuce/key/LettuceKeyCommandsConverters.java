@@ -4,44 +4,14 @@ import io.quarkus.redis.datasource.keys.CopyArgs;
 import io.quarkus.redis.datasource.keys.ExpireArgs;
 import io.quarkus.redis.datasource.keys.KeyScanArgs;
 import io.quarkus.redis.runtime.client.lettuce.ArgTokenCursor;
-import io.quarkus.redis.runtime.client.lettuce.LettuceConverterRegistry;
 
 /**
  * Converters bridging Quarkus Key Command argument types to their Lettuce equivalents.
- * <p>
- * Registration with {@link LettuceConverterRegistry} happens in this class's static initializer.
  */
 public final class LettuceKeyCommandsConverters {
 
-    static {
-        registerAll();
-    }
-
     private LettuceKeyCommandsConverters() {
         // Utility class
-    }
-
-    /**
-     * Ensures the Key Command converters are registered with {@link LettuceConverterRegistry}.
-     * <p>
-     * Registration normally happens in this class's static initializer; this method re-registers
-     * the converters if the registry has been cleared since (e.g. by tests), keyed on the
-     * registry's actual state. Idempotent and thread-safe: the registry uses concurrent maps and
-     * re-registering an equivalent converter is harmless.
-     */
-    public static void register() {
-        if (LettuceConverterRegistry.getArgConverter(ExpireArgs.class) == null) {
-            registerAll();
-        }
-    }
-
-    private static void registerAll() {
-        LettuceConverterRegistry.registerArgConverter(ExpireArgs.class,
-                LettuceKeyCommandsConverters::toLettuceExpireArgs);
-        LettuceConverterRegistry.registerArgConverter(CopyArgs.class,
-                LettuceKeyCommandsConverters::toLettuceCopyArgs);
-        LettuceConverterRegistry.registerArgConverter(KeyScanArgs.class,
-                LettuceKeyCommandsConverters::toLettuceKeyScanArgs);
     }
 
     /**
