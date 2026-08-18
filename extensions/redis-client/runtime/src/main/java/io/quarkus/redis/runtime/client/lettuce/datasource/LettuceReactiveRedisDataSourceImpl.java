@@ -57,11 +57,14 @@ import io.vertx.redis.client.Response;
 /**
  * Lettuce-backed implementation of {@link ReactiveRedisDataSource}.
  * <p>
- * Wires the {@code value} command group to {@link LettuceReactiveValueCommandsImpl} and
- * implements {@code execute(...)}, {@code flushall()} and {@code select(...)} on top of the
- * Lettuce async API. {@code withConnection(...)} runs the user block on a freshly opened
- * connection obtained from the supplied {@code connector}. {@code getRedis()} and
- * {@code withTransaction(...)} throw {@link UnsupportedOperationException} for now.
+ * Wires the implemented command groups to their Lettuce impls (see the {@code lettuce/<group>}
+ * packages, e.g. {@link LettuceReactiveValueCommandsImpl}) and implements {@code execute(...)},
+ * {@code flushall()} and {@code select(...)} on top of the Lettuce async API.
+ * {@code withConnection(...)} runs the user block on a freshly opened connection obtained from
+ * the supplied {@code connector}; {@code withTransaction(...)} runs it on a pinned connection
+ * under {@code MULTI}/{@code EXEC}, including the {@code WATCH}-based optimistic-locking
+ * variants. {@code getRedis()} throws {@link UnsupportedOperationException}: it returns a
+ * Vert.x-specific type that has no Lettuce equivalent.
  */
 public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSource {
 
