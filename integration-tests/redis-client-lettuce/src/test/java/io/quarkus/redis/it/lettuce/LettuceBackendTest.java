@@ -64,6 +64,33 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void valueLcs() {
+        String key1 = getKey("lcs-1");
+        String key2 = getKey("lcs-2");
+
+        RestAssured.given()
+                .body("ohmytext")
+                .when()
+                .post("/lettuce/value/" + key1)
+                .then()
+                .statusCode(204);
+
+        RestAssured.given()
+                .body("mynewtext")
+                .when()
+                .post("/lettuce/value/" + key2)
+                .then()
+                .statusCode(204);
+
+        RestAssured.given()
+                .when()
+                .get("/lettuce/value/lcs/" + key1 + "/" + key2)
+                .then()
+                .statusCode(200)
+                .body(CoreMatchers.is("mytext,6"));
+    }
+
+    @Test
     public void valueGetReactive() {
         String key = getKey("value-reactive");
         String value = "lettuce-reactive";

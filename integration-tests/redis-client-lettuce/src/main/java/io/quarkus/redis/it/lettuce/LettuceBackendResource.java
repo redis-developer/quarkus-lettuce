@@ -74,6 +74,12 @@ public class LettuceBackendResource {
         return values.get(key);
     }
 
+    @GET
+    @Path("/value/lcs/{key1}/{key2}")
+    public String lcs(@PathParam("key1") String key1, @PathParam("key2") String key2) {
+        return values.lcs(key1, key2) + "," + values.lcsLength(key1, key2);
+    }
+
     @POST
     @Path("/select/{index}")
     public void select(@PathParam("index") long index) {

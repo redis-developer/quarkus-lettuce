@@ -5,15 +5,19 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.positive;
 import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
 import io.lettuce.core.KeyValue;
+import io.lettuce.core.LcsArgs;
 import io.lettuce.core.RedisFuture;
+import io.lettuce.core.StringMatchResult;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
+import io.quarkus.redis.datasource.codecs.Codecs;
 import io.quarkus.redis.datasource.value.GetExArgs;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.SetArgs;
@@ -26,10 +30,6 @@ import io.smallrye.mutiny.Uni;
  * <p>
  * Delegates every command to Lettuce async APIs and adapts the resulting
  * {@link java.util.concurrent.CompletionStage} to {@link Uni} via {@link LettuceResult#toUni}.
- * <p>
- * <strong>Note on {@code LCS}</strong>: not yet implemented. Lettuce 7 exposes native
- * {@code lcs(LcsArgs)} support, so {@link #lcs} and {@link #lcsLength} can now be wired
- * up; until then they throw {@link UnsupportedOperationException}.
  *
  * @param <K> the key type
  * @param <V> the value type
@@ -168,18 +168,43 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
 
     @Override
     public Uni<String> lcs(K key1, K key2) {
-        return Uni.createFrom().failure(lcsUnsupported());
+        return LettuceResult.toUni(_lcs(key1, key2))
+                .map(r -> r == null ? null : r.getMatchString());
+    }
+
+    public Supplier<RedisFuture<StringMatchResult>> _lcs(K key1, K key2) {
+        LcsArgs args = lcsArgs(key1, key2);
+        return () -> async.lcs(args);
     }
 
     @Override
     public Uni<Long> lcsLength(K key1, K key2) {
-        return Uni.createFrom().failure(lcsUnsupported());
+        return LettuceResult.toUni(_lcsLength(key1, key2))
+                .map(r -> r == null ? null : r.getLen());
     }
 
-    private static UnsupportedOperationException lcsUnsupported() {
-        return new UnsupportedOperationException(
-                "LCS is not yet implemented on the Lettuce backend. "
-                        + "Set quarkus.redis.backend=vertx if you need LCS.");
+    public Supplier<RedisFuture<StringMatchResult>> _lcsLength(K key1, K key2) {
+        LcsArgs args = lcsArgs(key1, key2).justLen();
+        return () -> async.lcs(args);
+    }
+
+    /**
+     * Builds the {@link LcsArgs} for the two keys. Unlike every other command in this group,
+     * Lettuce's {@code LCS} API takes its keys as plain strings inside {@link LcsArgs} — they
+     * bypass the connection codec. Non-String keys are therefore rendered through the same
+     * Quarkus codec the connection codec would apply, keeping the wire bytes identical.
+     */
+    private LcsArgs lcsArgs(K key1, K key2) {
+        nonNull(key1, "key1");
+        nonNull(key2, "key2");
+        return LcsArgs.Builder.keys(keyAsString(key1), keyAsString(key2));
+    }
+
+    private String keyAsString(K key) {
+        if (key instanceof String s) {
+            return s;
+        }
+        return new String(Codecs.getDefaultCodecFor(key.getClass()).encode(key), StandardCharsets.UTF_8);
     }
 
     @SafeVarargs
