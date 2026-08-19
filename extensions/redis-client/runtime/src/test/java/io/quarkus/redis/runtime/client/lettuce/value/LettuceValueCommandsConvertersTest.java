@@ -11,7 +11,6 @@ import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.value.GetExArgs;
 import io.quarkus.redis.datasource.value.SetArgs;
-import io.quarkus.redis.runtime.client.lettuce.LettuceConverterRegistry;
 
 /**
  * Unit tests for {@link LettuceValueCommandsConverters}.
@@ -108,18 +107,6 @@ class LettuceValueCommandsConvertersTest {
     @Test
     void getExArgsEmpty() {
         assertThat(renderGetExArgs(new GetExArgs())).isEmpty();
-    }
-
-    @Test
-    void registerReinstatesConvertersAfterRegistryCleared() {
-        LettuceValueCommandsConverters.register();
-        assertThat(LettuceConverterRegistry.getArgConverter(SetArgs.class)).isNotNull();
-        // Simulate the registry being cleared (e.g. by another test) and verify register() self-heals.
-        LettuceConverterRegistry.clear();
-        assertThat(LettuceConverterRegistry.getArgConverter(SetArgs.class)).isNull();
-        LettuceValueCommandsConverters.register();
-        assertThat(LettuceConverterRegistry.getArgConverter(SetArgs.class)).isNotNull();
-        assertThat(LettuceConverterRegistry.getArgConverter(GetExArgs.class)).isNotNull();
     }
 
     private static String[] renderSetArgs(SetArgs quarkus) {

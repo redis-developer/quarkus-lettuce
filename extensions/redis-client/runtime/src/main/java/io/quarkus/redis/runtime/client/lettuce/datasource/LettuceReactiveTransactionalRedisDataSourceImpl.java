@@ -28,9 +28,13 @@ import io.quarkus.redis.datasource.topk.ReactiveTransactionalTopKCommands;
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
 import io.quarkus.redis.datasource.value.ReactiveTransactionalValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
+import io.quarkus.redis.runtime.client.lettuce.hash.LettuceReactiveHashCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.hash.LettuceReactiveTransactionalHashCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceReactiveKeyCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.key.LettuceReactiveTransactionalKeyCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.list.LettuceReactiveListCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.list.LettuceReactiveTransactionalListCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveTransactionalValueCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveValueCommandsImpl;
 import io.smallrye.mutiny.Uni;
 import io.vertx.redis.client.Command;
@@ -78,7 +82,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     public <K, V> ReactiveTransactionalValueCommands<K, V> value(Class<K> redisKeyType, Class<V> valueType) {
         nonNull(redisKeyType, "redisKeyType");
         nonNull(valueType, "valueType");
-        @SuppressWarnings("unchecked")
         LettuceReactiveValueCommandsImpl<K, V> reactiveValue = (LettuceReactiveValueCommandsImpl<K, V>) reactive
                 .value(redisKeyType, valueType);
         return new LettuceReactiveTransactionalValueCommandsImpl<>(this, reactiveValue, tx);
@@ -92,7 +95,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     @Override
     public <K> ReactiveTransactionalKeyCommands<K> key(Class<K> redisKeyType) {
         nonNull(redisKeyType, "redisKeyType");
-        @SuppressWarnings("unchecked")
         LettuceReactiveKeyCommandsImpl<K, Object> reactiveKey = (LettuceReactiveKeyCommandsImpl<K, Object>) reactive
                 .key(redisKeyType);
         return new LettuceReactiveTransactionalKeyCommandsImpl<>(this, reactiveKey, tx);
@@ -113,7 +115,12 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     @Override
     public <K, F, V> ReactiveTransactionalHashCommands<K, F, V> hash(Class<K> redisKeyType, Class<F> typeOfField,
             Class<V> typeOfValue) {
-        throw groupNotImplemented("hash");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(typeOfField, "typeOfField");
+        nonNull(typeOfValue, "typeOfValue");
+        LettuceReactiveHashCommandsImpl<K, F, V> reactiveHash = (LettuceReactiveHashCommandsImpl<K, F, V>) reactive
+                .hash(redisKeyType, typeOfField, typeOfValue);
+        return new LettuceReactiveTransactionalHashCommandsImpl<>(this, reactiveHash, tx);
     }
 
     @Override

@@ -1,4 +1,4 @@
-package io.quarkus.redis.runtime.client.lettuce.datasource;
+package io.quarkus.redis.runtime.client.lettuce.key;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -10,7 +10,7 @@ import io.quarkus.redis.datasource.keys.ReactiveTransactionalKeyCommands;
 import io.quarkus.redis.datasource.keys.RedisKeyNotFoundException;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
-import io.quarkus.redis.runtime.client.lettuce.key.LettuceReactiveKeyCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.datasource.LettuceTransactionHolder;
 import io.smallrye.mutiny.Uni;
 
 /**

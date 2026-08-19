@@ -18,7 +18,6 @@ import io.quarkus.redis.datasource.value.GetExArgs;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.SetArgs;
 import io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands;
-import io.quarkus.redis.runtime.client.lettuce.LettuceConverterRegistry;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
 import io.smallrye.mutiny.Uni;
 
@@ -43,7 +42,6 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     public LettuceReactiveValueCommandsImpl(ReactiveRedisDataSource dataSource,
             StatefulRedisConnection<K, V> connection) {
         super(connection);
-        LettuceValueCommandsConverters.register();
         this.dataSource = dataSource;
     }
 
@@ -111,7 +109,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     public Supplier<RedisFuture<V>> _getex(K key, GetExArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
-        io.lettuce.core.GetExArgs lettuceArgs = LettuceConverterRegistry.convertArg(args);
+        io.lettuce.core.GetExArgs lettuceArgs = LettuceValueCommandsConverters.toLettuceGetExArgs(args);
         return () -> async.getex(key, lettuceArgs);
     }
 
@@ -260,7 +258,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         nonNull(key, "key");
         nonNull(value, "value");
         nonNull(setArgs, "setArgs");
-        io.lettuce.core.SetArgs lettuceArgs = LettuceConverterRegistry.convertArg(setArgs);
+        io.lettuce.core.SetArgs lettuceArgs = LettuceValueCommandsConverters.toLettuceSetArgs(setArgs);
         return () -> async.set(key, value, lettuceArgs);
     }
 
@@ -295,7 +293,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         nonNull(key, "key");
         nonNull(value, "value");
         nonNull(setArgs, "setArgs");
-        io.lettuce.core.SetArgs lettuceArgs = LettuceConverterRegistry.convertArg(setArgs);
+        io.lettuce.core.SetArgs lettuceArgs = LettuceValueCommandsConverters.toLettuceSetArgs(setArgs);
         return () -> async.setGet(key, value, lettuceArgs);
     }
 
