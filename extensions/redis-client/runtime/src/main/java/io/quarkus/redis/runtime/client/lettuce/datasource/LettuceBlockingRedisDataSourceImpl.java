@@ -22,6 +22,7 @@ import io.quarkus.redis.datasource.cuckoo.CuckooCommands;
 import io.quarkus.redis.datasource.geo.GeoCommands;
 import io.quarkus.redis.datasource.graph.GraphCommands;
 import io.quarkus.redis.datasource.hash.HashCommands;
+import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.hyperloglog.HyperLogLogCommands;
 import io.quarkus.redis.datasource.json.JsonCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
@@ -41,6 +42,7 @@ import io.quarkus.redis.datasource.transactions.TransactionalRedisDataSource;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
+import io.quarkus.redis.runtime.client.lettuce.hash.LettuceBlockingHashCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceBlockingKeyCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.set.LettuceBlockingSetCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceBlockingValueCommandsImpl;
@@ -110,14 +112,11 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         }
         // Await the connection and run the user block on the calling (worker) thread. Running it
         // inside the reactive withConnection pipeline would execute it on the event loop thread
-        // that completed the connect, where the block's blocking calls would deadlock.
-        StatefulRedisConnection<String, String> conn = reactive.openConnection().await().atMost(timeout);
-        try {
+        // that completed the connection, where the block's blocking calls would deadlock.
+        try (StatefulRedisConnection<String, String> conn = reactive.openConnection().await().atMost(timeout)) {
             LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl
                     .pinnedTo(reactive.getVertx(), conn);
             consumer.accept(pinnedTo(pinnedReactive, timeout));
-        } finally {
-            conn.close();
         }
     }
 
@@ -273,13 +272,15 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, F, V> HashCommands<K, F, V> hash(Class<K> redisKeyType, Class<F> typeOfField, Class<V> typeOfValue) {
-        throw groupNotImplemented("hash");
+        ReactiveHashCommands<K, F, V> r = reactive.hash(redisKeyType, typeOfField, typeOfValue);
+        return new LettuceBlockingHashCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, F, V> HashCommands<K, F, V> hash(TypeReference<K> redisKeyType, TypeReference<F> typeOfField,
             TypeReference<V> typeOfValue) {
-        throw groupNotImplemented("hash");
+        ReactiveHashCommands<K, F, V> r = reactive.hash(redisKeyType, typeOfField, typeOfValue);
+        return new LettuceBlockingHashCommandsImpl<>(this, r, timeout);
     }
 
     @Override

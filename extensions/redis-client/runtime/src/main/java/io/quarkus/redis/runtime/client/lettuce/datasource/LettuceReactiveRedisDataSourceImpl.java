@@ -43,6 +43,7 @@ import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSo
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
+import io.quarkus.redis.runtime.client.lettuce.hash.LettuceReactiveHashCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.set.LettuceReactiveSetCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveValueCommandsImpl;
@@ -57,11 +58,14 @@ import io.vertx.redis.client.Response;
 /**
  * Lettuce-backed implementation of {@link ReactiveRedisDataSource}.
  * <p>
- * Wires the {@code value} command group to {@link LettuceReactiveValueCommandsImpl} and
- * implements {@code execute(...)}, {@code flushall()} and {@code select(...)} on top of the
- * Lettuce async API. {@code withConnection(...)} runs the user block on a freshly opened
- * connection obtained from the supplied {@code connector}. {@code getRedis()} and
- * {@code withTransaction(...)} throw {@link UnsupportedOperationException} for now.
+ * Wires the implemented command groups to their Lettuce impls (see the {@code lettuce/<group>}
+ * packages, e.g. {@link LettuceReactiveValueCommandsImpl}) and implements {@code execute(...)},
+ * {@code flushall()} and {@code select(...)} on top of the Lettuce async API.
+ * {@code withConnection(...)} runs the user block on a freshly opened connection obtained from
+ * the supplied {@code connector}; {@code withTransaction(...)} runs it on a pinned connection
+ * under {@code MULTI}/{@code EXEC}, including the {@code WATCH}-based optimistic-locking
+ * variants. {@code getRedis()} throws {@link UnsupportedOperationException}: it returns a
+ * Vert.x-specific type that has no Lettuce equivalent.
  */
 public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSource {
 
@@ -153,7 +157,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * Opens a fresh connection from the connector, without blocking the caller.
      */
     Uni<StatefulRedisConnection<String, String>> openConnection() {
-        return LettuceResult.toUni(connector::get);
+        return LettuceResult.toUni(connector);
     }
 
     @Override
@@ -199,7 +203,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     /**
      * Runs {@code body} on a transaction-scoped connection. When this data source is already
      * pinned (nested inside {@code withConnection}), the pinned connection is reused and left
-     * open for the outer scope to release. Otherwise a fresh connection is opened via the
+     * open for the outer scope to release. Otherwise, a fresh connection is opened via the
      * {@code connector} and closed on every termination path.
      */
     private <T> Uni<T> withTxConnection(Function<StatefulRedisConnection<String, String>, Uni<T>> body) {
@@ -314,13 +318,23 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K, F, V> ReactiveHashCommands<K, F, V> hash(Class<K> redisKeyType, Class<F> fieldType, Class<V> valueType) {
-        throw groupNotImplemented("hash");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(fieldType, "fieldType");
+        nonNull(valueType, "valueType");
+        @SuppressWarnings("unchecked")
+        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
+        return new LettuceReactiveHashCommandsImpl<>(this, typedConnection, redisKeyType, fieldType);
     }
 
     @Override
     public <K, F, V> ReactiveHashCommands<K, F, V> hash(TypeReference<K> redisKeyType, TypeReference<F> fieldType,
             TypeReference<V> valueType) {
-        throw groupNotImplemented("hash");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(fieldType, "fieldType");
+        nonNull(valueType, "valueType");
+        @SuppressWarnings("unchecked")
+        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
+        return new LettuceReactiveHashCommandsImpl<>(this, typedConnection, redisKeyType.getType(), fieldType.getType());
     }
 
     @Override

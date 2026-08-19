@@ -151,9 +151,20 @@ class LettuceWithTransactionBlockingIntegrationTest {
     }
 
     @Test
-    void lcsInTransactionIsUnsupported() {
-        assertThatThrownBy(() -> ds.withTransaction(tx -> tx.value(String.class, String.class).lcs("k1", "k2")))
-                .isInstanceOf(UnsupportedOperationException.class);
+    void lcsInTransaction() {
+        sharedConnection.sync().mset(Map.of("k1", "ohmytext", "k2", "mynewtext"));
+        TransactionResult result = ds.withTransaction(tx -> {
+            var value = tx.value(String.class, String.class);
+            value.lcs("k1", "k2");
+            value.lcsLength("k1", "k2");
+        });
+        assertThat(result.discarded()).isFalse();
+        assertThat(result.hasErrors()).isFalse();
+        assertThat(result.size()).isEqualTo(2);
+        String match = result.get(0);
+        Long length = result.get(1);
+        assertThat(match).isEqualTo("mytext");
+        assertThat(length).isEqualTo(6L);
     }
 
     @Test

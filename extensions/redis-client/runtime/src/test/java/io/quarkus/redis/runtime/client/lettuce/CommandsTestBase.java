@@ -100,4 +100,5 @@ public abstract class CommandsTestBase {
     protected static LettuceBlockingRedisDataSourceImpl blockingDataSource(Duration timeout) {
         return new LettuceBlockingRedisDataSourceImpl(reactiveDataSource(), timeout);
     }
+
 }
