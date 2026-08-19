@@ -63,4 +63,54 @@ class ArgTokenCursorTest {
         assertThat(cursor.nextLong("DB")).isEqualTo(2L);
     }
 
+    @Test
+    void nextIsNumericDetectsNumericTokenWithoutConsumingIt() {
+        ArgTokenCursor cursor = new ArgTokenCursor(List.of("LIMIT", "5"));
+        cursor.next();
+        assertThat(cursor.nextIsNumeric()).isTrue();
+        assertThat(cursor.hasNext()).isTrue();
+        assertThat(cursor.next()).isEqualTo("5");
+        assertThat(cursor.hasNext()).isFalse();
+    }
+
+    @Test
+    void nextIsNumericRecognisesNegativeNumbers() {
+        ArgTokenCursor cursor = new ArgTokenCursor(List.of("RANK", "-3"));
+        cursor.next();
+        assertThat(cursor.nextIsNumeric()).isTrue();
+        assertThat(cursor.nextLong("RANK")).isEqualTo(-3L);
+    }
+
+    @Test
+    void nextIsNumericReturnsFalseForKeywordAndPreservesIt() {
+        ArgTokenCursor cursor = new ArgTokenCursor(List.of("ALPHA"));
+        assertThat(cursor.nextIsNumeric()).isFalse();
+        assertThat(cursor.hasNext()).isTrue();
+        assertThat(cursor.next()).isEqualTo("ALPHA");
+    }
+
+    @Test
+    void nextIsNumericReturnsFalseAtEndOfInput() {
+        ArgTokenCursor cursor = new ArgTokenCursor(List.of("ALPHA"));
+        cursor.next();
+        assertThat(cursor.nextIsNumeric()).isFalse();
+        assertThat(cursor.hasNext()).isFalse();
+    }
+
+    @Test
+    void nextIsNumericIsIdempotent() {
+        ArgTokenCursor cursor = new ArgTokenCursor(List.of("10"));
+        assertThat(cursor.nextIsNumeric()).isTrue();
+        assertThat(cursor.nextIsNumeric()).isTrue();
+        assertThat(cursor.next()).isEqualTo("10");
+    }
+
+    /** Only integral values count as numeric — {@code Long.parseLong} rejects floating-point tokens. */
+    @Test
+    void nextIsNumericReturnsFalseForFloatingPointToken() {
+        ArgTokenCursor cursor = new ArgTokenCursor(List.of("1.5"));
+        assertThat(cursor.nextIsNumeric()).isFalse();
+        assertThat(cursor.next()).isEqualTo("1.5");
+    }
+
 }

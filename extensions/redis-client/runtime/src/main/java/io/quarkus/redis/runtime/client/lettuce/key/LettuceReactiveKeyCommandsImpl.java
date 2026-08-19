@@ -405,7 +405,7 @@ public class LettuceReactiveKeyCommandsImpl<K, V> extends AbstractLettuceCommand
 
     @Override
     public ReactiveKeyScanCursor<K> scan() {
-        return new LettuceKeyScanReactiveCursorImpl<>(async, null);
+        return new LettuceKeyScanReactiveCursorImpl<>(async);
     }
 
     @Override

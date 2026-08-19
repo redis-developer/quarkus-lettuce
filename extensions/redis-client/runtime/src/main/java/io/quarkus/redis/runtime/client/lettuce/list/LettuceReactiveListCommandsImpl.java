@@ -30,16 +30,6 @@ import io.smallrye.mutiny.Uni;
 /**
  * Lettuce-backed implementation of {@link ReactiveListCommands}, on top of
  * {@link RedisListAsyncCommands} plus {@link RedisKeyAsyncCommands} for {@code SORT}.
- * <p>
- * Deviations from the Vert.x backend:
- * <ul>
- * <li>{@code LMPOP} / {@code BLMPOP} reply as one {@code KeyValue<K, List<V>>} in Lettuce, collapsed
- * to the API's shapes by {@link #toFirstKeyValue} and {@link #toKeyValueList}.</li>
- * <li>A {@code nil} list reply decodes to an empty list, see {@link #orEmpty}.</li>
- * <li>{@code rpop(key, count)} leaves {@code count} unvalidated; only {@code lpop} validates it.</li>
- * <li>Blocking timeouts are sent as whole seconds unless the {@link Duration} is sub-second
- * (fractional timeouts need Redis 6).</li>
- * </ul>
  *
  * @param <K> the key type
  * @param <V> the value type
@@ -434,9 +424,6 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         return LettuceResult.toUni(_rpop(key, count)).map(LettuceReactiveListCommandsImpl::orEmpty);
     }
 
-    /**
-     * {@code count} is unvalidated, as in the Vert.x backend: Redis rejects a non-positive one.
-     */
     Supplier<RedisFuture<List<V>>> _rpop(K key, int count) {
         nonNull(key, "key");
         return () -> list.rpop(key, count);
@@ -517,9 +504,6 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         return sortAndStore(key, destination, DEFAULT_SORT_ARGS);
     }
 
-    /**
-     * Adapts a Lettuce {@code KeyValue}; an empty reply (pop timeout, missing key) gives {@code null}.
-     */
     KeyValue<K, V> toKeyValue(io.lettuce.core.KeyValue<K, V> kv) {
         if (kv == null || kv.isEmpty()) {
             return null;
@@ -527,9 +511,6 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         return KeyValue.of(kv.getKey(), kv.getValueOrElse(null));
     }
 
-    /**
-     * First element of an {@code LMPOP} reply — what the count-less overloads return.
-     */
     KeyValue<K, V> toFirstKeyValue(io.lettuce.core.KeyValue<K, List<V>> kv) {
         if (kv == null || kv.isEmpty()) {
             return null;
@@ -541,9 +522,6 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         return KeyValue.of(kv.getKey(), values.get(0));
     }
 
-    /**
-     * One {@link KeyValue} per element of an {@code LMPOP} reply — what the {@code count} overloads return.
-     */
     List<KeyValue<K, V>> toKeyValueList(io.lettuce.core.KeyValue<K, List<V>> kv) {
         if (kv == null || kv.isEmpty()) {
             return Collections.emptyList();
@@ -559,9 +537,6 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         return result;
     }
 
-    /**
-     * Maps a {@code nil} list reply to an empty list, as the Vert.x marshaller does.
-     */
     static <T> List<T> orEmpty(List<T> values) {
         return values == null ? Collections.emptyList() : values;
     }

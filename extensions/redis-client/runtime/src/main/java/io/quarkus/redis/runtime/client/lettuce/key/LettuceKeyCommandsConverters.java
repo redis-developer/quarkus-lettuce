@@ -14,12 +14,6 @@ public final class LettuceKeyCommandsConverters {
         // Utility class
     }
 
-    /**
-     * Convert a Quarkus {@link ExpireArgs} to a Lettuce {@link io.lettuce.core.ExpireArgs}.
-     * <p>
-     * The Quarkus class does not expose its flags through getters, so we parse its
-     * wire-format token list ({@link ExpireArgs#toArgs()}) — the stable public contract.
-     */
     public static io.lettuce.core.ExpireArgs toLettuceExpireArgs(ExpireArgs quarkus) {
         io.lettuce.core.ExpireArgs lettuce = new io.lettuce.core.ExpireArgs();
         for (Object token : quarkus.toArgs()) {
