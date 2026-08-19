@@ -9,6 +9,7 @@ import io.quarkus.redis.datasource.sortedset.Range;
 import io.quarkus.redis.datasource.sortedset.ScoreRange;
 import io.quarkus.redis.datasource.sortedset.ZAddArgs;
 import io.quarkus.redis.datasource.sortedset.ZAggregateArgs;
+import io.quarkus.redis.runtime.client.lettuce.ArgTokenCursor;
 
 /**
  * Converters bridging Quarkus Sorted Set Command argument types to their Lettuce equivalents.
@@ -21,12 +22,13 @@ public final class LettuceSortedSetCommandsConverters {
 
     public static io.lettuce.core.ScanArgs toLettuceScanArgs(ScanArgs quarkus) {
         io.lettuce.core.ScanArgs lettuce = new io.lettuce.core.ScanArgs();
-        List<String> tokens = quarkus.toArgs();
-        for (int i = 0; i < tokens.size(); i++) {
-            String token = tokens.get(i);
+        Iterable<String> tokens = quarkus.toArgs();
+        var cursor = new ArgTokenCursor(tokens);
+        while (cursor.hasNext()) {
+            String token = cursor.next();
             switch (token) {
-                case "MATCH" -> lettuce.match(nextToken(tokens, ++i, token));
-                case "COUNT" -> lettuce.limit(nextLong(tokens, ++i, token));
+                case "MATCH" -> lettuce.match(cursor.nextValue(token));
+                case "COUNT" -> lettuce.limit(cursor.nextLong(token));
                 default -> throw new IllegalStateException("Unexpected ScanArgs token: " + token);
             }
         }
@@ -35,21 +37,20 @@ public final class LettuceSortedSetCommandsConverters {
 
     public static io.lettuce.core.SortArgs toLettuceSortArgs(SortArgs quarkus) {
         io.lettuce.core.SortArgs lettuce = new io.lettuce.core.SortArgs();
-        List<Object> tokens = quarkus.toArgs();
-        for (int i = 0; i < tokens.size(); i++) {
-            String token = tokens.get(i).toString();
+        Iterable<Object> tokens = quarkus.toArgs();
+        var cursor = new ArgTokenCursor(tokens);
+        while (cursor.hasNext()) {
+            String token = cursor.next();
             switch (token) {
-                case "BY" -> lettuce.by(nextToken(tokens, ++i, token));
-                case "GET" -> lettuce.get(nextToken(tokens, ++i, token));
+                case "BY" -> lettuce.by(cursor.nextValue(token));
+                case "GET" -> lettuce.get(cursor.nextValue(token));
                 case "ASC" -> lettuce.asc();
                 case "DESC" -> lettuce.desc();
                 case "ALPHA" -> lettuce.alpha();
                 case "LIMIT" -> {
-                    long first = nextLong(tokens, ++i, token);
-                    // SortArgs.Limit emits a single value — the count — when its offset is -1. Only
-                    // keywords can follow LIMIT, so a numeric next token can only be the count.
-                    if (i + 1 < tokens.size() && isNumeric(tokens.get(i + 1).toString())) {
-                        lettuce.limit(first, nextLong(tokens, ++i, token));
+                    long first = cursor.nextLong(token);
+                    if (cursor.isNextNumeric()) {
+                        lettuce.limit(first, cursor.nextLong(token));
                     } else {
                         lettuce.limit(0, first);
                     }
@@ -106,19 +107,20 @@ public final class LettuceSortedSetCommandsConverters {
     private static <T extends io.lettuce.core.ZAggregateArgs> T apply(ZAggregateArgs quarkus, T lettuce) {
         List<Double> weights = new ArrayList<>();
         String aggregate = null;
-        List<Object> tokens = quarkus.toArgs();
-        for (int i = 0; i < tokens.size(); i++) {
-            String token = tokens.get(i).toString();
+        Iterable<Object> tokens = quarkus.toArgs();
+        var cursor = new ArgTokenCursor(tokens);
+        while (cursor.hasNext()) {
+            String token = cursor.next();
             switch (token) {
                 case "WEIGHTS" -> {
-                    while (i + 1 < tokens.size() && isNumeric(tokens.get(i + 1).toString())) {
-                        weights.add(Double.parseDouble(tokens.get(++i).toString()));
+                    while (cursor.nextIsNumeric()) {
+                        weights.add(cursor.nextDouble(token));
                     }
                     if (weights.isEmpty()) {
                         throw new IllegalStateException("Missing value for token: " + token);
                     }
                 }
-                case "AGGREGATE" -> aggregate = nextToken(tokens, ++i, token);
+                case "AGGREGATE" -> aggregate = cursor.nextValue(token);
                 default -> throw new IllegalStateException("Unexpected ZAggregateArgs token: " + token);
             }
         }
@@ -162,29 +164,4 @@ public final class LettuceSortedSetCommandsConverters {
         throw new IllegalStateException("Unexpected lexicographical boundary: " + bound);
     }
 
-    /**
-     * Return the value token at {@code index} (e.g. the pattern after {@code MATCH}).
-     */
-    private static String nextToken(List<?> tokens, int index, String token) {
-        if (index >= tokens.size()) {
-            throw new IllegalStateException("Missing value for token: " + token);
-        }
-        return tokens.get(index).toString();
-    }
-
-    /**
-     * Return and parse the numeric value token at {@code index} (e.g. the count after {@code COUNT}).
-     */
-    private static long nextLong(List<?> tokens, int index, String token) {
-        return Long.parseLong(nextToken(tokens, index, token));
-    }
-
-    private static boolean isNumeric(String token) {
-        try {
-            Double.parseDouble(token);
-            return true;
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
 }
