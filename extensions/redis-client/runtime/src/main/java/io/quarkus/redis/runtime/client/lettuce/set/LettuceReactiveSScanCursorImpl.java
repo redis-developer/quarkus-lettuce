@@ -47,7 +47,8 @@ public class LettuceReactiveSScanCursorImpl<K, V> implements ReactiveSScanCursor
 
     @Override
     public Uni<List<V>> next() {
-        final ScanCursor current = cursor;
+        // Reset cursor when finished to copy Vert.x. behavior.
+        final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
         return LettuceResult.toUni(() -> set.sscan(key, current, scanArgs))
                 .invoke(vc -> this.cursor = vc)
                 .map(ValueScanCursor::getValues);
