@@ -6,8 +6,7 @@ import io.lettuce.core.api.async.RedisAsyncCommands;
 /**
  * Base class for Lettuce-backed reactive command group implementations.
  * <p>
- * Holds the async command handle and provides shared access to the
- * {@link LettuceConverterRegistry} for argument/result conversion.
+ * Holds the async command handle.
  *
  * @param <K> the key type
  * @param <V> the value type

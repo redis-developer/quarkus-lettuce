@@ -191,9 +191,18 @@ class LettuceValueCommandsIntegrationTest {
     }
 
     @Test
-    void lcsNotYetImplemented() {
-        assertThatThrownBy(() -> blocking.lcs("a", "b")).isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> blocking.lcsLength("a", "b")).isInstanceOf(UnsupportedOperationException.class);
+    void lcs() {
+        // Canonical example from the Redis LCS documentation
+        blocking.mset(Map.of("k1", "ohmytext", "k2", "mynewtext"));
+        assertThat(blocking.lcs("k1", "k2")).isEqualTo("mytext");
+        assertThat(blocking.lcsLength("k1", "k2")).isEqualTo(6L);
+
+        // Missing keys behave as empty strings
+        assertThat(blocking.lcs("missing1", "missing2")).isEmpty();
+        assertThat(blocking.lcsLength("missing1", "missing2")).isZero();
+
+        assertThatThrownBy(() -> blocking.lcs(null, "k2")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> blocking.lcsLength("k1", null)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
