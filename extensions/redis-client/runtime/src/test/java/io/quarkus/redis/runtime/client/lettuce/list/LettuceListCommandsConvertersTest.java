@@ -3,18 +3,18 @@ package io.quarkus.redis.runtime.client.lettuce.list;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.lang.reflect.Field;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.SortArgs;
 import io.quarkus.redis.datasource.list.LPosArgs;
 import io.quarkus.redis.datasource.list.Position;
 
 /**
- * Unit tests for {@link LettuceListCommandsConverters}, without a running Redis. The Lettuce argument
- * classes expose no getters, so the assertions read their private fields reflectively.
+ * Unit tests for {@link LettuceListCommandsConverters}.
  */
 class LettuceListCommandsConvertersTest {
 
@@ -22,45 +22,34 @@ class LettuceListCommandsConvertersTest {
 
     @Test
     void emptyLPosArgsSetsNothing() {
-        io.lettuce.core.LPosArgs args = LettuceListCommandsConverters.toLettuceLPosArgs(new LPosArgs());
-        assertThat(rank(args)).isNull();
-        assertThat(maxlen(args)).isNull();
+        assertThat(renderLPosArgs(new LPosArgs())).isEmpty();
     }
 
     @Test
     void rankOnly() {
-        io.lettuce.core.LPosArgs args = LettuceListCommandsConverters.toLettuceLPosArgs(new LPosArgs().rank(2));
-        assertThat(rank(args)).isEqualTo(2L);
-        assertThat(maxlen(args)).isNull();
+        assertThat(renderLPosArgs(new LPosArgs().rank(2))).containsExactly("RANK", "2");
     }
 
     @Test
     void negativeRankIsPreserved() {
-        io.lettuce.core.LPosArgs args = LettuceListCommandsConverters.toLettuceLPosArgs(new LPosArgs().rank(-1));
-        assertThat(rank(args)).isEqualTo(-1L);
+        assertThat(renderLPosArgs(new LPosArgs().rank(-1))).containsExactly("RANK", "-1");
     }
 
     @Test
     void maxlenOnly() {
-        io.lettuce.core.LPosArgs args = LettuceListCommandsConverters.toLettuceLPosArgs(new LPosArgs().maxlen(10));
-        assertThat(rank(args)).isNull();
-        assertThat(maxlen(args)).isEqualTo(10L);
+        assertThat(renderLPosArgs(new LPosArgs().maxlen(10))).containsExactly("MAXLEN", "10");
     }
 
     @Test
     void rankAndMaxlen() {
-        io.lettuce.core.LPosArgs args = LettuceListCommandsConverters
-                .toLettuceLPosArgs(new LPosArgs().rank(3).maxlen(100));
-        assertThat(rank(args)).isEqualTo(3L);
-        assertThat(maxlen(args)).isEqualTo(100L);
+        assertThat(renderLPosArgs(new LPosArgs().rank(3).maxlen(100)))
+                .containsExactly("MAXLEN", "100", "RANK", "3");
     }
 
     @Test
     void maxlenBeforeRankIsOrderIndependent() {
-        io.lettuce.core.LPosArgs args = LettuceListCommandsConverters
-                .toLettuceLPosArgs(lPosArgs("MAXLEN", "100", "RANK", "3"));
-        assertThat(rank(args)).isEqualTo(3L);
-        assertThat(maxlen(args)).isEqualTo(100L);
+        assertThat(renderLPosArgs(lPosArgs("MAXLEN", "100", "RANK", "3")))
+                .containsExactly("MAXLEN", "100", "RANK", "3");
     }
 
     @Test
@@ -83,103 +72,73 @@ class LettuceListCommandsConvertersTest {
 
     @Test
     void emptySortArgsSetsNothing() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters.toLettuceSortArgs(new SortArgs());
-        assertThat(by(args)).isNull();
-        assertThat(get(args)).isNullOrEmpty();
-        // Lettuce initialises the field to Limit.unlimited() rather than leaving it null.
-        assertThat(limit(args).isLimited()).isFalse();
-        assertThat(alpha(args)).isFalse();
-        assertThat(order(args)).isNull();
+        assertThat(renderSortArgs(new SortArgs())).isEmpty();
     }
 
     @Test
     void ascending() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters.toLettuceSortArgs(new SortArgs().ascending());
-        assertThat(order(args)).isEqualTo("ASC");
+        assertThat(renderSortArgs(new SortArgs().ascending())).containsExactly("ASC");
     }
 
     @Test
     void descending() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters.toLettuceSortArgs(new SortArgs().descending());
-        assertThat(order(args)).isEqualTo("DESC");
+        assertThat(renderSortArgs(new SortArgs().descending())).containsExactly("DESC");
     }
 
     @Test
     void alphaOnly() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters.toLettuceSortArgs(new SortArgs().alpha());
-        assertThat(alpha(args)).isTrue();
+        assertThat(renderSortArgs(new SortArgs().alpha())).containsExactly("ALPHA");
     }
 
     @Test
     void byOnly() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters.toLettuceSortArgs(new SortArgs().by("weight_*"));
-        assertThat(by(args)).isEqualTo("weight_*");
+        assertThat(renderSortArgs(new SortArgs().by("weight_*"))).containsExactly("BY", "weight_*");
     }
 
     @Test
     void limitWithOffsetAndCount() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters.toLettuceSortArgs(new SortArgs().limit(2, 5));
-        assertThat(limit(args)).isNotNull();
-        assertThat(limit(args).getOffset()).isEqualTo(2);
-        assertThat(limit(args).getCount()).isEqualTo(5);
+        assertThat(renderSortArgs(new SortArgs().limit(2, 5))).containsExactly("LIMIT", "2", "5");
     }
 
     @Test
     void limitWithCountOnlyDefaultsOffsetToZero() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters.toLettuceSortArgs(new SortArgs().limit(7));
-        assertThat(limit(args).getOffset()).isZero();
-        assertThat(limit(args).getCount()).isEqualTo(7);
+        assertThat(renderSortArgs(new SortArgs().limit(7))).containsExactly("LIMIT", "0", "7");
     }
 
     /** {@code SortArgs.Limit} emits a single value — the count — when its offset is -1. */
     @Test
     void limitWithASingleValueIsTreatedAsACount() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters
-                .toLettuceSortArgs(new SortArgs().limit(SortArgs.Limit.of(-1, 4)));
-        assertThat(limit(args).getOffset()).isZero();
-        assertThat(limit(args).getCount()).isEqualTo(4);
+        assertThat(renderSortArgs(new SortArgs().limit(SortArgs.Limit.of(-1, 4))))
+                .containsExactly("LIMIT", "0", "4");
     }
 
     @Test
     void limitFollowedByAKeywordIsNotMisread() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters
-                .toLettuceSortArgs(sortArgs("LIMIT", "9", "ALPHA"));
-        assertThat(limit(args).getOffset()).isZero();
-        assertThat(limit(args).getCount()).isEqualTo(9);
-        assertThat(alpha(args)).isTrue();
+        assertThat(renderSortArgs(sortArgs("LIMIT", "9", "ALPHA")))
+                .containsExactly("LIMIT", "0", "9", "ALPHA");
     }
 
     @Test
     void multipleGetPatterns() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters
-                .toLettuceSortArgs(new SortArgs().get("#").get("data_*"));
-        assertThat(get(args)).containsExactly("#", "data_*");
+        assertThat(renderSortArgs(new SortArgs().get("#").get("data_*")))
+                .containsExactly("GET", "#", "GET", "data_*");
     }
 
     @Test
     void allSortOptionsCombined() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters.toLettuceSortArgs(new SortArgs()
+        assertThat(renderSortArgs(new SortArgs()
                 .by("weight_*")
                 .limit(1, 3)
                 .get("#")
                 .descending()
-                .alpha());
-        assertThat(by(args)).isEqualTo("weight_*");
-        assertThat(limit(args).getOffset()).isEqualTo(1);
-        assertThat(limit(args).getCount()).isEqualTo(3);
-        assertThat(get(args)).containsExactly("#");
-        assertThat(order(args)).isEqualTo("DESC");
-        assertThat(alpha(args)).isTrue();
+                .alpha()))
+                .containsExactly("BY", "weight_*", "GET", "#", "LIMIT", "1", "3", "DESC", "ALPHA");
     }
 
     @Test
     void sortTokenOrderIsIndependent() {
-        io.lettuce.core.SortArgs args = LettuceListCommandsConverters
-                .toLettuceSortArgs(sortArgs("ALPHA", "DESC", "GET", "#", "BY", "w_*"));
-        assertThat(by(args)).isEqualTo("w_*");
-        assertThat(get(args)).containsExactly("#");
-        assertThat(order(args)).isEqualTo("DESC");
-        assertThat(alpha(args)).isTrue();
+        assertThat(renderSortArgs(sortArgs("ALPHA", "DESC", "GET", "#", "BY", "w_*")))
+                .containsExactly("BY", "w_*", "GET", "#", "DESC", "ALPHA");
     }
 
     @Test
@@ -210,88 +169,49 @@ class LettuceListCommandsConvertersTest {
 
     @Test
     void lMoveArgsCoverEveryPositionPair() {
-        assertThat(lMovePositions(Position.LEFT, Position.LEFT)).containsExactly("LEFT", "LEFT");
-        assertThat(lMovePositions(Position.LEFT, Position.RIGHT)).containsExactly("LEFT", "RIGHT");
-        assertThat(lMovePositions(Position.RIGHT, Position.LEFT)).containsExactly("RIGHT", "LEFT");
-        assertThat(lMovePositions(Position.RIGHT, Position.RIGHT)).containsExactly("RIGHT", "RIGHT");
+        assertThat(renderLMoveArgs(Position.LEFT, Position.LEFT)).containsExactly("LEFT", "LEFT");
+        assertThat(renderLMoveArgs(Position.LEFT, Position.RIGHT)).containsExactly("LEFT", "RIGHT");
+        assertThat(renderLMoveArgs(Position.RIGHT, Position.LEFT)).containsExactly("RIGHT", "LEFT");
+        assertThat(renderLMoveArgs(Position.RIGHT, Position.RIGHT)).containsExactly("RIGHT", "RIGHT");
     }
 
     @Test
     void lMPopArgsWithoutCount() {
-        io.lettuce.core.LMPopArgs left = LettuceListCommandsConverters.toLettuceLMPopArgs(Position.LEFT);
-        assertThat(direction(left)).isEqualTo("LEFT");
-        assertThat(count(left)).isNull();
-
-        io.lettuce.core.LMPopArgs right = LettuceListCommandsConverters.toLettuceLMPopArgs(Position.RIGHT);
-        assertThat(direction(right)).isEqualTo("RIGHT");
-        assertThat(count(right)).isNull();
+        assertThat(renderToTokens(LettuceListCommandsConverters.toLettuceLMPopArgs(Position.LEFT)::build))
+                .containsExactly("LEFT");
+        assertThat(renderToTokens(LettuceListCommandsConverters.toLettuceLMPopArgs(Position.RIGHT)::build))
+                .containsExactly("RIGHT");
     }
 
     @Test
     void lMPopArgsWithCount() {
-        io.lettuce.core.LMPopArgs args = LettuceListCommandsConverters.toLettuceLMPopArgs(Position.RIGHT, 3);
-        assertThat(direction(args)).isEqualTo("RIGHT");
-        assertThat(count(args)).isEqualTo(3L);
+        assertThat(renderToTokens(LettuceListCommandsConverters.toLettuceLMPopArgs(Position.RIGHT, 3)::build))
+                .containsExactly("RIGHT", "COUNT", "3");
     }
 
     // ------------------------------------------------------------------ helpers
 
-    private static Long rank(io.lettuce.core.LPosArgs args) {
-        return (Long) read(io.lettuce.core.LPosArgs.class, args, "rank");
+    private static String[] renderLPosArgs(LPosArgs quarkus) {
+        return renderToTokens(LettuceListCommandsConverters.toLettuceLPosArgs(quarkus)::build);
     }
 
-    private static Long maxlen(io.lettuce.core.LPosArgs args) {
-        return (Long) read(io.lettuce.core.LPosArgs.class, args, "maxlen");
+    private static String[] renderSortArgs(SortArgs quarkus) {
+        return renderToTokens(LettuceListCommandsConverters.toLettuceSortArgs(quarkus)::build);
     }
 
-    private static String by(io.lettuce.core.SortArgs args) {
-        return (String) read(io.lettuce.core.SortArgs.class, args, "by");
+    private static String[] renderLMoveArgs(Position source, Position destination) {
+        return renderToTokens(LettuceListCommandsConverters.toLettuceLMoveArgs(source, destination)::build);
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<String> get(io.lettuce.core.SortArgs args) {
-        return (List<String>) read(io.lettuce.core.SortArgs.class, args, "get");
-    }
-
-    private static io.lettuce.core.Limit limit(io.lettuce.core.SortArgs args) {
-        return (io.lettuce.core.Limit) read(io.lettuce.core.SortArgs.class, args, "limit");
-    }
-
-    private static boolean alpha(io.lettuce.core.SortArgs args) {
-        return (Boolean) read(io.lettuce.core.SortArgs.class, args, "alpha");
-    }
-
-    private static String order(io.lettuce.core.SortArgs args) {
-        return keyword(read(io.lettuce.core.SortArgs.class, args, "order"));
-    }
-
-    private static String direction(io.lettuce.core.LMPopArgs args) {
-        return keyword(read(io.lettuce.core.LMPopArgs.class, args, "direction"));
-    }
-
-    private static Long count(io.lettuce.core.LMPopArgs args) {
-        return (Long) read(io.lettuce.core.LMPopArgs.class, args, "count");
-    }
-
-    private static List<String> lMovePositions(Position source, Position destination) {
-        io.lettuce.core.LMoveArgs args = LettuceListCommandsConverters.toLettuceLMoveArgs(source, destination);
-        return List.of(
-                keyword(read(io.lettuce.core.LMoveArgs.class, args, "source")),
-                keyword(read(io.lettuce.core.LMoveArgs.class, args, "destination")));
-    }
-
-    private static String keyword(Object protocolKeyword) {
-        return protocolKeyword == null ? null : protocolKeyword.toString();
-    }
-
-    private static Object read(Class<?> type, Object args, String name) {
-        try {
-            Field field = type.getDeclaredField(name);
-            field.setAccessible(true);
-            return field.get(args);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Cannot read Lettuce " + type.getSimpleName() + "." + name, e);
+    private static String[] renderToTokens(java.util.function.Consumer<CommandArgs<String, String>> builder) {
+        CommandArgs<String, String> args = new CommandArgs<>(StringCodec.UTF8);
+        builder.accept(args);
+        // CommandArgs.toCommandString() renders tokens space-separated, unquoted
+        String rendered = args.toCommandString();
+        if (rendered == null || rendered.isEmpty()) {
+            return new String[0];
         }
+        return rendered.split(" ");
     }
 
     /** An {@link LPosArgs} emitting exactly {@code tokens}, to cover shapes the setters cannot make. */
@@ -299,7 +219,7 @@ class LettuceListCommandsConvertersTest {
         return new LPosArgs() {
             @Override
             public List<Object> toArgs() {
-                return List.of((Object[]) tokens);
+                return List.of(tokens);
             }
         };
     }
@@ -309,7 +229,7 @@ class LettuceListCommandsConvertersTest {
         return new SortArgs() {
             @Override
             public List<Object> toArgs() {
-                return List.of((Object[]) tokens);
+                return List.of(tokens);
             }
         };
     }
