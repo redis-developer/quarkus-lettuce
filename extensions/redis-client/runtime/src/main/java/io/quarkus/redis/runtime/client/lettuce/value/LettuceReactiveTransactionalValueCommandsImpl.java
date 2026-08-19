@@ -98,12 +98,12 @@ public class LettuceReactiveTransactionalValueCommandsImpl<K, V>
 
     @Override
     public Uni<Void> lcs(K key1, K key2) {
-        return Uni.createFrom().failure(lcsUnsupported());
+        return tx.enqueue(reactive._lcs(key1, key2), r -> r == null ? null : r.getMatchString());
     }
 
     @Override
     public Uni<Void> lcsLength(K key1, K key2) {
-        return Uni.createFrom().failure(lcsUnsupported());
+        return tx.enqueue(reactive._lcsLength(key1, key2), r -> r == null ? null : r.getLen());
     }
 
     @SafeVarargs
@@ -175,10 +175,5 @@ public class LettuceReactiveTransactionalValueCommandsImpl<K, V>
     @Override
     public Uni<Void> strlen(K key) {
         return tx.enqueue(reactive._strlen(key), v -> v);
-    }
-
-    private static UnsupportedOperationException lcsUnsupported() {
-        return new UnsupportedOperationException(
-                "LCS is not yet implemented on the Lettuce backend.");
     }
 }
