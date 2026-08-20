@@ -14,10 +14,6 @@ import io.quarkus.redis.datasource.keys.RedisValueType;
 
 /**
  * Unit tests for {@link LettuceKeyCommandsConverters}.
- * <p>
- * Each test builds a Quarkus arg object, converts it, then renders the Lettuce args to
- * wire format via {@link CommandArgs#toCommandString()} and asserts the resulting token
- * list matches the Quarkus {@code toArgs()} output.
  */
 class LettuceKeyCommandsConvertersTest {
 
@@ -101,7 +97,7 @@ class LettuceKeyCommandsConvertersTest {
         ExpireArgs broken = new ExpireArgs() {
             @Override
             public java.util.List<Object> toArgs() {
-                return java.util.List.<Object> of("UNKNOWN");
+                return java.util.List.of("UNKNOWN");
             }
         };
         assertThatThrownBy(() -> LettuceKeyCommandsConverters.toLettuceExpireArgs(broken))

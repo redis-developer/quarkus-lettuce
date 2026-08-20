@@ -1,6 +1,8 @@
 package io.quarkus.redis.it.lettuce;
 
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -14,11 +16,15 @@ import jakarta.ws.rs.QueryParam;
 
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.hash.HashCommands;
+import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.keys.KeyScanArgs;
 import io.quarkus.redis.datasource.keys.KeyScanCursor;
 import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
 import io.quarkus.redis.datasource.keys.RedisValueType;
+import io.quarkus.redis.datasource.list.ListCommands;
+import io.quarkus.redis.datasource.list.ReactiveListCommands;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
@@ -37,6 +43,10 @@ public class LettuceBackendResource {
     private final ReactiveValueCommands<String, String> reactiveValues;
     private final KeyCommands<String> keys;
     private final ReactiveKeyCommands<String> reactiveKeys;
+    private final HashCommands<String, String, String> hash;
+    private final ReactiveHashCommands<String, String, String> reactiveHash;
+    private final ListCommands<String, String> list;
+    private final ReactiveListCommands<String, String> reactiveList;
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs) {
@@ -46,6 +56,10 @@ public class LettuceBackendResource {
         this.reactiveValues = reactiveDs.value(String.class);
         this.keys = ds.key(String.class);
         this.reactiveKeys = reactiveDs.key(String.class);
+        this.hash = ds.hash(String.class);
+        this.reactiveHash = reactiveDs.hash(String.class);
+        this.list = ds.list(String.class);
+        this.reactiveList = reactiveDs.list(String.class);
     }
 
     @GET
@@ -165,6 +179,48 @@ public class LettuceBackendResource {
     @Path("/key/reactive/ttl/{key}")
     public Uni<Long> keyTtlReactive(@PathParam("key") String key) {
         return reactiveKeys.ttl(key);
+    }
+
+    @POST
+    @Path("/hash/{key}/{field}")
+    public boolean hashSet(@PathParam("key") String key, @PathParam("field") String field, String value) {
+        return hash.hset(key, field, value);
+    }
+
+    @GET
+    @Path("/hash/{key}/{field}")
+    public String hashGet(@PathParam("key") String key, @PathParam("field") String field) {
+        return hash.hget(key, field);
+    }
+
+    @GET
+    @Path("/hash/{key}")
+    public Map<String, String> hashGetAll(@PathParam("key") String key) {
+        return hash.hgetall(key);
+    }
+
+    @GET
+    @Path("/hash/reactive/{key}/{field}")
+    public Uni<String> hashGetReactive(@PathParam("key") String key, @PathParam("field") String field) {
+        return reactiveHash.hget(key, field);
+    }
+
+    @POST
+    @Path("/list/{key}")
+    public long listPush(@PathParam("key") String key, String value) {
+        return list.lpush(key, value);
+    }
+
+    @GET
+    @Path("/list/{key}")
+    public List<String> listRange(@PathParam("key") String key) {
+        return list.lrange(key, 0, -1);
+    }
+
+    @GET
+    @Path("/list/reactive/{key}")
+    public Uni<List<String>> listRangeReactive(@PathParam("key") String key) {
+        return reactiveList.lrange(key, 0, -1);
     }
 
     @GET

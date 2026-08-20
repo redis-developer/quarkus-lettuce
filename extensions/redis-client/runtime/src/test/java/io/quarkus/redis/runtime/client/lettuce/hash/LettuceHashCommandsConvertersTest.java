@@ -4,72 +4,46 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.lang.reflect.Field;
+import java.util.Base64;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.ScanArgs;
 
 /**
- * Unit tests for {@link LettuceHashCommandsConverters}, exercising the Quarkus → Lettuce
- * {@link ScanArgs} conversion without a running Redis instance.
+ * Unit tests for {@link LettuceHashCommandsConverters}, without a running Redis.
  */
 class LettuceHashCommandsConvertersTest {
 
-    private static Long count(io.lettuce.core.ScanArgs args) {
-        return (Long) read(args, "count");
-    }
-
-    private static byte[] match(io.lettuce.core.ScanArgs args) {
-        return (byte[]) read(args, "match");
-    }
-
-    private static Object read(io.lettuce.core.ScanArgs args, String name) {
-        try {
-            Field field = io.lettuce.core.ScanArgs.class.getDeclaredField(name);
-            field.setAccessible(true);
-            return field.get(args);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Cannot read Lettuce ScanArgs." + name, e);
-        }
-    }
-
     @Test
     void emptyScanArgsSetsNothing() {
-        io.lettuce.core.ScanArgs args = LettuceHashCommandsConverters.toLettuceScanArgs(new ScanArgs());
-        assertThat(count(args)).isNull();
-        assertThat(match(args)).isNull();
+        assertThat(renderScanArgs(new ScanArgs())).isEmpty();
     }
 
     @Test
     void countOnly() {
-        io.lettuce.core.ScanArgs args = LettuceHashCommandsConverters.toLettuceScanArgs(new ScanArgs().count(42));
-        assertThat(count(args)).isEqualTo(42L);
-        assertThat(match(args)).isNull();
+        assertThat(renderScanArgs(new ScanArgs().count(42))).containsExactly("COUNT", "42");
     }
 
     @Test
     void matchOnly() {
-        io.lettuce.core.ScanArgs args = LettuceHashCommandsConverters.toLettuceScanArgs(new ScanArgs().match("keep:*"));
-        assertThat(count(args)).isNull();
-        assertThat(match(args)).isEqualTo("keep:*".getBytes(UTF_8));
+        assertThat(renderScanArgs(new ScanArgs().match("keep:*")))
+                .containsExactly("MATCH", base64("keep:*"));
     }
 
     @Test
     void matchAndCount() {
-        io.lettuce.core.ScanArgs args = LettuceHashCommandsConverters
-                .toLettuceScanArgs(new ScanArgs().count(7).match("keep:*"));
-        assertThat(count(args)).isEqualTo(7L);
-        assertThat(match(args)).isEqualTo("keep:*".getBytes(UTF_8));
+        assertThat(renderScanArgs(new ScanArgs().count(7).match("keep:*")))
+                .containsExactly("MATCH", base64("keep:*"), "COUNT", "7");
     }
 
     @Test
     void matchBeforeCountIsOrderIndependent() {
-        ScanArgs reordered = scanArgs("MATCH", "keep:*", "COUNT", "5");
-        io.lettuce.core.ScanArgs args = LettuceHashCommandsConverters.toLettuceScanArgs(reordered);
-        assertThat(count(args)).isEqualTo(5L);
-        assertThat(match(args)).isEqualTo("keep:*".getBytes(UTF_8));
+        assertThat(renderScanArgs(scanArgs("MATCH", "keep:*", "COUNT", "5")))
+                .containsExactly("MATCH", base64("keep:*"), "COUNT", "5");
     }
 
     @Test
@@ -86,6 +60,24 @@ class LettuceHashCommandsConvertersTest {
         assertThatThrownBy(() -> LettuceHashCommandsConverters.toLettuceScanArgs(unknown))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Unexpected ScanArgs token: NOVALUES");
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    private static String[] renderScanArgs(ScanArgs quarkus) {
+        CommandArgs<String, String> args = new CommandArgs<>(StringCodec.UTF8);
+        LettuceHashCommandsConverters.toLettuceScanArgs(quarkus).build(args);
+        // CommandArgs.toCommandString() renders tokens space-separated, unquoted
+        String rendered = args.toCommandString();
+        if (rendered == null || rendered.isEmpty()) {
+            return new String[0];
+        }
+        return rendered.split(" ");
+    }
+
+    /** Lettuce stores the MATCH pattern as bytes, which {@code toCommandString()} renders Base64-encoded. */
+    private static String base64(String pattern) {
+        return Base64.getEncoder().encodeToString(pattern.getBytes(UTF_8));
     }
 
     /** A {@link ScanArgs} emitting exactly {@code tokens}, to cover shapes the built-in setters cannot produce. */
