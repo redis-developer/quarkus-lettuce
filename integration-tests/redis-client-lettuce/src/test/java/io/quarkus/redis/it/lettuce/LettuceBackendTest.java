@@ -315,6 +315,45 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void setAddMembersAndIsMember() {
+        String key = getKey("set-sync");
+
+        RestAssured.given().when().get("/lettuce/set/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of()));
+
+        RestAssured.given().body("a").when().post("/lettuce/set/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().body("a").when().post("/lettuce/set/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+        RestAssured.given().body("b").when().post("/lettuce/set/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+
+        RestAssured.given().when().get("/lettuce/set/" + key).then()
+                .statusCode(200)
+                .body("$", CoreMatchers.hasItems("a", "b"))
+                .body("size()", CoreMatchers.is(2));
+
+        RestAssured.given().when().get("/lettuce/set/ismember/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().get("/lettuce/set/ismember/" + key + "/missing").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+    }
+
+    @Test
+    public void setCardReactive() {
+        String key = getKey("set-reactive");
+
+        RestAssured.given().when().get("/lettuce/set/reactive/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().body("x").when().post("/lettuce/set/" + key).then().statusCode(200);
+        RestAssured.given().body("y").when().post("/lettuce/set/" + key).then().statusCode(200);
+
+        RestAssured.given().when().get("/lettuce/set/reactive/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+    }
+
+    @Test
     public void sortedSetAddCardScoreRank() {
         String key = getKey("zset-sync");
 
