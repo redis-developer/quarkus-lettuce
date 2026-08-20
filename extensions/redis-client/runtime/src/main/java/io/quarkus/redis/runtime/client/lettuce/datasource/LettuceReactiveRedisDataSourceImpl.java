@@ -45,6 +45,7 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
 import io.quarkus.redis.runtime.client.lettuce.hash.LettuceReactiveHashCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceReactiveKeyCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.list.LettuceReactiveListCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveValueCommandsImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
 import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
@@ -381,12 +382,20 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K, V> ReactiveListCommands<K, V> list(Class<K> redisKeyType, Class<V> memberType) {
-        throw groupNotImplemented("list");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(memberType, "memberType");
+        @SuppressWarnings("unchecked")
+        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
+        return new LettuceReactiveListCommandsImpl<>(this, typedConnection);
     }
 
     @Override
     public <K, V> ReactiveListCommands<K, V> list(TypeReference<K> redisKeyType, TypeReference<V> memberType) {
-        throw groupNotImplemented("list");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(memberType, "memberType");
+        @SuppressWarnings("unchecked")
+        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
+        return new LettuceReactiveListCommandsImpl<>(this, typedConnection);
     }
 
     @Override

@@ -14,10 +14,6 @@ import io.quarkus.redis.datasource.value.SetArgs;
 
 /**
  * Unit tests for {@link LettuceValueCommandsConverters}.
- * <p>
- * Each test builds a Quarkus {@link SetArgs}/{@link GetExArgs}, converts it, then renders
- * the Lettuce args to wire format via {@link CommandArgs#build} and asserts the resulting
- * token list matches the Quarkus {@code toArgs()} output.
  */
 class LettuceValueCommandsConvertersTest {
 
