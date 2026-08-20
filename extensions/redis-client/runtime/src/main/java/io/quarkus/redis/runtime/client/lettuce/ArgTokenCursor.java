@@ -16,6 +16,8 @@ public final class ArgTokenCursor {
 
     private final Iterator<?> tokens;
 
+    private Object peeked;
+
     public ArgTokenCursor(Iterable<?> args) {
         this.tokens = args.iterator();
     }
@@ -24,13 +26,18 @@ public final class ArgTokenCursor {
      * Whether any tokens remain.
      */
     public boolean hasNext() {
-        return tokens.hasNext();
+        return peeked != null || tokens.hasNext();
     }
 
     /**
      * Consume and return the next token, typically a keyword such as {@code MATCH} or {@code COUNT}.
      */
     public String next() {
+        if (peeked != null) {
+            String value = peeked.toString();
+            peeked = null;
+            return value;
+        }
         return tokens.next().toString();
     }
 
@@ -42,10 +49,10 @@ public final class ArgTokenCursor {
      * @throws IllegalStateException if the token list ends before the value
      */
     public String nextValue(String keyword) {
-        if (!tokens.hasNext()) {
+        if (!hasNext()) {
             throw new IllegalStateException("Missing value for token: " + keyword);
         }
-        return tokens.next().toString();
+        return next();
     }
 
     /**
@@ -77,6 +84,25 @@ public final class ArgTokenCursor {
             return Double.parseDouble(value);
         } catch (NumberFormatException e) {
             throw new IllegalStateException("Invalid numeric value for token " + keyword + ": " + value, e);
+        }
+    }
+
+    /**
+     * Whether the next token exists and parses as a {@code long}, without consuming it.
+     * Used to disambiguate keywords whose trailing value tokens are optional.
+     */
+    public boolean nextIsNumeric() {
+        if (peeked == null) {
+            if (!tokens.hasNext()) {
+                return false;
+            }
+            peeked = tokens.next();
+        }
+        try {
+            Long.parseLong(peeked.toString());
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 

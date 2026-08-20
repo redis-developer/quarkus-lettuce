@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+
 import org.hamcrest.CoreMatchers;
 import org.junit.jupiter.api.Test;
 
@@ -244,6 +246,72 @@ class LettuceBackendTest {
         RestAssured.given().queryParam("match", prefix + "*").when().get("/lettuce/key/scan").then()
                 .statusCode(200)
                 .body("$", CoreMatchers.hasItems(prefix + "0", prefix + "1", prefix + "2", prefix + "3", prefix + "4"));
+    }
+
+    @Test
+    public void hashSetGetAll() {
+        String key = getKey("hash-sync");
+
+        RestAssured.given().when().get("/lettuce/hash/" + key + "/f1").then()
+                .statusCode(204);
+
+        RestAssured.given().body("v1").when().post("/lettuce/hash/" + key + "/f1").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("v1-updated").when().post("/lettuce/hash/" + key + "/f1").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("v2").when().post("/lettuce/hash/" + key + "/f2").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        RestAssured.given().when().get("/lettuce/hash/" + key + "/f1").then()
+                .statusCode(200).body(CoreMatchers.is("v1-updated"));
+
+        RestAssured.given().when().get("/lettuce/hash/" + key).then()
+                .statusCode(200)
+                .body("f1", CoreMatchers.is("v1-updated"))
+                .body("f2", CoreMatchers.is("v2"))
+                .body("size()", CoreMatchers.is(2));
+    }
+
+    @Test
+    public void hashGetReactive() {
+        String key = getKey("hash-reactive");
+
+        RestAssured.given().body("rv").when().post("/lettuce/hash/" + key + "/field").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        RestAssured.given().when().get("/lettuce/hash/reactive/" + key + "/field").then()
+                .statusCode(200).body(CoreMatchers.is("rv"));
+    }
+
+    @Test
+    public void listPushAndRange() {
+        String key = getKey("list-sync");
+
+        RestAssured.given().when().get("/lettuce/list/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of()));
+
+        RestAssured.given().body("a").when().post("/lettuce/list/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().body("b").when().post("/lettuce/list/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().body("c").when().post("/lettuce/list/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("3"));
+
+        RestAssured.given().when().get("/lettuce/list/" + key).then()
+                .statusCode(200)
+                .body("$", CoreMatchers.equalTo(List.of("c", "b", "a")));
+    }
+
+    @Test
+    public void listRangeReactive() {
+        String key = getKey("list-reactive");
+
+        RestAssured.given().body("x").when().post("/lettuce/list/" + key).then().statusCode(200);
+        RestAssured.given().body("y").when().post("/lettuce/list/" + key).then().statusCode(200);
+
+        RestAssured.given().when().get("/lettuce/list/reactive/" + key).then()
+                .statusCode(200)
+                .body("$", CoreMatchers.equalTo(List.of("y", "x")));
     }
 
     @Test
