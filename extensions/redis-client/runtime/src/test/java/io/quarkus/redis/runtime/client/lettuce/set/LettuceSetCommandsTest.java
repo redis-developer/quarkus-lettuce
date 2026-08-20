@@ -16,6 +16,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.SortArgs;
+import io.quarkus.redis.datasource.list.ListCommands;
 import io.quarkus.redis.datasource.set.ReactiveSScanCursor;
 import io.quarkus.redis.datasource.set.ReactiveSetCommands;
 import io.quarkus.redis.datasource.set.SScanCursor;
@@ -310,10 +311,10 @@ class LettuceSetCommandsTest extends CommandsTestBase {
         assertThat(blocking.sortAndStore(alphaKey, "dest1", new SortArgs().alpha())).isEqualTo(4);
         assertThat(blocking.sortAndStore(KEY, "dest2")).isEqualTo(9);
 
-        // SORT ... STORE writes a list; the list group is not on the Lettuce backend yet, so read it
-        // through the raw Lettuce connection.
-        assertThat(connection.sync().lrange("dest1", 0, -1)).containsExactly("a", "b", "e", "f");
-        assertThat(connection.sync().lrange("dest2", 0, -1))
+        // SORT ... STORE writes a list, so read the destinations back through the list group.
+        ListCommands<String, String> lists = blockingDs.list(String.class);
+        assertThat(lists.lrange("dest1", 0, -1)).containsExactly("a", "b", "e", "f");
+        assertThat(lists.lrange("dest2", 0, -1))
                 .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
     }
 

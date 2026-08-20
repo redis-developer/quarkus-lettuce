@@ -25,6 +25,8 @@ import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.datasource.list.ListCommands;
 import io.quarkus.redis.datasource.list.ReactiveListCommands;
+import io.quarkus.redis.datasource.set.ReactiveSetCommands;
+import io.quarkus.redis.datasource.set.SetCommands;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
@@ -47,6 +49,8 @@ public class LettuceBackendResource {
     private final ReactiveHashCommands<String, String, String> reactiveHash;
     private final ListCommands<String, String> list;
     private final ReactiveListCommands<String, String> reactiveList;
+    private final SetCommands<String, String> set;
+    private final ReactiveSetCommands<String, String> reactiveSet;
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs) {
@@ -60,6 +64,8 @@ public class LettuceBackendResource {
         this.reactiveHash = reactiveDs.hash(String.class);
         this.list = ds.list(String.class);
         this.reactiveList = reactiveDs.list(String.class);
+        this.set = ds.set(String.class);
+        this.reactiveSet = reactiveDs.set(String.class);
     }
 
     @GET
@@ -221,6 +227,30 @@ public class LettuceBackendResource {
     @Path("/list/reactive/{key}")
     public Uni<List<String>> listRangeReactive(@PathParam("key") String key) {
         return reactiveList.lrange(key, 0, -1);
+    }
+
+    @POST
+    @Path("/set/{key}")
+    public int setAdd(@PathParam("key") String key, String value) {
+        return set.sadd(key, value);
+    }
+
+    @GET
+    @Path("/set/{key}")
+    public Set<String> setMembers(@PathParam("key") String key) {
+        return set.smembers(key);
+    }
+
+    @GET
+    @Path("/set/ismember/{key}/{member}")
+    public boolean setIsMember(@PathParam("key") String key, @PathParam("member") String member) {
+        return set.sismember(key, member);
+    }
+
+    @GET
+    @Path("/set/reactive/{key}")
+    public Uni<Long> setCardReactive(@PathParam("key") String key) {
+        return reactiveSet.scard(key);
     }
 
     @GET

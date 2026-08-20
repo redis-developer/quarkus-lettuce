@@ -1,60 +1,49 @@
 package io.quarkus.redis.runtime.client.lettuce.set;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.lang.reflect.Field;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.SortArgs;
 
 /**
- * Unit tests for {@link LettuceSetCommandsConverters}, without a running Redis. The Lettuce argument
- * classes expose no getters, so the assertions read their private fields reflectively.
+ * Unit tests for {@link LettuceSetCommandsConverters}, without a running Redis.
  */
 class LettuceSetCommandsConvertersTest {
 
-    // --- ScanArgs ---
+    // ---------------------------------------------------------------- ScanArgs
 
     @Test
     void emptyScanArgsSetsNothing() {
-        io.lettuce.core.ScanArgs args = LettuceSetCommandsConverters.toLettuceScanArgs(new ScanArgs());
-        assertThat(count(args)).isNull();
-        assertThat(match(args)).isNull();
+        assertThat(renderScanArgs(new ScanArgs())).isEmpty();
     }
 
     @Test
     void countOnly() {
-        io.lettuce.core.ScanArgs args = LettuceSetCommandsConverters.toLettuceScanArgs(new ScanArgs().count(42));
-        assertThat(count(args)).isEqualTo(42L);
-        assertThat(match(args)).isNull();
+        assertThat(renderScanArgs(new ScanArgs().count(42))).containsExactly("COUNT", "42");
     }
 
     @Test
     void matchOnly() {
-        io.lettuce.core.ScanArgs args = LettuceSetCommandsConverters.toLettuceScanArgs(new ScanArgs().match("keep:*"));
-        assertThat(count(args)).isNull();
-        assertThat(match(args)).isEqualTo("keep:*".getBytes(UTF_8));
+        assertThat(renderScanArgs(new ScanArgs().match("keep:*"))).containsExactly("MATCH", "keep:*");
     }
 
     @Test
     void matchAndCount() {
-        io.lettuce.core.ScanArgs args = LettuceSetCommandsConverters
-                .toLettuceScanArgs(new ScanArgs().count(7).match("keep:*"));
-        assertThat(count(args)).isEqualTo(7L);
-        assertThat(match(args)).isEqualTo("keep:*".getBytes(UTF_8));
+        assertThat(renderScanArgs(new ScanArgs().count(7).match("keep:*")))
+                .containsExactly("MATCH", "keep:*", "COUNT", "7");
     }
 
     @Test
     void matchBeforeCountIsOrderIndependent() {
-        io.lettuce.core.ScanArgs args = LettuceSetCommandsConverters
-                .toLettuceScanArgs(scanArgs("MATCH", "keep:*", "COUNT", "5"));
-        assertThat(count(args)).isEqualTo(5L);
-        assertThat(match(args)).isEqualTo("keep:*".getBytes(UTF_8));
+        assertThat(renderScanArgs(scanArgs("MATCH", "keep:*", "COUNT", "5")))
+                .containsExactly("MATCH", "keep:*", "COUNT", "5");
     }
 
     @Test
@@ -73,104 +62,77 @@ class LettuceSetCommandsConvertersTest {
                 .hasMessage("Unexpected ScanArgs token: NOVALUES");
     }
 
-    // --- SortArgs ---
+    // ---------------------------------------------------------------- SortArgs
 
     @Test
     void emptySortArgsSetsNothing() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters.toLettuceSortArgs(new SortArgs());
-        assertThat(by(args)).isNull();
-        assertThat(get(args)).isNullOrEmpty();
-        // Lettuce initializes the field to Limit.unlimited() rather than leaving it null.
-        assertThat(limit(args).isLimited()).isFalse();
-        assertThat(alpha(args)).isFalse();
-        assertThat(order(args)).isNull();
+        assertThat(renderSortArgs(new SortArgs())).isEmpty();
     }
 
     @Test
     void ascending() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters.toLettuceSortArgs(new SortArgs().ascending());
-        assertThat(order(args)).isEqualTo("ASC");
+        assertThat(renderSortArgs(new SortArgs().ascending())).containsExactly("ASC");
     }
 
     @Test
     void descending() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters.toLettuceSortArgs(new SortArgs().descending());
-        assertThat(order(args)).isEqualTo("DESC");
+        assertThat(renderSortArgs(new SortArgs().descending())).containsExactly("DESC");
     }
 
     @Test
     void alphaOnly() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters.toLettuceSortArgs(new SortArgs().alpha());
-        assertThat(alpha(args)).isTrue();
+        assertThat(renderSortArgs(new SortArgs().alpha())).containsExactly("ALPHA");
     }
 
     @Test
     void byOnly() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters.toLettuceSortArgs(new SortArgs().by("weight_*"));
-        assertThat(by(args)).isEqualTo("weight_*");
+        assertThat(renderSortArgs(new SortArgs().by("weight_*"))).containsExactly("BY", "weight_*");
     }
 
     @Test
     void limitWithOffsetAndCount() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters.toLettuceSortArgs(new SortArgs().limit(2, 5));
-        assertThat(limit(args).getOffset()).isEqualTo(2);
-        assertThat(limit(args).getCount()).isEqualTo(5);
+        assertThat(renderSortArgs(new SortArgs().limit(2, 5))).containsExactly("LIMIT", "2", "5");
     }
 
     @Test
     void limitWithCountOnlyDefaultsOffsetToZero() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters.toLettuceSortArgs(new SortArgs().limit(7));
-        assertThat(limit(args).getOffset()).isZero();
-        assertThat(limit(args).getCount()).isEqualTo(7);
+        assertThat(renderSortArgs(new SortArgs().limit(7))).containsExactly("LIMIT", "0", "7");
     }
 
+    /** {@code SortArgs.Limit} emits a single value — the count — when its offset is -1. */
     @Test
     void limitWithASingleValueIsTreatedAsACount() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters
-                .toLettuceSortArgs(new SortArgs().limit(SortArgs.Limit.of(-1, 4)));
-        assertThat(limit(args).getOffset()).isZero();
-        assertThat(limit(args).getCount()).isEqualTo(4);
+        assertThat(renderSortArgs(new SortArgs().limit(SortArgs.Limit.of(-1, 4))))
+                .containsExactly("LIMIT", "0", "4");
     }
 
     @Test
     void limitFollowedByAKeywordIsNotMisread() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters.toLettuceSortArgs(sortArgs("LIMIT", "9", "ALPHA"));
-        assertThat(limit(args).getOffset()).isZero();
-        assertThat(limit(args).getCount()).isEqualTo(9);
-        assertThat(alpha(args)).isTrue();
+        assertThat(renderSortArgs(sortArgs("LIMIT", "9", "ALPHA")))
+                .containsExactly("LIMIT", "0", "9", "ALPHA");
     }
 
     @Test
     void multipleGetPatterns() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters
-                .toLettuceSortArgs(new SortArgs().get("#").get("data_*"));
-        assertThat(get(args)).containsExactly("#", "data_*");
+        assertThat(renderSortArgs(new SortArgs().get("#").get("data_*")))
+                .containsExactly("GET", "#", "GET", "data_*");
     }
 
     @Test
     void allSortOptionsCombined() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters.toLettuceSortArgs(new SortArgs()
+        assertThat(renderSortArgs(new SortArgs()
                 .by("weight_*")
                 .limit(1, 3)
                 .get("#")
                 .descending()
-                .alpha());
-        assertThat(by(args)).isEqualTo("weight_*");
-        assertThat(limit(args).getOffset()).isEqualTo(1);
-        assertThat(limit(args).getCount()).isEqualTo(3);
-        assertThat(get(args)).containsExactly("#");
-        assertThat(order(args)).isEqualTo("DESC");
-        assertThat(alpha(args)).isTrue();
+                .alpha()))
+                .containsExactly("BY", "weight_*", "GET", "#", "LIMIT", "1", "3", "DESC", "ALPHA");
     }
 
     @Test
     void sortTokenOrderIsIndependent() {
-        io.lettuce.core.SortArgs args = LettuceSetCommandsConverters
-                .toLettuceSortArgs(sortArgs("ALPHA", "DESC", "GET", "#", "BY", "w_*"));
-        assertThat(by(args)).isEqualTo("w_*");
-        assertThat(get(args)).containsExactly("#");
-        assertThat(order(args)).isEqualTo("DESC");
-        assertThat(alpha(args)).isTrue();
+        assertThat(renderSortArgs(sortArgs("ALPHA", "DESC", "GET", "#", "BY", "w_*")))
+                .containsExactly("BY", "w_*", "GET", "#", "DESC", "ALPHA");
     }
 
     @Test
@@ -197,45 +159,40 @@ class LettuceSetCommandsConvertersTest {
                 .hasMessage("Unexpected SortArgs token: STORE");
     }
 
-    // --- Helpers ---
+    // ------------------------------------------------------------------ helpers
 
-    private static Long count(io.lettuce.core.ScanArgs args) {
-        return (Long) read(io.lettuce.core.ScanArgs.class, args, "count");
+    private static String[] renderScanArgs(ScanArgs quarkus) {
+        return renderToTokens(LettuceSetCommandsConverters.toLettuceScanArgs(quarkus)::build);
     }
 
-    private static byte[] match(io.lettuce.core.ScanArgs args) {
-        return (byte[]) read(io.lettuce.core.ScanArgs.class, args, "match");
+    private static String[] renderSortArgs(SortArgs quarkus) {
+        return renderToTokens(LettuceSetCommandsConverters.toLettuceSortArgs(quarkus)::build);
     }
 
-    private static String by(io.lettuce.core.SortArgs args) {
-        return (String) read(io.lettuce.core.SortArgs.class, args, "by");
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<String> get(io.lettuce.core.SortArgs args) {
-        return (List<String>) read(io.lettuce.core.SortArgs.class, args, "get");
-    }
-
-    private static io.lettuce.core.Limit limit(io.lettuce.core.SortArgs args) {
-        return (io.lettuce.core.Limit) read(io.lettuce.core.SortArgs.class, args, "limit");
-    }
-
-    private static boolean alpha(io.lettuce.core.SortArgs args) {
-        return (Boolean) read(io.lettuce.core.SortArgs.class, args, "alpha");
-    }
-
-    private static String order(io.lettuce.core.SortArgs args) {
-        Object keyword = read(io.lettuce.core.SortArgs.class, args, "order");
-        return keyword == null ? null : keyword.toString();
-    }
-
-    private static Object read(Class<?> type, Object args, String name) {
+    /**
+     * Encodes the command args into a RESP byte buffer and extracts the bulk-string values.
+     * This avoids the lossy {@code toCommandString()} rendering that base64-encodes or
+     * mangles byte-typed values such as the SCAN {@code MATCH} pattern.
+     */
+    private static String[] renderToTokens(java.util.function.Consumer<CommandArgs<String, String>> builder) {
+        CommandArgs<String, String> args = new CommandArgs<>(StringCodec.UTF8);
+        builder.accept(args);
+        io.netty.buffer.ByteBuf buf = io.netty.buffer.ByteBufAllocator.DEFAULT.buffer();
         try {
-            Field field = type.getDeclaredField(name);
-            field.setAccessible(true);
-            return field.get(args);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Cannot read Lettuce " + type.getSimpleName() + "." + name, e);
+            args.encode(buf);
+            String wire = buf.toString(java.nio.charset.StandardCharsets.UTF_8);
+            String[] lines = wire.split("\r\n");
+            java.util.List<String> tokens = new java.util.ArrayList<>();
+            for (int i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith("$") && i + 1 < lines.length) {
+                    tokens.add(lines[++i]);
+                } else if (lines[i].startsWith(":")) {
+                    tokens.add(lines[i].substring(1));
+                }
+            }
+            return tokens.toArray(new String[0]);
+        } finally {
+            buf.release();
         }
     }
 
