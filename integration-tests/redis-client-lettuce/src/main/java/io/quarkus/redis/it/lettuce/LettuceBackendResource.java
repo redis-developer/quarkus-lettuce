@@ -3,6 +3,8 @@ package io.quarkus.redis.it.lettuce;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
+import java.util.OptionalLong;
 import java.util.Set;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,6 +27,9 @@ import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.datasource.list.ListCommands;
 import io.quarkus.redis.datasource.list.ReactiveListCommands;
+import io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands;
+import io.quarkus.redis.datasource.sortedset.ScoredValue;
+import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
@@ -47,6 +52,8 @@ public class LettuceBackendResource {
     private final ReactiveHashCommands<String, String, String> reactiveHash;
     private final ListCommands<String, String> list;
     private final ReactiveListCommands<String, String> reactiveList;
+    private final SortedSetCommands<String, String> sortedSet;
+    private final ReactiveSortedSetCommands<String, String> reactiveSortedSet;
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs) {
@@ -60,6 +67,8 @@ public class LettuceBackendResource {
         this.reactiveHash = reactiveDs.hash(String.class);
         this.list = ds.list(String.class);
         this.reactiveList = reactiveDs.list(String.class);
+        this.sortedSet = ds.sortedSet(String.class);
+        this.reactiveSortedSet = reactiveDs.sortedSet(String.class);
     }
 
     @GET
@@ -223,6 +232,45 @@ public class LettuceBackendResource {
         return reactiveList.lrange(key, 0, -1);
     }
 
+    @POST
+    @Path("/sortedset/add/{key}/{score}")
+    public boolean sortedSetAdd(@PathParam("key") String key, @PathParam("score") double score, String member) {
+        return sortedSet.zadd(key, score, member);
+    }
+
+    @GET
+    @Path("/sortedset/card/{key}")
+    public long sortedSetCard(@PathParam("key") String key) {
+        return sortedSet.zcard(key);
+    }
+
+    @GET
+    @Path("/sortedset/score/{key}/{member}")
+    public Double sortedSetScore(@PathParam("key") String key, @PathParam("member") String member) {
+        OptionalDouble score = sortedSet.zscore(key, member);
+        return score.isPresent() ? score.getAsDouble() : null;
+    }
+
+    @GET
+    @Path("/sortedset/rank/{key}/{member}")
+    public Long sortedSetRank(@PathParam("key") String key, @PathParam("member") String member) {
+        OptionalLong rank = sortedSet.zrank(key, member);
+        return rank.isPresent() ? rank.getAsLong() : null;
+    }
+
+    @POST
+    @Path("/sortedset/popmin/{key}")
+    public String sortedSetPopMin(@PathParam("key") String key) {
+        ScoredValue<String> popped = sortedSet.zpopmin(key);
+        return popped.value() + "," + popped.score();
+    }
+
+    @GET
+    @Path("/sortedset/reactive/score/{key}/{member}")
+    public Uni<Double> sortedSetScoreReactive(@PathParam("key") String key, @PathParam("member") String member) {
+        return reactiveSortedSet.zscore(key, member);
+    }
+
     @GET
     @Path("/with-connection/client-ids")
     public String withConnectionClientIds() {
@@ -315,5 +363,23 @@ public class LettuceBackendResource {
         long ttl = result.get(2);
         RedisValueType type = result.get(3);
         return result.discarded() + "," + result.size() + "," + exists + "," + expired + "," + (ttl > 0) + "," + type;
+    }
+
+    @POST
+    @Path("/with-transaction/sortedset/{key}")
+    public String withTransactionSortedSet(@PathParam("key") String key) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var s = tx.sortedSet(String.class);
+            s.zadd(key, 1.0, "a");
+            s.zadd(key, Map.of("b", 2.0, "c", 3.0));
+            s.zcard(key);
+            s.zpopmin(key);
+        });
+        boolean added = result.get(0);
+        int addedCount = result.get(1);
+        long card = result.get(2);
+        ScoredValue<String> min = result.get(3);
+        return result.discarded() + "," + result.size() + "," + added + "," + addedCount + "," + card
+                + "," + min.value() + "," + min.score();
     }
 }

@@ -23,6 +23,7 @@ import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.SortArgs;
 import io.quarkus.redis.datasource.list.KeyValue;
+import io.quarkus.redis.datasource.list.ListCommands;
 import io.quarkus.redis.datasource.sortedset.Range;
 import io.quarkus.redis.datasource.sortedset.ScoreRange;
 import io.quarkus.redis.datasource.sortedset.ScoredValue;
@@ -1002,8 +1003,9 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
         commands.sortAndStore(k, "dest1", new SortArgs().alpha());
         commands.sortAndStore(key, "dest2");
 
-        assertThat(connection.sync().lrange("dest1", 0, -1)).containsExactly("a", "b", "e", "f");
-        assertThat(connection.sync().lpop("dest2", 100)).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+        ListCommands<String, String> lists = ds.list(String.class);
+        assertThat(lists.lrange("dest1", 0, -1)).containsExactly("a", "b", "e", "f");
+        assertThat(lists.lpop("dest2", 100)).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
     }
 
     @Test

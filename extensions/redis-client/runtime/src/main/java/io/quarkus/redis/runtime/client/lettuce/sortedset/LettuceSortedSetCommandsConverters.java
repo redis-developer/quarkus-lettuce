@@ -49,7 +49,7 @@ public final class LettuceSortedSetCommandsConverters {
                 case "ALPHA" -> lettuce.alpha();
                 case "LIMIT" -> {
                     long first = cursor.nextLong(token);
-                    if (cursor.isNextNumeric()) {
+                    if (cursor.nextIsNumeric()) {
                         lettuce.limit(first, cursor.nextLong(token));
                     } else {
                         lettuce.limit(0, first);
@@ -113,7 +113,7 @@ public final class LettuceSortedSetCommandsConverters {
             String token = cursor.next();
             switch (token) {
                 case "WEIGHTS" -> {
-                    while (cursor.nextIsNumeric()) {
+                    while (cursor.nextIsDouble()) {
                         weights.add(cursor.nextDouble(token));
                     }
                     if (weights.isEmpty()) {

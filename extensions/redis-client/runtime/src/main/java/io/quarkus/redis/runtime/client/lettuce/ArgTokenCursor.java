@@ -106,4 +106,24 @@ public final class ArgTokenCursor {
         }
     }
 
+    /**
+     * Whether the next token exists and parses as a {@code double}, without consuming it.
+     * Used to consume a run of floating-point value tokens (e.g. the {@code WEIGHTS} list)
+     * up to the next keyword.
+     */
+    public boolean nextIsDouble() {
+        if (peeked == null) {
+            if (!tokens.hasNext()) {
+                return false;
+            }
+            peeked = tokens.next();
+        }
+        try {
+            Double.parseDouble(peeked.toString());
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
 }

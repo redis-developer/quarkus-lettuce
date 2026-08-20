@@ -113,4 +113,39 @@ class ArgTokenCursorTest {
         assertThat(cursor.next()).isEqualTo("1.5");
     }
 
+    @Test
+    void nextIsDoubleDetectsFloatingPointTokenWithoutConsumingIt() {
+        ArgTokenCursor cursor = new ArgTokenCursor(List.of("WEIGHTS", "1.5"));
+        cursor.next();
+        assertThat(cursor.nextIsDouble()).isTrue();
+        assertThat(cursor.hasNext()).isTrue();
+        assertThat(cursor.nextDouble("WEIGHTS")).isEqualTo(1.5d);
+        assertThat(cursor.hasNext()).isFalse();
+    }
+
+    @Test
+    void nextIsDoubleRecognisesIntegralAndNegativeTokens() {
+        ArgTokenCursor cursor = new ArgTokenCursor(List.of("2", "-3.5"));
+        assertThat(cursor.nextIsDouble()).isTrue();
+        assertThat(cursor.nextDouble("WEIGHTS")).isEqualTo(2.0d);
+        assertThat(cursor.nextIsDouble()).isTrue();
+        assertThat(cursor.nextDouble("WEIGHTS")).isEqualTo(-3.5d);
+    }
+
+    @Test
+    void nextIsDoubleReturnsFalseForKeywordAndPreservesIt() {
+        ArgTokenCursor cursor = new ArgTokenCursor(List.of("AGGREGATE"));
+        assertThat(cursor.nextIsDouble()).isFalse();
+        assertThat(cursor.hasNext()).isTrue();
+        assertThat(cursor.next()).isEqualTo("AGGREGATE");
+    }
+
+    @Test
+    void nextIsDoubleReturnsFalseAtEndOfInput() {
+        ArgTokenCursor cursor = new ArgTokenCursor(List.of("WEIGHTS"));
+        cursor.next();
+        assertThat(cursor.nextIsDouble()).isFalse();
+        assertThat(cursor.hasNext()).isFalse();
+    }
+
 }

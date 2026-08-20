@@ -6,43 +6,42 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.lang.reflect.Field;
+import java.util.Base64;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
 import io.lettuce.core.Range;
+import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.SortArgs;
 import io.quarkus.redis.datasource.sortedset.ScoreRange;
 import io.quarkus.redis.datasource.sortedset.ZAddArgs;
 import io.quarkus.redis.datasource.sortedset.ZAggregateArgs;
 
+/**
+ * Unit tests for {@link LettuceSortedSetCommandsConverters}.
+ */
 class LettuceSortedSetCommandsConvertersTest {
 
-    // --- ScanArgs ---
+    // ---------------------------------------------------------------- ScanArgs
 
     @Test
     void emptyScanArgsSetsNothing() {
-        io.lettuce.core.ScanArgs args = LettuceSortedSetCommandsConverters.toLettuceScanArgs(new ScanArgs());
-        assertThat(count(args)).isNull();
-        assertThat(match(args)).isNull();
+        assertThat(renderScanArgs(new ScanArgs())).isEmpty();
     }
 
     @Test
     void matchAndCount() {
-        io.lettuce.core.ScanArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceScanArgs(new ScanArgs().count(7).match("keep:*"));
-        assertThat(count(args)).isEqualTo(7L);
-        assertThat(match(args)).isEqualTo("keep:*".getBytes(UTF_8));
+        assertThat(renderScanArgs(new ScanArgs().count(7).match("keep:*")))
+                .containsExactly("MATCH", base64("keep:*"), "COUNT", "7");
     }
 
     @Test
     void matchBeforeCountIsOrderIndependent() {
-        io.lettuce.core.ScanArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceScanArgs(scanArgs("MATCH", "keep:*", "COUNT", "5"));
-        assertThat(count(args)).isEqualTo(5L);
-        assertThat(match(args)).isEqualTo("keep:*".getBytes(UTF_8));
+        assertThat(renderScanArgs(scanArgs("MATCH", "keep:*", "COUNT", "5")))
+                .containsExactly("MATCH", base64("keep:*"), "COUNT", "5");
     }
 
     @Test
@@ -61,56 +60,40 @@ class LettuceSortedSetCommandsConvertersTest {
                 .hasMessage("Unexpected ScanArgs token: NOVALUES");
     }
 
-    // --- SortArgs ---
+    // ---------------------------------------------------------------- SortArgs
 
     @Test
     void emptySortArgsSetsNothing() {
-        io.lettuce.core.SortArgs args = LettuceSortedSetCommandsConverters.toLettuceSortArgs(new SortArgs());
-        assertThat(by(args)).isNull();
-        assertThat(get(args)).isNullOrEmpty();
-        // Lettuce initializes the field to Limit.unlimited() rather than leaving it null.
-        assertThat(limit(args).isLimited()).isFalse();
-        assertThat(alpha(args)).isFalse();
-        assertThat(order(args)).isNull();
+        assertThat(renderSortArgs(new SortArgs())).isEmpty();
     }
 
     @Test
     void allSortOptionsCombined() {
-        io.lettuce.core.SortArgs args = LettuceSortedSetCommandsConverters.toLettuceSortArgs(new SortArgs()
+        assertThat(renderSortArgs(new SortArgs()
                 .by("weight_*")
                 .limit(1, 3)
                 .get("#")
                 .descending()
-                .alpha());
-        assertThat(by(args)).isEqualTo("weight_*");
-        assertThat(limit(args).getOffset()).isEqualTo(1);
-        assertThat(limit(args).getCount()).isEqualTo(3);
-        assertThat(get(args)).containsExactly("#");
-        assertThat(order(args)).isEqualTo("DESC");
-        assertThat(alpha(args)).isTrue();
+                .alpha()))
+                .containsExactly("BY", "weight_*", "GET", "#", "LIMIT", "1", "3", "DESC", "ALPHA");
     }
 
     @Test
     void ascendingSortArgs() {
-        io.lettuce.core.SortArgs args = LettuceSortedSetCommandsConverters.toLettuceSortArgs(new SortArgs().ascending());
-        assertThat(order(args)).isEqualTo("ASC");
+        assertThat(renderSortArgs(new SortArgs().ascending())).containsExactly("ASC");
     }
 
+    /** {@code SortArgs.Limit} emits a single value — the count — when its offset is -1. */
     @Test
     void limitWithASingleValueIsTreatedAsACount() {
-        io.lettuce.core.SortArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceSortArgs(new SortArgs().limit(SortArgs.Limit.of(-1, 4)));
-        assertThat(limit(args).getOffset()).isZero();
-        assertThat(limit(args).getCount()).isEqualTo(4);
+        assertThat(renderSortArgs(new SortArgs().limit(SortArgs.Limit.of(-1, 4))))
+                .containsExactly("LIMIT", "0", "4");
     }
 
     @Test
     void limitFollowedByAKeywordIsNotMisread() {
-        io.lettuce.core.SortArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceSortArgs(sortArgs("LIMIT", "9", "ALPHA"));
-        assertThat(limit(args).getOffset()).isZero();
-        assertThat(limit(args).getCount()).isEqualTo(9);
-        assertThat(alpha(args)).isTrue();
+        assertThat(renderSortArgs(sortArgs("LIMIT", "9", "ALPHA")))
+                .containsExactly("LIMIT", "0", "9", "ALPHA");
     }
 
     @Test
@@ -129,47 +112,31 @@ class LettuceSortedSetCommandsConvertersTest {
                 .hasMessage("Unexpected SortArgs token: STORE");
     }
 
-    // --- ZAddArgs ---
+    // ---------------------------------------------------------------- ZAddArgs
 
     @Test
     void emptyZAddArgsSetsNothing() {
-        io.lettuce.core.ZAddArgs args = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(new ZAddArgs());
-        assertThat(flag(args, "nx")).isFalse();
-        assertThat(flag(args, "xx")).isFalse();
-        assertThat(flag(args, "ch")).isFalse();
-        assertThat(flag(args, "lt")).isFalse();
-        assertThat(flag(args, "gt")).isFalse();
+        assertThat(renderZAddArgs(new ZAddArgs())).isEmpty();
     }
 
     @Test
     void nxAndChangedZAddArgs() {
-        io.lettuce.core.ZAddArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceZAddArgs(new ZAddArgs().nx().ch());
-        assertThat(flag(args, "nx")).isTrue();
-        assertThat(flag(args, "ch")).isTrue();
-        assertThat(flag(args, "xx")).isFalse();
+        assertThat(renderZAddArgs(new ZAddArgs().nx().ch())).containsExactly("NX", "CH");
     }
 
     @Test
     void xxAndGreaterThanZAddArgs() {
-        io.lettuce.core.ZAddArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceZAddArgs(new ZAddArgs().xx().gt());
-        assertThat(flag(args, "xx")).isTrue();
-        assertThat(flag(args, "gt")).isTrue();
-        assertThat(flag(args, "lt")).isFalse();
+        assertThat(renderZAddArgs(new ZAddArgs().xx().gt())).containsExactly("XX", "GT");
     }
 
     @Test
     void lowerThanZAddArgs() {
-        io.lettuce.core.ZAddArgs args = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(new ZAddArgs().lt());
-        assertThat(flag(args, "lt")).isTrue();
+        assertThat(renderZAddArgs(new ZAddArgs().lt())).containsExactly("LT");
     }
 
     @Test
     void zAddTokenOrderIsIndependent() {
-        io.lettuce.core.ZAddArgs args = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(zAddArgs("CH", "XX"));
-        assertThat(flag(args, "ch")).isTrue();
-        assertThat(flag(args, "xx")).isTrue();
+        assertThat(renderZAddArgs(zAddArgs("CH", "XX"))).containsExactly("XX", "CH");
     }
 
     @Test
@@ -180,54 +147,42 @@ class LettuceSortedSetCommandsConvertersTest {
                 .hasMessage("Unexpected ZAddArgs token: INCR");
     }
 
-    // --- ZAggregateArgs / ZStoreArgs ---
+    // ------------------------------------------------- ZAggregateArgs / ZStoreArgs
 
     @Test
     void emptyAggregateArgsSetsNothing() {
-        io.lettuce.core.ZAggregateArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceZAggregateArgs(new ZAggregateArgs());
-        assertThat(weights(args)).isNull();
-        assertThat(aggregate(args)).isNull();
+        assertThat(renderZAggregateArgs(new ZAggregateArgs())).isEmpty();
     }
 
+    /** {@code toCommandString()} renders weights via {@code Double.toString}, so 2.0 stays "2.0". */
     @Test
     void weightsOnly() {
-        io.lettuce.core.ZAggregateArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceZAggregateArgs(new ZAggregateArgs().weights(2.0, 3.5));
-        assertThat(weights(args)).containsExactly(2.0, 3.5);
-        assertThat(aggregate(args)).isNull();
+        assertThat(renderZAggregateArgs(new ZAggregateArgs().weights(2.0, 3.5)))
+                .containsExactly("WEIGHTS", "2.0", "3.5");
     }
 
     @Test
     void aggregateOnly() {
-        io.lettuce.core.ZAggregateArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceZAggregateArgs(new ZAggregateArgs().min());
-        assertThat(weights(args)).isNull();
-        assertThat(aggregate(args)).isEqualTo("MIN");
+        assertThat(renderZAggregateArgs(new ZAggregateArgs().min())).containsExactly("AGGREGATE", "MIN");
     }
 
     @Test
     void weightsAndAggregate() {
-        io.lettuce.core.ZAggregateArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceZAggregateArgs(new ZAggregateArgs().weights(1, 2, 3).max());
-        assertThat(weights(args)).containsExactly(1.0, 2.0, 3.0);
-        assertThat(aggregate(args)).isEqualTo("MAX");
+        assertThat(renderZAggregateArgs(new ZAggregateArgs().weights(1, 2, 3).max()))
+                .containsExactly("WEIGHTS", "1.0", "2.0", "3.0", "AGGREGATE", "MAX");
     }
 
     @Test
     void aggregateBeforeWeightsIsOrderIndependent() {
-        io.lettuce.core.ZAggregateArgs args = LettuceSortedSetCommandsConverters
-                .toLettuceZAggregateArgs(aggregateArgs("AGGREGATE", "SUM", "WEIGHTS", "2.0", "3.0"));
-        assertThat(weights(args)).containsExactly(2.0, 3.0);
-        assertThat(aggregate(args)).isEqualTo("SUM");
+        assertThat(renderZAggregateArgs(aggregateArgs("AGGREGATE", "SUM", "WEIGHTS", "2.0", "3.0")))
+                .containsExactly("WEIGHTS", "2.0", "3.0", "AGGREGATE", "SUM");
     }
 
     @Test
     void theSameOptionsConvertToZStoreArgs() {
         io.lettuce.core.ZStoreArgs args = LettuceSortedSetCommandsConverters
                 .toLettuceZStoreArgs(new ZAggregateArgs().weights(2.0, 3.0).sum());
-        assertThat(weights(args)).containsExactly(2.0, 3.0);
-        assertThat(aggregate(args)).isEqualTo("SUM");
+        assertThat(renderToTokens(args::build)).containsExactly("WEIGHTS", "2.0", "3.0", "AGGREGATE", "SUM");
     }
 
     @Test
@@ -262,7 +217,9 @@ class LettuceSortedSetCommandsConvertersTest {
                 .hasMessage("Unexpected ZAggregateArgs token: WITHSCORES");
     }
 
-    // --- ScoreRange ---
+    // -------------------------------------------------------------- ScoreRange
+    // Lettuce Range is not a renderable command-args object, so these assert through
+    // its public boundary accessors instead of wire tokens.
 
     @Test
     void inclusiveScoreRange() {
@@ -311,7 +268,7 @@ class LettuceSortedSetCommandsConvertersTest {
         assertThat(range.getUpper().isIncluding()).isFalse();
     }
 
-    // --- lexicographical Range ---
+    // ------------------------------------------------------ lexicographical Range
 
     @Test
     void inclusiveLexRange() {
@@ -356,60 +313,38 @@ class LettuceSortedSetCommandsConvertersTest {
         assertThat(range.getUpper().isIncluding()).isTrue();
     }
 
-    // --- Helpers ---
+    // ------------------------------------------------------------------ helpers
 
-    private static Long count(io.lettuce.core.ScanArgs args) {
-        return (Long) read(io.lettuce.core.ScanArgs.class, args, "count");
+    private static String[] renderScanArgs(ScanArgs quarkus) {
+        return renderToTokens(LettuceSortedSetCommandsConverters.toLettuceScanArgs(quarkus)::build);
     }
 
-    private static byte[] match(io.lettuce.core.ScanArgs args) {
-        return (byte[]) read(io.lettuce.core.ScanArgs.class, args, "match");
+    private static String[] renderSortArgs(SortArgs quarkus) {
+        return renderToTokens(LettuceSortedSetCommandsConverters.toLettuceSortArgs(quarkus)::build);
     }
 
-    private static String by(io.lettuce.core.SortArgs args) {
-        return (String) read(io.lettuce.core.SortArgs.class, args, "by");
+    private static String[] renderZAddArgs(ZAddArgs quarkus) {
+        return renderToTokens(LettuceSortedSetCommandsConverters.toLettuceZAddArgs(quarkus)::build);
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<String> get(io.lettuce.core.SortArgs args) {
-        return (List<String>) read(io.lettuce.core.SortArgs.class, args, "get");
+    private static String[] renderZAggregateArgs(ZAggregateArgs quarkus) {
+        return renderToTokens(LettuceSortedSetCommandsConverters.toLettuceZAggregateArgs(quarkus)::build);
     }
 
-    private static io.lettuce.core.Limit limit(io.lettuce.core.SortArgs args) {
-        return (io.lettuce.core.Limit) read(io.lettuce.core.SortArgs.class, args, "limit");
-    }
-
-    private static boolean alpha(io.lettuce.core.SortArgs args) {
-        return (Boolean) read(io.lettuce.core.SortArgs.class, args, "alpha");
-    }
-
-    private static String order(io.lettuce.core.SortArgs args) {
-        Object keyword = read(io.lettuce.core.SortArgs.class, args, "order");
-        return keyword == null ? null : keyword.toString();
-    }
-
-    private static boolean flag(io.lettuce.core.ZAddArgs args, String name) {
-        return (Boolean) read(io.lettuce.core.ZAddArgs.class, args, name);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<Double> weights(io.lettuce.core.ZAggregateArgs args) {
-        return (List<Double>) read(io.lettuce.core.ZAggregateArgs.class, args, "weights");
-    }
-
-    private static String aggregate(io.lettuce.core.ZAggregateArgs args) {
-        Object value = read(io.lettuce.core.ZAggregateArgs.class, args, "aggregate");
-        return value == null ? null : value.toString();
-    }
-
-    private static Object read(Class<?> type, Object args, String name) {
-        try {
-            Field field = type.getDeclaredField(name);
-            field.setAccessible(true);
-            return field.get(args);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Cannot read Lettuce " + type.getSimpleName() + "." + name, e);
+    private static String[] renderToTokens(java.util.function.Consumer<CommandArgs<String, String>> builder) {
+        CommandArgs<String, String> args = new CommandArgs<>(StringCodec.UTF8);
+        builder.accept(args);
+        // CommandArgs.toCommandString() renders tokens space-separated, unquoted
+        String rendered = args.toCommandString();
+        if (rendered == null || rendered.isEmpty()) {
+            return new String[0];
         }
+        return rendered.split(" ");
+    }
+
+    /** Lettuce stores the MATCH pattern as bytes, which {@code toCommandString()} renders Base64-encoded. */
+    private static String base64(String pattern) {
+        return Base64.getEncoder().encodeToString(pattern.getBytes(UTF_8));
     }
 
     /** A {@link ScanArgs} emitting exactly {@code tokens}, to cover shapes the setters cannot make. */
