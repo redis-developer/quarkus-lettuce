@@ -36,6 +36,8 @@ import io.quarkus.redis.runtime.client.lettuce.list.LettuceReactiveListCommandsI
 import io.quarkus.redis.runtime.client.lettuce.list.LettuceReactiveTransactionalListCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.set.LettuceReactiveSetCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.set.LettuceReactiveTransactionalSetCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.sortedset.LettuceReactiveSortedSetCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.sortedset.LettuceReactiveTransactionalSortedSetCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveTransactionalValueCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveValueCommandsImpl;
 import io.smallrye.mutiny.Uni;
@@ -132,7 +134,11 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalSortedSetCommands<K, V> sortedSet(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("sortedSet");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        LettuceReactiveSortedSetCommandsImpl<K, V> reactiveSortedSet = (LettuceReactiveSortedSetCommandsImpl<K, V>) reactive
+                .sortedSet(redisKeyType, valueType);
+        return new LettuceReactiveTransactionalSortedSetCommandsImpl<>(this, reactiveSortedSet, tx);
     }
 
     @Override

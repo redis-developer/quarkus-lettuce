@@ -354,6 +354,58 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void sortedSetAddCardScoreRank() {
+        String key = getKey("zset-sync");
+
+        RestAssured.given().when().get("/lettuce/sortedset/score/" + key + "/a").then()
+                .statusCode(204);
+
+        RestAssured.given().body("a").when().post("/lettuce/sortedset/add/" + key + "/1.0").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("a").when().post("/lettuce/sortedset/add/" + key + "/1.0").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("b").when().post("/lettuce/sortedset/add/" + key + "/2.5").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        RestAssured.given().when().get("/lettuce/sortedset/card/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().when().get("/lettuce/sortedset/score/" + key + "/b").then()
+                .statusCode(200).body(CoreMatchers.is("2.5"));
+        RestAssured.given().when().get("/lettuce/sortedset/rank/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+        RestAssured.given().when().get("/lettuce/sortedset/rank/" + key + "/b").then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().when().get("/lettuce/sortedset/rank/" + key + "/missing").then()
+                .statusCode(204);
+    }
+
+    @Test
+    public void sortedSetPopMin() {
+        String key = getKey("zset-popmin");
+
+        RestAssured.given().body("low").when().post("/lettuce/sortedset/add/" + key + "/1.0").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("high").when().post("/lettuce/sortedset/add/" + key + "/9.0").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        RestAssured.given().when().post("/lettuce/sortedset/popmin/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("low,1.0"));
+        RestAssured.given().when().get("/lettuce/sortedset/card/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+    }
+
+    @Test
+    public void sortedSetScoreReactive() {
+        String key = getKey("zset-reactive");
+
+        RestAssured.given().body("m").when().post("/lettuce/sortedset/add/" + key + "/5.0").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        RestAssured.given().when().get("/lettuce/sortedset/reactive/score/" + key + "/m").then()
+                .statusCode(200).body(CoreMatchers.is("5.0"));
+    }
+
+    @Test
     public void withConnectionBlockingClientIds() {
         String body = RestAssured.given().when().get("/lettuce/with-connection/client-ids")
                 .then().statusCode(200).extract().asString();
@@ -433,5 +485,13 @@ class LettuceBackendTest {
         String body = RestAssured.given().when().post("/lettuce/with-transaction/key/" + key)
                 .then().statusCode(200).extract().asString();
         assertEquals("false,4,true,true,true,STRING", body);
+    }
+
+    @Test
+    public void withTransactionSortedSet() {
+        String key = getKey("tx-zset");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/sortedset/" + key)
+                .then().statusCode(200).extract().asString();
+        assertEquals("false,4,true,2,3,a,1.0", body);
     }
 }

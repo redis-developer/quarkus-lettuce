@@ -47,6 +47,7 @@ import io.quarkus.redis.runtime.client.lettuce.hash.LettuceReactiveHashCommandsI
 import io.quarkus.redis.runtime.client.lettuce.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.list.LettuceReactiveListCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.set.LettuceReactiveSetCommandsImpl;
+import io.quarkus.redis.runtime.client.lettuce.sortedset.LettuceReactiveSortedSetCommandsImpl;
 import io.quarkus.redis.runtime.client.lettuce.value.LettuceReactiveValueCommandsImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
 import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
@@ -363,12 +364,20 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K, V> ReactiveSortedSetCommands<K, V> sortedSet(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("sortedSet");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        @SuppressWarnings("unchecked")
+        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
+        return new LettuceReactiveSortedSetCommandsImpl<>(this, typedConnection, valueType);
     }
 
     @Override
     public <K, V> ReactiveSortedSetCommands<K, V> sortedSet(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("sortedSet");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        @SuppressWarnings("unchecked")
+        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
+        return new LettuceReactiveSortedSetCommandsImpl<>(this, typedConnection, valueType.getType());
     }
 
     @Override

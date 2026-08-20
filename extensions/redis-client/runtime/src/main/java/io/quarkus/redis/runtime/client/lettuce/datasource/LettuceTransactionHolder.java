@@ -40,6 +40,9 @@ public class LettuceTransactionHolder {
      * <p>
      * The {@code command} supplier is invoked eagerly so the command is enqueued on the
      * pinned connection in call order, which matches the order of the {@code EXEC} reply.
+     * A supplier that throws instead of issuing a command — the command implementations defer
+     * some argument validations that way — fails the returned {@link Uni} rather than the call,
+     * as the Vert.x backend and the non-transactional path do, and records no entry.
      *
      * @param command supplier issuing the Lettuce async command, returning its {@link RedisFuture}
      * @param mapper maps the command's raw result to the Quarkus-typed transaction entry
@@ -48,7 +51,12 @@ public class LettuceTransactionHolder {
      */
     @SuppressWarnings("unchecked")
     public <T> Uni<Void> enqueue(Supplier<RedisFuture<T>> command, Function<? super T, Object> mapper) {
-        RedisFuture<T> future = command.get();
+        RedisFuture<T> future;
+        try {
+            future = command.get();
+        } catch (RuntimeException e) {
+            return Uni.createFrom().failure(e);
+        }
         futures.add(future);
         mappers.add((Function<Object, Object>) mapper);
         return Uni.createFrom().voidItem();
