@@ -20,17 +20,17 @@ import io.smallrye.mutiny.Uni;
  * @param <K> the key type
  * @param <V> the value type
  */
-public class LettuceKeyScanReactiveCursorImpl<K, V> implements ReactiveKeyScanCursor<K> {
+public class LettuceReactiveKeyScanCursorImpl<K, V> implements ReactiveKeyScanCursor<K> {
 
     private final RedisAsyncCommands<K, V> async;
     private final KeyScanArgs keyScanArgs;
     private ScanCursor cursor = ScanCursor.INITIAL;
 
-    public LettuceKeyScanReactiveCursorImpl(RedisAsyncCommands<K, V> async) {
+    public LettuceReactiveKeyScanCursorImpl(RedisAsyncCommands<K, V> async) {
         this(async, new KeyScanArgs());
     }
 
-    public LettuceKeyScanReactiveCursorImpl(RedisAsyncCommands<K, V> async, KeyScanArgs keyScanArgs) {
+    public LettuceReactiveKeyScanCursorImpl(RedisAsyncCommands<K, V> async, KeyScanArgs keyScanArgs) {
         nonNull(async, "async");
         nonNull(keyScanArgs, "args");
         this.async = async;

@@ -537,10 +537,6 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         return result;
     }
 
-    static <T> List<T> orEmpty(List<T> values) {
-        return values == null ? Collections.emptyList() : values;
-    }
-
     private static boolean isWholeSeconds(Duration duration) {
         return duration.getNano() == 0;
     }
