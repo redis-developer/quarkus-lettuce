@@ -1133,7 +1133,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     static <K, V> ScoredValue<V> popped(io.lettuce.core.KeyValue<K, io.lettuce.core.ScoredValue<V>> result) {
         if (result == null || !result.hasValue()) {
-            return ScoredValue.empty();
+            return null;
         }
         return toScoredValue(result.getValue());
     }
