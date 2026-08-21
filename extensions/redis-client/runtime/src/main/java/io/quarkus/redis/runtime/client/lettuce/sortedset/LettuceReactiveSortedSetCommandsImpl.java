@@ -384,13 +384,13 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     final Supplier<RedisFuture<Long>> _zinterstore(K destination, ZAggregateArgs arguments, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        nonNull(arguments, "arguments");
-        nonNull(destination, "destination");
         if (keys.length < 2) {
             return () -> {
                 throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
+        nonNull(arguments, "arguments");
+        nonNull(destination, "destination");
         io.lettuce.core.ZStoreArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZStoreArgs(arguments);
         return () -> sortedSet.zinterstore(destination, lettuceArgs, keys);
     }
@@ -1109,7 +1109,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     static <K, V> ScoredValue<V> popped(io.lettuce.core.KeyValue<K, io.lettuce.core.ScoredValue<V>> result) {
         if (result == null || !result.hasValue()) {
-            return null;
+            return ScoredValue.empty();
         }
         return toScoredValue(result.getValue());
     }
