@@ -1,5 +1,6 @@
 package io.quarkus.redis.runtime.client.lettuce;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 
@@ -45,5 +46,13 @@ public abstract class AbstractLettuceCommands<K, V> {
             return 0L;
         }
         return value;
+    }
+
+    public static boolean isWholeSeconds(Duration duration) {
+        return duration.getNano() == 0;
+    }
+
+    public static double toFractionalSeconds(Duration duration) {
+        return duration.toMillis() / 1_000.0d;
     }
 }

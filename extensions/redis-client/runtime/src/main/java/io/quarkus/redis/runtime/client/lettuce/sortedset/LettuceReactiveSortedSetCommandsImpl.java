@@ -489,8 +489,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzmpop(seconds, ZPopArgs.Builder.min(), keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzmpop(timeout.getSeconds(), ZPopArgs.Builder.min(), keys);
+            }
+            return sortedSet.bzmpop(toFractionalSeconds(timeout), ZPopArgs.Builder.min(), keys);
+        };
     }
 
     @SafeVarargs
@@ -506,8 +510,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzmpop(seconds, (long) count, ZPopArgs.Builder.min(), keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.min(), keys);
+            }
+            return sortedSet.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.min(), keys);
+        };
     }
 
     @SafeVarargs
@@ -522,8 +530,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzmpop(seconds, ZPopArgs.Builder.max(), keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzmpop(timeout.getSeconds(), ZPopArgs.Builder.max(), keys);
+            }
+            return sortedSet.bzmpop(toFractionalSeconds(timeout), ZPopArgs.Builder.max(), keys);
+        };
     }
 
     @SafeVarargs
@@ -539,8 +551,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzmpop(seconds, (long) count, ZPopArgs.Builder.max(), keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.max(), keys);
+            }
+            return sortedSet.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.max(), keys);
+        };
     }
 
     @SafeVarargs
@@ -653,8 +669,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzpopmin(seconds, keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzpopmin(timeout.getSeconds(), keys);
+            }
+            return sortedSet.bzpopmin(toFractionalSeconds(timeout), keys);
+        };
     }
 
     @SafeVarargs
@@ -669,8 +689,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzpopmax(seconds, keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzpopmax(timeout.getSeconds(), keys);
+            }
+            return sortedSet.bzpopmax(toFractionalSeconds(timeout), keys);
+        };
     }
 
     @Override

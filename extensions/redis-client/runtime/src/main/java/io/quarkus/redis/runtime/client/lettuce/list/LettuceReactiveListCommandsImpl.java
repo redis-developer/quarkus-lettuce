@@ -536,12 +536,4 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         }
         return result;
     }
-
-    private static boolean isWholeSeconds(Duration duration) {
-        return duration.getNano() == 0;
-    }
-
-    private static double toFractionalSeconds(Duration duration) {
-        return duration.toMillis() / 1000.0;
-    }
 }
