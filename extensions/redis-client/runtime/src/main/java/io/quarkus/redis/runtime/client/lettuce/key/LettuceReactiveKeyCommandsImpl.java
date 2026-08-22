@@ -149,7 +149,7 @@ public class LettuceReactiveKeyCommandsImpl<K, V> extends AbstractLettuceCommand
     }
 
     Supplier<RedisFuture<Boolean>> _expire(K key, long seconds) {
-        return () -> async.expire(key, seconds);
+        return _expire(key, seconds, new ExpireArgs());
     }
 
     @Override
@@ -286,8 +286,7 @@ public class LettuceReactiveKeyCommandsImpl<K, V> extends AbstractLettuceCommand
     }
 
     Supplier<RedisFuture<Boolean>> _pexpire(K key, long ms) {
-        nonNull(key, "key");
-        return () -> async.pexpire(key, ms);
+        return _pexpire(key, ms, new ExpireArgs());
     }
 
     @Override
