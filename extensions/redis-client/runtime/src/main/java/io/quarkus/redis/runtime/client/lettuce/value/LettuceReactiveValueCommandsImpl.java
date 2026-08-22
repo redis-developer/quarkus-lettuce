@@ -1,5 +1,6 @@
 package io.quarkus.redis.runtime.client.lettuce.value;
 
+import static io.quarkus.redis.runtime.datasource.Validation.notNullOrEmpty;
 import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.positive;
@@ -27,9 +28,6 @@ import io.smallrye.mutiny.Uni;
 
 /**
  * Lettuce-backed implementation of {@link ReactiveValueCommands}.
- * <p>
- * Delegates every command to Lettuce async APIs and adapts the resulting
- * {@link java.util.concurrent.CompletionStage} to {@link Uni} via {@link LettuceResult#toUni}.
  *
  * @param <K> the key type
  * @param <V> the value type
@@ -55,7 +53,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_append(key, value));
     }
 
-    public Supplier<RedisFuture<Long>> _append(K key, V value) {
+    Supplier<RedisFuture<Long>> _append(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
         return () -> async.append(key, value);
@@ -66,7 +64,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_decr(key));
     }
 
-    public Supplier<RedisFuture<Long>> _decr(K key) {
+    Supplier<RedisFuture<Long>> _decr(K key) {
         nonNull(key, "key");
         return () -> async.decr(key);
     }
@@ -76,7 +74,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_decrby(key, amount));
     }
 
-    public Supplier<RedisFuture<Long>> _decrby(K key, long amount) {
+    Supplier<RedisFuture<Long>> _decrby(K key, long amount) {
         nonNull(key, "key");
         return () -> async.decrby(key, amount);
     }
@@ -86,7 +84,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_get(key));
     }
 
-    public Supplier<RedisFuture<V>> _get(K key) {
+    Supplier<RedisFuture<V>> _get(K key) {
         nonNull(key, "key");
         return () -> async.get(key);
     }
@@ -96,7 +94,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_getdel(key));
     }
 
-    public Supplier<RedisFuture<V>> _getdel(K key) {
+    Supplier<RedisFuture<V>> _getdel(K key) {
         nonNull(key, "key");
         return () -> async.getdel(key);
     }
@@ -106,7 +104,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_getex(key, args));
     }
 
-    public Supplier<RedisFuture<V>> _getex(K key, GetExArgs args) {
+    Supplier<RedisFuture<V>> _getex(K key, GetExArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
         io.lettuce.core.GetExArgs lettuceArgs = LettuceValueCommandsConverters.toLettuceGetExArgs(args);
@@ -119,7 +117,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
                 .map(v -> v == null ? null : v.toString());
     }
 
-    public Supplier<RedisFuture<V>> _getrange(K key, long start, long end) {
+    Supplier<RedisFuture<V>> _getrange(K key, long start, long end) {
         nonNull(key, "key");
         positiveOrZero(start, "start");
         return () -> async.getrange(key, start, end);
@@ -130,7 +128,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_getset(key, value));
     }
 
-    public Supplier<RedisFuture<V>> _getset(K key, V value) {
+    Supplier<RedisFuture<V>> _getset(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
         return () -> async.getset(key, value);
@@ -141,7 +139,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_incr(key));
     }
 
-    public Supplier<RedisFuture<Long>> _incr(K key) {
+    Supplier<RedisFuture<Long>> _incr(K key) {
         nonNull(key, "key");
         return () -> async.incr(key);
     }
@@ -151,7 +149,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_incrby(key, amount));
     }
 
-    public Supplier<RedisFuture<Long>> _incrby(K key, long amount) {
+    Supplier<RedisFuture<Long>> _incrby(K key, long amount) {
         nonNull(key, "key");
         return () -> async.incrby(key, amount);
     }
@@ -161,7 +159,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_incrbyfloat(key, amount));
     }
 
-    public Supplier<RedisFuture<Double>> _incrbyfloat(K key, double amount) {
+    Supplier<RedisFuture<Double>> _incrbyfloat(K key, double amount) {
         nonNull(key, "key");
         return () -> async.incrbyfloat(key, amount);
     }
@@ -172,7 +170,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
                 .map(r -> r == null ? null : r.getMatchString());
     }
 
-    public Supplier<RedisFuture<StringMatchResult>> _lcs(K key1, K key2) {
+    Supplier<RedisFuture<StringMatchResult>> _lcs(K key1, K key2) {
         LcsArgs args = lcsArgs(key1, key2);
         return () -> async.lcs(args);
     }
@@ -183,7 +181,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
                 .map(r -> r == null ? null : r.getLen());
     }
 
-    public Supplier<RedisFuture<StringMatchResult>> _lcsLength(K key1, K key2) {
+    Supplier<RedisFuture<StringMatchResult>> _lcsLength(K key1, K key2) {
         LcsArgs args = lcsArgs(key1, key2).justLen();
         return () -> async.lcs(args);
     }
@@ -214,11 +212,8 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     }
 
     @SafeVarargs
-    public final Supplier<RedisFuture<List<KeyValue<K, V>>>> _mget(K... keys) {
-        nonNull(keys, "keys");
-        if (keys.length == 0) {
-            throw new IllegalArgumentException("`keys` must not be empty");
-        }
+    final Supplier<RedisFuture<List<KeyValue<K, V>>>> _mget(K... keys) {
+        notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         return () -> async.mget(keys);
     }
@@ -236,8 +231,8 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_mset(map)).replaceWithVoid();
     }
 
-    public Supplier<RedisFuture<String>> _mset(Map<K, V> map) {
-        requireNonEmpty(map);
+    Supplier<RedisFuture<String>> _mset(Map<K, V> map) {
+        notNullOrEmpty(map, "map");
         return () -> async.mset(map);
     }
 
@@ -246,8 +241,8 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_msetnx(map));
     }
 
-    public Supplier<RedisFuture<Boolean>> _msetnx(Map<K, V> map) {
-        requireNonEmpty(map);
+    Supplier<RedisFuture<Boolean>> _msetnx(Map<K, V> map) {
+        notNullOrEmpty(map, "map");
         return () -> async.msetnx(map);
     }
 
@@ -256,7 +251,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_psetex(key, milliseconds, value)).replaceWithVoid();
     }
 
-    public Supplier<RedisFuture<String>> _psetex(K key, long milliseconds, V value) {
+    Supplier<RedisFuture<String>> _psetex(K key, long milliseconds, V value) {
         nonNull(key, "key");
         positive(milliseconds, "milliseconds");
         nonNull(value, "value");
@@ -268,7 +263,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_set(key, value)).replaceWithVoid();
     }
 
-    public Supplier<RedisFuture<String>> _set(K key, V value) {
+    Supplier<RedisFuture<String>> _set(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
         return () -> async.set(key, value);
@@ -279,7 +274,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_set(key, value, setArgs)).replaceWithVoid();
     }
 
-    public Supplier<RedisFuture<String>> _set(K key, V value, SetArgs setArgs) {
+    Supplier<RedisFuture<String>> _set(K key, V value, SetArgs setArgs) {
         nonNull(key, "key");
         nonNull(value, "value");
         nonNull(setArgs, "setArgs");
@@ -303,7 +298,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_setGet(key, value));
     }
 
-    public Supplier<RedisFuture<V>> _setGet(K key, V value) {
+    Supplier<RedisFuture<V>> _setGet(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
         return () -> async.setGet(key, value);
@@ -314,7 +309,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_setGet(key, value, setArgs));
     }
 
-    public Supplier<RedisFuture<V>> _setGet(K key, V value, SetArgs setArgs) {
+    Supplier<RedisFuture<V>> _setGet(K key, V value, SetArgs setArgs) {
         nonNull(key, "key");
         nonNull(value, "value");
         nonNull(setArgs, "setArgs");
@@ -327,7 +322,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_setex(key, seconds, value)).replaceWithVoid();
     }
 
-    public Supplier<RedisFuture<String>> _setex(K key, long seconds, V value) {
+    Supplier<RedisFuture<String>> _setex(K key, long seconds, V value) {
         nonNull(key, "key");
         positive(seconds, "seconds");
         nonNull(value, "value");
@@ -339,7 +334,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_setnx(key, value));
     }
 
-    public Supplier<RedisFuture<Boolean>> _setnx(K key, V value) {
+    Supplier<RedisFuture<Boolean>> _setnx(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
         return () -> async.setnx(key, value);
@@ -350,7 +345,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_setrange(key, offset, value));
     }
 
-    public Supplier<RedisFuture<Long>> _setrange(K key, long offset, V value) {
+    Supplier<RedisFuture<Long>> _setrange(K key, long offset, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
         positiveOrZero(offset, "offset");
@@ -362,18 +357,8 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return LettuceResult.toUni(_strlen(key));
     }
 
-    public Supplier<RedisFuture<Long>> _strlen(K key) {
+    Supplier<RedisFuture<Long>> _strlen(K key) {
         nonNull(key, "key");
         return () -> async.strlen(key);
-    }
-
-    public static boolean isOk(String response) {
-        return "OK".equals(response);
-    }
-
-    private static <K, V> void requireNonEmpty(Map<K, V> map) {
-        if (map == null || map.isEmpty()) {
-            throw new IllegalArgumentException("`map` must not be null or empty");
-        }
     }
 }

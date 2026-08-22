@@ -38,12 +38,6 @@ import io.smallrye.mutiny.Uni;
 /**
  * Lettuce-backed implementation of {@link ReactiveSortedSetCommands}, on top of
  * {@link RedisSortedSetAsyncCommands} plus {@link RedisKeyAsyncCommands} for {@code SORT}.
- * <p>
- * Where the Vert.x backend builds one command and appends the {@code REV} keyword, Lettuce exposes a
- * separate reversed method per command ({@code zrevrange}, {@code zrevrangebylex}, ...). Those methods
- * emit the range boundaries in the opposite order, so a reversed range is handed over with its
- * boundaries swapped wherever needed to reproduce the exact bytes the Vert.x backend sends — see
- * {@link LettuceSortedSetCommandsConverters#toLettuceScoreRange}.
  *
  * @param <K> the key type
  * @param <V> the type of the scored member
@@ -95,7 +89,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Boolean> zadd(K key, ZAddArgs args, double score, V value) {
-        return LettuceResult.toUni(_zadd(key, args, score, value)).map(LettuceReactiveSortedSetCommandsImpl::longAsBoolean);
+        return LettuceResult.toUni(_zadd(key, args, score, value)).map(LettuceReactiveSortedSetCommandsImpl::asBoolean);
     }
 
     Supplier<RedisFuture<Long>> _zadd(K key, ZAddArgs args, double score, V value) {
@@ -191,7 +185,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Long> zcard(K key) {
-        return LettuceResult.toUni(_zcard(key)).map(LettuceReactiveSortedSetCommandsImpl::longOrZero);
+        return LettuceResult.toUni(_zcard(key)).map(LettuceReactiveSortedSetCommandsImpl::orZero);
     }
 
     Supplier<RedisFuture<Long>> _zcard(K key) {
@@ -214,7 +208,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<List<V>> zdiff(K... keys) {
-        return LettuceResult.toUni(_zdiff(keys)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
+        return LettuceResult.toUni(_zdiff(keys)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
     }
 
     @SafeVarargs
@@ -223,7 +217,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
             return () -> {
-                throw new IllegalArgumentException("Need at least two keys");
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
         return () -> sortedSet.zdiff(keys);
@@ -241,7 +235,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
             return () -> {
-                throw new IllegalArgumentException("Need at least two keys");
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
         return () -> sortedSet.zdiffWithScores(keys);
@@ -260,7 +254,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
             return () -> {
-                throw new IllegalArgumentException("Need at least two keys");
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
         return () -> sortedSet.zdiffstore(destination, keys);
@@ -281,7 +275,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<List<V>> zinter(ZAggregateArgs args, K... keys) {
-        return LettuceResult.toUni(_zinter(args, keys)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
+        return LettuceResult.toUni(_zinter(args, keys)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
     }
 
     @SafeVarargs
@@ -291,7 +285,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
             return () -> {
-                throw new IllegalArgumentException("Need at least two keys");
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
         io.lettuce.core.ZAggregateArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAggregateArgs(args);
@@ -324,7 +318,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
             return () -> {
-                throw new IllegalArgumentException("Need at least two keys");
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
         io.lettuce.core.ZAggregateArgs lettuceArgs = LettuceSortedSetCommandsConverters
@@ -355,7 +349,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
             return () -> {
-                throw new IllegalArgumentException("Need at least two keys");
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
         return () -> sortedSet.zintercard(keys);
@@ -373,7 +367,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
             return () -> {
-                throw new IllegalArgumentException("Need at least two keys");
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
         positive(limit, "limit");
@@ -390,13 +384,13 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     final Supplier<RedisFuture<Long>> _zinterstore(K destination, ZAggregateArgs arguments, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        nonNull(arguments, "arguments");
-        nonNull(destination, "destination");
         if (keys.length < 2) {
             return () -> {
-                throw new IllegalArgumentException("Need at least two keys");
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
+        nonNull(arguments, "arguments");
+        nonNull(destination, "destination");
         io.lettuce.core.ZStoreArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZStoreArgs(arguments);
         return () -> sortedSet.zinterstore(destination, lettuceArgs, keys);
     }
@@ -495,8 +489,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzmpop(seconds, ZPopArgs.Builder.min(), keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzmpop(timeout.getSeconds(), ZPopArgs.Builder.min(), keys);
+            }
+            return sortedSet.bzmpop(toFractionalSeconds(timeout), ZPopArgs.Builder.min(), keys);
+        };
     }
 
     @SafeVarargs
@@ -512,8 +510,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzmpop(seconds, (long) count, ZPopArgs.Builder.min(), keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.min(), keys);
+            }
+            return sortedSet.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.min(), keys);
+        };
     }
 
     @SafeVarargs
@@ -528,8 +530,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzmpop(seconds, ZPopArgs.Builder.max(), keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzmpop(timeout.getSeconds(), ZPopArgs.Builder.max(), keys);
+            }
+            return sortedSet.bzmpop(toFractionalSeconds(timeout), ZPopArgs.Builder.max(), keys);
+        };
     }
 
     @SafeVarargs
@@ -545,14 +551,18 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzmpop(seconds, (long) count, ZPopArgs.Builder.max(), keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.max(), keys);
+            }
+            return sortedSet.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.max(), keys);
+        };
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<Double>> zmscore(K key, V... values) {
-        return LettuceResult.toUni(_zmscore(key, values)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
+        return LettuceResult.toUni(_zmscore(key, values)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
     }
 
     @SafeVarargs
@@ -616,7 +626,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<V>> zrandmember(K key, int count) {
-        return LettuceResult.toUni(_zrandmember(key, count)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
+        return LettuceResult.toUni(_zrandmember(key, count)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
     }
 
     Supplier<RedisFuture<List<V>>> _zrandmember(K key, int count) {
@@ -656,12 +666,15 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     final Supplier<RedisFuture<io.lettuce.core.KeyValue<K, io.lettuce.core.ScoredValue<V>>>> _bzpopmin(Duration timeout,
             K... keys) {
-        nonNull(keys, "keys");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzpopmin(seconds, keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzpopmin(timeout.getSeconds(), keys);
+            }
+            return sortedSet.bzpopmin(toFractionalSeconds(timeout), keys);
+        };
     }
 
     @SafeVarargs
@@ -673,17 +686,20 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     final Supplier<RedisFuture<io.lettuce.core.KeyValue<K, io.lettuce.core.ScoredValue<V>>>> _bzpopmax(Duration timeout,
             K... keys) {
-        nonNull(keys, "keys");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        long seconds = timeout.toSeconds();
-        return () -> sortedSet.bzpopmax(seconds, keys);
+        return () -> {
+            if (isWholeSeconds(timeout)) {
+                return sortedSet.bzpopmax(timeout.getSeconds(), keys);
+            }
+            return sortedSet.bzpopmax(toFractionalSeconds(timeout), keys);
+        };
     }
 
     @Override
     public Uni<List<V>> zrange(K key, long start, long stop, ZRangeArgs args) {
-        return LettuceResult.toUni(_zrange(key, start, stop, args)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
+        return LettuceResult.toUni(_zrange(key, start, stop, args)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
     }
 
     Supplier<RedisFuture<List<V>>> _zrange(K key, long start, long stop, ZRangeArgs args) {
@@ -728,7 +744,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @Override
     public Uni<List<V>> zrangebylex(K key, Range<String> range, ZRangeArgs args) {
         return LettuceResult.toUni(_zrangebylex(key, range, args))
-                .map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
+                .map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
     }
 
     Supplier<RedisFuture<List<V>>> _zrangebylex(K key, Range<String> range, ZRangeArgs args) {
@@ -752,7 +768,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @Override
     public Uni<List<V>> zrangebyscore(K key, ScoreRange<Double> range, ZRangeArgs args) {
         return LettuceResult.toUni(_zrangebyscore(key, range, args))
-                .map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
+                .map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
     }
 
     Supplier<RedisFuture<List<V>>> _zrangebyscore(K key, ScoreRange<Double> range, ZRangeArgs args) {
@@ -967,7 +983,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<List<V>> zunion(ZAggregateArgs args, K... keys) {
-        return LettuceResult.toUni(_zunion(args, keys)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
+        return LettuceResult.toUni(_zunion(args, keys)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
     }
 
     @SafeVarargs
@@ -1051,7 +1067,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<V>> sort(K key, SortArgs sortArguments) {
-        return LettuceResult.toUni(_sort(key, sortArguments)).map(LettuceReactiveSortedSetCommandsImpl::listOrEmpty);
+        return LettuceResult.toUni(_sort(key, sortArguments)).map(LettuceReactiveSortedSetCommandsImpl::orEmpty);
     }
 
     Supplier<RedisFuture<List<V>>> _sort(K key, SortArgs sortArguments) {
@@ -1087,24 +1103,6 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
                     + " type `" + valueType.getTypeName() + "`. Use quarkus.redis.backend=vertx for other member"
                     + " types.");
         }
-    }
-
-    static Boolean longAsBoolean(Long added) {
-        return added != null && added == 1L;
-    }
-
-    static Long longOrZero(Long value) {
-        if (value == null) {
-            return 0L;
-        }
-        return value;
-    }
-
-    static <T> List<T> listOrEmpty(List<T> list) {
-        if (list == null) {
-            return List.of();
-        }
-        return list;
     }
 
     static <V> ScoredValue<V> toScoredValue(io.lettuce.core.ScoredValue<V> value) {
