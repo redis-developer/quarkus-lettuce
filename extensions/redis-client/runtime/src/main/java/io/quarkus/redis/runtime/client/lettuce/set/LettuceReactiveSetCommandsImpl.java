@@ -5,7 +5,6 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.positive;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -26,19 +25,6 @@ import io.smallrye.mutiny.Uni;
 /**
  * Lettuce-backed implementation of {@link ReactiveSetCommands}, on top of
  * {@link RedisSetAsyncCommands} plus {@link RedisKeyAsyncCommands} for {@code SORT}.
- * <p>
- * Deviations from the Vert.x backend:
- * <ul>
- * <li>The multi-key commands ({@code SDIFF}, {@code SDIFFSTORE}, {@code SINTER},
- * {@code SINTERCARD}, {@code SINTERSTORE}, {@code SUNION}, {@code SUNIONSTORE}) reject fewer than
- * two keys, as the Vert.x backend does, and — like it — surface that failure on subscription rather
- * than throwing from the call itself, see {@link #requireAtLeastTwoKeys}.</li>
- * <li>{@code SADD} validates its members under the name {@code members}, the name the Vert.x
- * backend uses, even though the API parameter is called {@code values}.</li>
- * <li>A {@code nil} list reply decodes to an empty list, see {@link #orEmpty}.</li>
- * <li>{@code srandmember(key, count)} leaves {@code count} unvalidated — a negative count is a
- * legal request for duplicates — while {@code spop(key, count)} requires a positive one.</li>
- * </ul>
  *
  * @param <K> the key type
  * @param <V> the member type
@@ -102,7 +88,12 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     final Supplier<RedisFuture<Set<V>>> _sdiff(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> set.sdiff(keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
+            };
+        }
+        return () -> set.sdiff(keys);
     }
 
     @SafeVarargs
@@ -116,7 +107,12 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(destination, "destination");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> set.sdiffstore(destination, keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
+            };
+        }
+        return () -> set.sdiffstore(destination, keys);
     }
 
     @SafeVarargs
@@ -129,7 +125,12 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     final Supplier<RedisFuture<Set<V>>> _sinter(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> set.sinter(keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
+            };
+        }
+        return () -> set.sinter(keys);
     }
 
     @SafeVarargs
@@ -142,7 +143,12 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     final Supplier<RedisFuture<Long>> _sintercard(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> set.sintercard(keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
+            };
+        }
+        return () -> set.sintercard(keys);
     }
 
     @SafeVarargs
@@ -156,7 +162,12 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         positive(limit, "limit");
-        return requireAtLeastTwoKeys(keys.length, () -> set.sintercard(limit, keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
+            };
+        }
+        return () -> set.sintercard(limit, keys);
     }
 
     @SafeVarargs
@@ -169,7 +180,12 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     final Supplier<RedisFuture<Long>> _sinterstore(K destination, K... keys) {
         nonNull(destination, "destination");
         notNullOrEmpty(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> set.sinterstore(destination, keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
+            };
+        }
+        return () -> set.sinterstore(destination, keys);
     }
 
     @Override
@@ -283,7 +299,12 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     final Supplier<RedisFuture<Set<V>>> _sunion(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> set.sunion(keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
+            };
+        }
+        return () -> set.sunion(keys);
     }
 
     @SafeVarargs
@@ -297,7 +318,12 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(destination, "destination");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return requireAtLeastTwoKeys(keys.length, () -> set.sunionstore(destination, keys));
+        if (keys.length < 2) {
+            return () -> {
+                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
+            };
+        }
+        return () -> set.sunionstore(destination, keys);
     }
 
     @Override
@@ -347,26 +373,5 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     @Override
     public Uni<Long> sortAndStore(K key, K destination) {
         return sortAndStore(key, destination, DEFAULT_SORT_ARGS);
-    }
-
-    /**
-     * Guards a multi-key command with the Vert.x backend's "at least 2 keys" rule. That backend fails
-     * lazily — the caller gets a failed {@code Uni}, not an exception — so the check runs inside the
-     * returned supplier.
-     */
-    private static <T> Supplier<RedisFuture<T>> requireAtLeastTwoKeys(int keyCount, Supplier<RedisFuture<T>> command) {
-        if (keyCount <= 1) {
-            return () -> {
-                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
-            };
-        }
-        return command;
-    }
-
-    /**
-     * A {@code nil} multi-bulk reply decodes to an empty list, as in the Vert.x backend.
-     */
-    static <T> List<T> orEmpty(List<T> list) {
-        return list == null ? Collections.emptyList() : list;
     }
 }

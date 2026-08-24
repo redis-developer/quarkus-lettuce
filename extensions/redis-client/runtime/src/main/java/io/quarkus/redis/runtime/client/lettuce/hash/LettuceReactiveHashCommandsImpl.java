@@ -156,9 +156,6 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         return LettuceResult.toUni(_hmget(key, fields)).map(this::toMap);
     }
 
-    /**
-     * Empty {@code fields} fails the returned {@code Uni} on subscription instead of throwing here.
-     */
     @SafeVarargs
     final Supplier<RedisFuture<List<KeyValue<F, V>>>> _hmget(K key, F... fields) {
         nonNull(key, "key");
@@ -177,9 +174,6 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         return LettuceResult.toUni(_hmset(key, map)).replaceWithVoid();
     }
 
-    /**
-     * Empty {@code map} fails the returned {@code Uni} on subscription instead of throwing here.
-     */
     Supplier<RedisFuture<String>> _hmset(K key, Map<F, V> map) {
         nonNull(key, "key");
         nonNull(map, "map");
@@ -253,9 +247,6 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         return LettuceResult.toUni(_hset(key, map));
     }
 
-    /**
-     * Empty {@code map} fails the returned {@code Uni} on subscription instead of throwing here.
-     */
     Supplier<RedisFuture<Long>> _hset(K key, Map<F, V> map) {
         nonNull(key, "key");
         nonNull(map, "map");

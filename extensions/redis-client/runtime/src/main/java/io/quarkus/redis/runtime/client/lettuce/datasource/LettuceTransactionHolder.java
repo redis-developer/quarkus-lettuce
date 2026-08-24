@@ -82,7 +82,7 @@ public class LettuceTransactionHolder {
         return awaitAll().map(ignored -> {
             boolean[] hasErrors = { false };
             List<Object> results = collect(hasErrors);
-            return new TransactionResultImpl(false, hasErrors[0], results);
+            return new TransactionResultImpl(discarded, hasErrors[0], results);
         });
     }
 
@@ -93,7 +93,7 @@ public class LettuceTransactionHolder {
         return awaitAll().map(ignored -> {
             boolean[] hasErrors = { false };
             List<Object> results = collect(hasErrors);
-            return new OptimisticLockingTransactionResultImpl<>(false, hasErrors[0], input, results);
+            return new OptimisticLockingTransactionResultImpl<>(discarded, hasErrors[0], input, results);
         });
     }
 

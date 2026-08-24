@@ -318,6 +318,21 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
         assertThat(setOfPlaces.bzpopmax(Duration.ofSeconds(1), "zset2")).isNull();
     }
 
+    /**
+     * A sub-second timeout must expire after that fraction of a second — truncating it to whole
+     * seconds would send {@code 0} to Redis and block the connection forever.
+     */
+    @Test
+    void blockingCommandsSupportSubSecondTimeouts() {
+        Duration timeout = Duration.ofMillis(250);
+        assertThat(setOfPlaces.bzpopmin(timeout, "missing")).isNull();
+        assertThat(setOfPlaces.bzpopmax(timeout, "missing")).isNull();
+        assertThat(setOfPlaces.bzmpopMin(timeout, "missing")).isNull();
+        assertThat(setOfPlaces.bzmpopMax(timeout, "missing")).isNull();
+        assertThat(setOfPlaces.bzmpopMin(timeout, 2, "missing")).isEmpty();
+        assertThat(setOfPlaces.bzmpopMax(timeout, 2, "missing")).isEmpty();
+    }
+
     @Test
     void zpopmin() {
         setOfPlaces.zadd("zset", Map.of(crussol, 2.0, grignan, 3.0, suze, 4.0));

@@ -120,7 +120,7 @@ public class LettuceReactiveTransactionalKeyCommandsImpl<K, V>
 
     @Override
     public Uni<Void> expiretime(K key) {
-        return tx.enqueue(reactive._expiretime(key), r -> decodeExpireResponse(key, r));
+        return tx.enqueue(reactive._expiretime(key), r -> reactive.decodeExpireResponse(key, r));
     }
 
     @Override
@@ -180,12 +180,12 @@ public class LettuceReactiveTransactionalKeyCommandsImpl<K, V>
 
     @Override
     public Uni<Void> pexpiretime(K key) {
-        return tx.enqueue(reactive._pexpiretime(key), r -> decodeExpireResponse(key, r));
+        return tx.enqueue(reactive._pexpiretime(key), r -> reactive.decodeExpireResponse(key, r));
     }
 
     @Override
     public Uni<Void> pttl(K key) {
-        return tx.enqueue(reactive._pttl(key), r -> decodeExpireResponse(key, r));
+        return tx.enqueue(reactive._pttl(key), r -> reactive.decodeExpireResponse(key, r));
     }
 
     @Override
@@ -211,7 +211,7 @@ public class LettuceReactiveTransactionalKeyCommandsImpl<K, V>
 
     @Override
     public Uni<Void> ttl(K key) throws RedisKeyNotFoundException {
-        return tx.enqueue(reactive._ttl(key), r -> decodeExpireResponse(key, r));
+        return tx.enqueue(reactive._ttl(key), r -> reactive.decodeExpireResponse(key, r));
     }
 
     @Override
@@ -224,12 +224,5 @@ public class LettuceReactiveTransactionalKeyCommandsImpl<K, V>
     @Override
     public final Uni<Void> unlink(K... keys) {
         return tx.enqueue(reactive._unlink(keys), v -> v == null ? null : v.intValue());
-    }
-
-    private long decodeExpireResponse(K key, Long r) {
-        if (r != null && r == -2L) {
-            throw new RedisKeyNotFoundException(String.valueOf(key));
-        }
-        return r;
     }
 }

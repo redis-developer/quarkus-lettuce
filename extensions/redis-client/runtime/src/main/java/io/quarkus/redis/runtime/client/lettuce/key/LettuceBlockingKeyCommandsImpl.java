@@ -198,12 +198,12 @@ public class LettuceBlockingKeyCommandsImpl<K> implements KeyCommands<K> {
 
     @Override
     public KeyScanCursor<K> scan() {
-        return new LettuceKeyScanBlockingCursorImpl<>(reactive.scan(), timeout);
+        return new LettuceBlockingKeyScanCursorImpl<>(reactive.scan(), timeout);
     }
 
     @Override
     public KeyScanCursor<K> scan(KeyScanArgs args) {
-        return new LettuceKeyScanBlockingCursorImpl<>(reactive.scan(args), timeout);
+        return new LettuceBlockingKeyScanCursorImpl<>(reactive.scan(args), timeout);
     }
 
     @SafeVarargs

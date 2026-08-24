@@ -84,16 +84,16 @@ public class Validation {
         if (col == null) {
             throw new IllegalArgumentException("`" + name + "` must not be `null`");
         }
-        if (col.size() == 0) {
+        if (col.isEmpty()) {
             throw new IllegalArgumentException("`" + name + "` must not be empty");
         }
     }
 
-    static <K, V> void notNullOrEmpty(Map<K, V> map, String name) {
+    public static <K, V> void notNullOrEmpty(Map<K, V> map, String name) {
         if (map == null) {
             throw new IllegalArgumentException("`" + name + "` must not be `null`");
         }
-        if (map.size() == 0) {
+        if (map.isEmpty()) {
             throw new IllegalArgumentException("`" + name + "` must not be empty");
         }
     }
