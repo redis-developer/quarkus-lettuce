@@ -16,15 +16,13 @@ import io.quarkus.redis.runtime.client.lettuce.CommandsTestBase;
 
 class LettuceTransactionalHashCommandsTest extends CommandsTestBase {
 
-    private static final String KEY = "tx-hash-key";
-
-    private RedisDataSource blockingDs;
-    private ReactiveRedisDataSource reactiveDs;
+    ReactiveRedisDataSource reactiveDs;
+    RedisDataSource blockingDs;
 
     @BeforeEach
     void initialize() {
-        blockingDs = blockingDataSource(Duration.ofSeconds(60));
         reactiveDs = reactiveDataSource();
+        blockingDs = blockingDataSource(Duration.ofSeconds(60));
     }
 
     @Test
@@ -32,13 +30,12 @@ class LettuceTransactionalHashCommandsTest extends CommandsTestBase {
         TransactionResult result = blockingDs.withTransaction(tx -> {
             TransactionalHashCommands<String, String, String> hash = tx.hash(String.class);
             assertThat(hash.getDataSource()).isEqualTo(tx);
-            hash.hget(KEY, "field"); // 0 -> null
-            hash.hset(KEY, "field", "hello"); // 1 -> true
-            hash.hget(KEY, "field"); // 2 -> "hello"
-            hash.hdel(KEY, "field", "field2"); // 3 -> 1
-            hash.hget(KEY, "field"); // 4 -> null
+            hash.hget(key, "field"); // 0 -> null
+            hash.hset(key, "field", "hello"); // 1 -> true
+            hash.hget(key, "field"); // 2 -> "hello
+            hash.hdel(key, "field", "field2"); // 3 -> 1
+            hash.hget(key, "field"); // 4 -> null
         });
-
         assertThat(result.size()).isEqualTo(5);
         assertThat(result.discarded()).isFalse();
         assertThat((Void) result.get(0)).isNull();
@@ -52,12 +49,12 @@ class LettuceTransactionalHashCommandsTest extends CommandsTestBase {
     void hgetBlockingWithWatch() {
         TransactionResult result = blockingDs.withTransaction(tx -> {
             TransactionalHashCommands<String, String, String> hash = tx.hash(String.class);
-            hash.hget(KEY, "field"); // 0 -> null
-            hash.hset(KEY, "field", "hello"); // 1 -> true
-            hash.hget(KEY, "field"); // 2 -> "hello"
-            hash.hdel(KEY, "field", "field2"); // 3 -> 1
-            hash.hget(KEY, "field"); // 4 -> null
-        }, KEY);
+            hash.hget(key, "field"); // 0 -> null
+            hash.hset(key, "field", "hello"); // 1 -> true
+            hash.hget(key, "field"); // 2 -> "hello
+            hash.hdel(key, "field", "field2"); // 3 -> 1
+            hash.hget(key, "field"); // 4 -> null
+        }, key);
         assertThat(result.size()).isEqualTo(5);
         assertThat(result.discarded()).isFalse();
         assertThat((Void) result.get(0)).isNull();
@@ -71,17 +68,16 @@ class LettuceTransactionalHashCommandsTest extends CommandsTestBase {
     void hgetBlockingWithWatchAndDiscard() {
         TransactionResult result = blockingDs.withTransaction(tx -> {
             TransactionalHashCommands<String, String, String> hash = tx.hash(String.class);
-            hash.hget(KEY, "field");
-            hash.hset(KEY, "field", "hello");
-            hash.hget(KEY, "field");
+            hash.hget(key, "field"); // 0 -> null
+            hash.hset(key, "field", "hello"); // 1 -> true
+            hash.hget(key, "field"); // 2 -> "hello
 
-            // Update the watched key from outside the transaction - that discards it.
-            blockingDs.hash(String.class).hset(KEY, "toto", "updated");
+            // Update the key - that will discard the transaction
+            blockingDs.hash(String.class).hset(key, "toto", "updated");
 
-            hash.hdel(KEY, "field", "field2");
-            hash.hget(KEY, "field");
-        }, KEY);
-
+            hash.hdel(key, "field", "field2"); // 3 -> 1
+            hash.hget(key, "field"); // 4 -> null
+        }, key);
         assertThat(result.size()).isEqualTo(0);
         assertThat(result.discarded()).isTrue();
     }
@@ -90,12 +86,12 @@ class LettuceTransactionalHashCommandsTest extends CommandsTestBase {
     void hgetReactive() {
         TransactionResult result = reactiveDs.withTransaction(tx -> {
             ReactiveTransactionalHashCommands<String, String, String> hash = tx.hash(String.class);
-            return hash.hget(KEY, "field") // 0 -> null
-                    .chain(() -> hash.hset(KEY, "field", "hello")) // 1 -> true
-                    .chain(() -> hash.hget(KEY, "field")) // 2 -> "hello"
-                    .chain(() -> hash.hdel(KEY, "field", "field2")) // 3 -> 1
-                    .chain(() -> hash.hget(KEY, "field")); // 4 -> null
-        }).await().atMost(TIMEOUT);
+            return hash.hget(key, "field") // 0 -> null
+                    .chain(() -> hash.hset(key, "field", "hello")) // 1 -> true
+                    .chain(() -> hash.hget(key, "field")) // 2 -> "hello
+                    .chain(() -> hash.hdel(key, "field", "field2")) // 3 -> 1
+                    .chain(() -> hash.hget(key, "field")); // 4 -> null
+        }).await().atMost(Duration.ofSeconds(5));
         assertThat(result.size()).isEqualTo(5);
         assertThat(result.discarded()).isFalse();
         assertThat((Void) result.get(0)).isNull();
@@ -109,12 +105,12 @@ class LettuceTransactionalHashCommandsTest extends CommandsTestBase {
     void hgetReactiveWithWatch() {
         TransactionResult result = reactiveDs.withTransaction(tx -> {
             ReactiveTransactionalHashCommands<String, String, String> hash = tx.hash(String.class);
-            return hash.hget(KEY, "field") // 0 -> null
-                    .chain(() -> hash.hset(KEY, "field", "hello")) // 1 -> true
-                    .chain(() -> hash.hget(KEY, "field")) // 2 -> "hello"
-                    .chain(() -> hash.hdel(KEY, "field", "field2")) // 3 -> 1
-                    .chain(() -> hash.hget(KEY, "field")); // 4 -> null
-        }, KEY).await().atMost(TIMEOUT);
+            return hash.hget(key, "field") // 0 -> null
+                    .chain(() -> hash.hset(key, "field", "hello")) // 1 -> true
+                    .chain(() -> hash.hget(key, "field")) // 2 -> "hello
+                    .chain(() -> hash.hdel(key, "field", "field2")) // 3 -> 1
+                    .chain(() -> hash.hget(key, "field")); // 4 -> null
+        }, key).await().atMost(Duration.ofSeconds(5));
         assertThat(result.size()).isEqualTo(5);
         assertThat(result.discarded()).isFalse();
         assertThat((Void) result.get(0)).isNull();
@@ -128,13 +124,13 @@ class LettuceTransactionalHashCommandsTest extends CommandsTestBase {
     void hgetReactiveWithWatchAndDiscard() {
         TransactionResult result = reactiveDs.withTransaction(tx -> {
             ReactiveTransactionalHashCommands<String, String, String> hash = tx.hash(String.class);
-            return hash.hget(KEY, "field")
-                    .chain(() -> hash.hset(KEY, "field", "hello"))
-                    .chain(() -> hash.hget(KEY, "field"))
-                    .chain(() -> reactiveDs.hash(String.class).hset(KEY, "a", "b"))
-                    .chain(() -> hash.hdel(KEY, "field", "field2"))
-                    .chain(() -> hash.hget(KEY, "field"));
-        }, KEY).await().atMost(TIMEOUT);
+            return hash.hget(key, "field")
+                    .chain(() -> hash.hset(key, "field", "hello"))
+                    .chain(() -> hash.hget(key, "field"))
+                    .chain(() -> reactiveDs.hash(String.class).hset(key, "a", "b"))
+                    .chain(() -> hash.hdel(key, "field", "field2"))
+                    .chain(() -> hash.hget(key, "field"));
+        }, key).await().atMost(Duration.ofSeconds(5));
         assertThat(result.size()).isEqualTo(0);
         assertThat(result.discarded()).isTrue();
     }

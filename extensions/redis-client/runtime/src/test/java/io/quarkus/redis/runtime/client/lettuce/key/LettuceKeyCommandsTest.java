@@ -28,7 +28,6 @@ import io.quarkus.redis.datasource.keys.RedisKeyNotFoundException;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.datasource.list.ListCommands;
 import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
-import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.CommandsTestBase;
 
@@ -38,7 +37,6 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     RedisDataSource blockingDs;
     ReactiveKeyCommands<String> reactiveKeys;
     KeyCommands<String> blockingKeys;
-    ReactiveValueCommands<String, String> reactiveValues;
     ValueCommands<String, String> blockingValues;
 
     @BeforeEach
@@ -47,7 +45,6 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
         blockingDs = blockingDataSource();
         reactiveKeys = reactiveDs.key(String.class);
         blockingKeys = blockingDs.key(String.class);
-        reactiveValues = reactiveDs.value(String.class);
         blockingValues = blockingDs.value(String.class);
     }
 
@@ -106,7 +103,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     void dump() {
         assertThat(blockingKeys.dump("invalid")).isNull();
         blockingValues.set(key, "person7");
-        assertThat(!blockingKeys.dump(key).isEmpty()).isTrue();
+        assertThat(blockingKeys.dump(key)).isNotEmpty();
     }
 
     @Test
@@ -185,8 +182,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
         blockingValues.mset(map);
         List<String> k = blockingKeys.keys("???");
         assertThat(k).hasSize(2);
-        assertThat(k.contains("one")).isTrue();
-        assertThat(k.contains("two")).isTrue();
+        assertThat(k).contains("one", "two");
     }
 
     @Test
@@ -233,7 +229,8 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
         blockingKeys.pexpire(key, Duration.ofSeconds(20), new ExpireArgs().gt());
         assertThat(blockingKeys.ttl(key)).isBetween(10L, 20L);
 
-        assertThat(blockingKeys.pexpiretime(key)).isBetween(System.currentTimeMillis() - 10000L, System.currentTimeMillis() + 30000L);
+        assertThat(blockingKeys.pexpiretime(key)).isBetween(System.currentTimeMillis() - 10000L,
+                System.currentTimeMillis() + 30000L);
     }
 
     @Test
@@ -327,7 +324,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
 
     @Test
     void ttl() {
-        assertThatThrownBy(() -> blockingKeys.pttl(key)).isInstanceOf(RedisKeyNotFoundException.class);
+        assertThatThrownBy(() -> blockingKeys.ttl(key)).isInstanceOf(RedisKeyNotFoundException.class);
         blockingValues.set(key, "person7");
         assertThat(blockingKeys.ttl(key)).isEqualTo(-1);
         blockingKeys.expire(key, 10);

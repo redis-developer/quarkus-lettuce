@@ -44,7 +44,15 @@ import io.quarkus.redis.datasource.transactions.TransactionalRedisDataSource;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
-import io.quarkus.redis.runtime.datasource.*;
+import io.quarkus.redis.runtime.datasource.BlockingHashCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingKeyCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingListCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingSetCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingSortedSetCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingStringCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingTransactionalRedisDataSourceImpl;
+import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
+import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
 import io.vertx.redis.client.Command;
 import io.vertx.redis.client.Response;
 

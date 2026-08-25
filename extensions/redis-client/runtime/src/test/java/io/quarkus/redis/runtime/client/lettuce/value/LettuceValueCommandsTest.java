@@ -1,25 +1,33 @@
 package io.quarkus.redis.runtime.client.lettuce.value;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
+
 import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.UUID;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import io.quarkus.redis.datasource.*;
-import io.quarkus.redis.datasource.keys.KeyCommands;
-import io.quarkus.redis.datasource.value.ReactiveValueCommands;
-import io.quarkus.redis.runtime.client.lettuce.CommandsTestBase;
-import io.vertx.core.json.DecodeException;
-import io.vertx.core.json.Json;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+
+import io.quarkus.redis.datasource.Person;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
+import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.value.GetExArgs;
+import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.SetArgs;
 import io.quarkus.redis.datasource.value.ValueCommands;
-
-import static org.assertj.core.api.Assertions.*;
-import static org.assertj.core.api.Assertions.entry;
+import io.quarkus.redis.runtime.client.lettuce.CommandsTestBase;
+import io.vertx.core.json.DecodeException;
+import io.vertx.core.json.Json;
 
 class LettuceValueCommandsTest extends CommandsTestBase {
 
@@ -169,7 +177,7 @@ class LettuceValueCommandsTest extends CommandsTestBase {
 
         blockingValues.set(key, value, new SetArgs().px(20000).nx());
         assertThat(blockingValues.get(key)).isEqualTo(value);
-        assertThat(keys.ttl(key) >= 19).isTrue();
+        assertThat(keys.ttl(key)).isGreaterThanOrEqualTo(19);
     }
 
     @Test
@@ -190,17 +198,19 @@ class LettuceValueCommandsTest extends CommandsTestBase {
         blockingValues.set(key, value, new SetArgs().ex(10));
         blockingValues.set(key, "value2", new SetArgs().keepttl());
         assertThat(blockingValues.get(key)).isEqualTo("value2");
-        assertThat(keys.ttl(key) >= 1).isTrue();
+        assertThat(keys.ttl(key)).isGreaterThanOrEqualTo(1);
     }
 
     @Test
     void setNegativeEX() {
-        assertThatThrownBy(() -> blockingValues.set(key, value, new SetArgs().ex(-10))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> blockingValues.set(key, value, new SetArgs().ex(-10)))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void setNegativePX() {
-        assertThatThrownBy(() -> blockingValues.set(key, value, new SetArgs().px(-1000))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> blockingValues.set(key, value, new SetArgs().px(-1000)))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -252,7 +262,7 @@ class LettuceValueCommandsTest extends CommandsTestBase {
 
         blockingValues.setex(key, 10, value);
         assertThat(blockingValues.get(key)).isEqualTo(value);
-        assertThat(keys.ttl(key) >= 9).isTrue();
+        assertThat(keys.ttl(key)).isGreaterThanOrEqualTo(9);
     }
 
     @Test
@@ -261,7 +271,7 @@ class LettuceValueCommandsTest extends CommandsTestBase {
 
         blockingValues.psetex(key, 20000, value);
         assertThat(blockingValues.get(key)).isEqualTo(value);
-        assertThat(keys.pttl(key) >= 19000).isTrue();
+        assertThat(keys.pttl(key)).isGreaterThanOrEqualTo(19000);
     }
 
     @Test
@@ -346,7 +356,7 @@ class LettuceValueCommandsTest extends CommandsTestBase {
 
         values.set(key, people, new SetArgs().px(20000).nx());
         assertThat(values.get(key)).isEqualTo(people);
-        assertThat(keys.ttl(key) >= 19).isTrue();
+        assertThat(keys.ttl(key)).isGreaterThanOrEqualTo(19);
     }
 
 }

@@ -12,19 +12,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
 
-import io.quarkus.redis.datasource.ReactiveRedisDataSource;
-import io.quarkus.redis.datasource.sortedset.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.SortArgs;
 import io.quarkus.redis.datasource.list.KeyValue;
 import io.quarkus.redis.datasource.list.ListCommands;
+import io.quarkus.redis.datasource.sortedset.Range;
+import io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands;
+import io.quarkus.redis.datasource.sortedset.ScoreRange;
+import io.quarkus.redis.datasource.sortedset.ScoredValue;
+import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
+import io.quarkus.redis.datasource.sortedset.ZAddArgs;
+import io.quarkus.redis.datasource.sortedset.ZAggregateArgs;
+import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
+import io.quarkus.redis.datasource.sortedset.ZScanCursor;
 import io.quarkus.redis.runtime.client.lettuce.CommandsTestBase;
 
 @SuppressWarnings("unchecked")
@@ -37,6 +45,7 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     static final String grignan = "chateau de Grignan";
     static final String suze = "chateau de Suze La Rousse";
     static final String adhemar = "chateau des Adhemar";
+    static final String value = "value";
 
     ReactiveRedisDataSource reactiveDs;
     RedisDataSource blockingDs;
@@ -51,8 +60,8 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
         blockingDs = blockingDataSource();
         reactiveSortedSetOfPlaces = reactiveDs.sortedSet(String.class, String.class);
         reactiveSortedSetOfStrings = reactiveDs.sortedSet(String.class, String.class);
-        blockingSortedSetOfPlaces = blockingDs.sortedSet(String.class);
-        blockingSortedSetOfStrings = blockingDs.sortedSet(String.class);
+        blockingSortedSetOfPlaces = blockingDs.sortedSet(String.class, String.class);
+        blockingSortedSetOfStrings = blockingDs.sortedSet(String.class, String.class);
     }
 
     private void populate() {
@@ -352,7 +361,8 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
         assertThat(blockingSortedSetOfPlaces.zrandmember("zset", 2)).hasSize(2).containsAnyOf(crussol, grignan, suze);
         assertThat(blockingSortedSetOfPlaces.zrandmemberWithScores("zset")).isIn(ScoredValue.of(crussol, 2.0),
                 ScoredValue.of(grignan, 3.0), ScoredValue.of(suze, 4.0));
-        assertThat(blockingSortedSetOfPlaces.zrandmemberWithScores("zset", 2)).hasSize(2).containsAnyOf(ScoredValue.of(crussol, 2.0),
+        assertThat(blockingSortedSetOfPlaces.zrandmemberWithScores("zset", 2)).hasSize(2).containsAnyOf(
+                ScoredValue.of(crussol, 2.0),
                 ScoredValue.of(grignan, 3.0), ScoredValue.of(suze, 4.0));
     }
 
@@ -399,7 +409,8 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
                 .isEqualTo(List.of(ScoredValue.of(grignan, 2.0), ScoredValue.of(suze, 3.0)));
         assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, new ScoreRange<>(1.0, false, 3.0, true)))
                 .isEqualTo(List.of(ScoredValue.of(grignan, 2.0), ScoredValue.of(suze, 3.0)));
-        assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, new ScoreRange<>(NEGATIVE_INFINITY, POSITIVE_INFINITY)))
+        assertThat(
+                blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, new ScoreRange<>(NEGATIVE_INFINITY, POSITIVE_INFINITY)))
                 .isEqualTo(List.of(ScoredValue.of(crussol, 1.0), ScoredValue.of(grignan, 2.0),
                         ScoredValue.of(suze, 3.0),
                         ScoredValue.of(adhemar, 4.0)));
@@ -407,7 +418,8 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
                 .isEqualTo(List.of(ScoredValue.of(crussol, 1.0), ScoredValue.of(grignan, 2.0),
                         ScoredValue.of(suze, 3.0),
                         ScoredValue.of(adhemar, 4.0)));
-        assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, new ScoreRange<>(0.0, 4.0), new ZRangeArgs().limit(1, 3)))
+        assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, new ScoreRange<>(0.0, 4.0),
+                new ZRangeArgs().limit(1, 3)))
                 .isEqualTo(List.of(ScoredValue.of(grignan, 2.0), ScoredValue.of(suze, 3.0),
                         ScoredValue.of(adhemar, 4.0)));
         assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, ScoreRange.unbounded(), new ZRangeArgs().limit(2, 2)))
@@ -426,7 +438,8 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrangestorebylex() {
         blockingSortedSetOfStrings.zadd(key, Map.of("a", 1.0, "b", 1.0, "c", 1.0, "d", 1.0));
-        assertThat(blockingSortedSetOfStrings.zrangestorebylex("key1", key, new Range<>("b", "d"), new ZRangeArgs().limit(0, 4)))
+        assertThat(
+                blockingSortedSetOfStrings.zrangestorebylex("key1", key, new Range<>("b", "d"), new ZRangeArgs().limit(0, 4)))
                 .isEqualTo(3);
         assertThat(blockingSortedSetOfStrings.zrange("key1", 0, 1)).isEqualTo(List.of("b", "c"));
 
@@ -528,11 +541,15 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     void zrevrangebylex() {
         populateManyStringEntriesForLex();
         assertThat(blockingSortedSetOfStrings.zrangebylex(key, Range.unbounded(), new ZRangeArgs().rev())).hasSize(100);
-        assertThat(blockingSortedSetOfStrings.zrangebylex(key, new Range<>("value", "zzz"), new ZRangeArgs().rev())).hasSize(100);
+        assertThat(blockingSortedSetOfStrings.zrangebylex(key, new Range<>("value", "zzz"), new ZRangeArgs().rev()))
+                .hasSize(100);
         assertThat(blockingSortedSetOfStrings.zrangebylex(key, new Range<>("value98", true, "value99", true),
                 new ZRangeArgs().rev())).containsSequence("value99", "value98");
-        assertThat(blockingSortedSetOfStrings.zrangebylex(key, new Range<>("value99", true, null, true), new ZRangeArgs().rev())).hasSize(1);
-        assertThat(blockingSortedSetOfStrings.zrangebylex(key, new Range<>("value99", false, null, false), new ZRangeArgs().rev()))
+        assertThat(
+                blockingSortedSetOfStrings.zrangebylex(key, new Range<>("value99", true, null, true), new ZRangeArgs().rev()))
+                .hasSize(1);
+        assertThat(
+                blockingSortedSetOfStrings.zrangebylex(key, new Range<>("value99", false, null, false), new ZRangeArgs().rev()))
                 .hasSize(0);
     }
 
@@ -564,7 +581,8 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
                 .isEqualTo(List.of(ScoredValue.of(suze, 3.0), ScoredValue.of(grignan, 2.0)));
         assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, new ScoreRange<>(4.0, false, 1.0, false), rev))
                 .isEqualTo(List.of(ScoredValue.of(suze, 3.0), ScoredValue.of(grignan, 2.0)));
-        assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, new ScoreRange<>(POSITIVE_INFINITY, NEGATIVE_INFINITY), rev))
+        assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key,
+                new ScoreRange<>(POSITIVE_INFINITY, NEGATIVE_INFINITY), rev))
                 .isEqualTo(List.of(ScoredValue.of(adhemar, 4.0), ScoredValue.of(suze, 3.0),
                         ScoredValue.of(grignan, 2.0),
                         ScoredValue.of(crussol, 1.0)));
@@ -572,10 +590,12 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
                 .isEqualTo(List.of(ScoredValue.of(adhemar, 4.0), ScoredValue.of(suze, 3.0),
                         ScoredValue.of(grignan, 2.0),
                         ScoredValue.of(crussol, 1.0)));
-        assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, new ScoreRange<>(4.0, 0.0), new ZRangeArgs().rev().limit(1, 3)))
+        assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, new ScoreRange<>(4.0, 0.0),
+                new ZRangeArgs().rev().limit(1, 3)))
                 .isEqualTo(List.of(ScoredValue.of(suze, 3.0), ScoredValue.of(grignan, 2.0),
                         ScoredValue.of(crussol, 1.0)));
-        assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, ScoreRange.unbounded(), new ZRangeArgs().rev().limit(2, 2)))
+        assertThat(blockingSortedSetOfPlaces.zrangebyscoreWithScores(key, ScoreRange.unbounded(),
+                new ZRangeArgs().rev().limit(2, 2)))
                 .isEqualTo(List.of(ScoredValue.of(grignan, 2.0), ScoredValue.of(crussol, 1.0)));
     }
 
@@ -627,12 +647,14 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
                 .isEqualTo(List.of(ScoredValue.of(crussol, 3.0), new ScoredValue<>(suze, 4.0),
                         ScoredValue.of(grignan, 5.0)));
 
-        assertThat(blockingSortedSetOfPlaces.zunionstore(key, new ZAggregateArgs().weights(2.0, 3.0), "zset1", "zset2")).isEqualTo(3);
+        assertThat(blockingSortedSetOfPlaces.zunionstore(key, new ZAggregateArgs().weights(2.0, 3.0), "zset1", "zset2"))
+                .isEqualTo(3);
         assertThat(rawZrangeWithScores(key)).isEqualTo(
                 List.of(new ScoredValue<>(crussol, 8.0), new ScoredValue<>(suze, 12.0),
                         new ScoredValue<>(grignan, 13.0)));
 
-        assertThat(blockingSortedSetOfPlaces.zunionstore(key, new ZAggregateArgs().weights(2.0, 3.0).sum(), "zset1", "zset2")).isEqualTo(3);
+        assertThat(blockingSortedSetOfPlaces.zunionstore(key, new ZAggregateArgs().weights(2.0, 3.0).sum(), "zset1", "zset2"))
+                .isEqualTo(3);
         assertThat(rawZrangeWithScores(key)).isEqualTo(
                 List.of(new ScoredValue<>(crussol, 8.0), new ScoredValue<>(suze, 12.0),
                         new ScoredValue<>(grignan, 13.0)));
@@ -642,12 +664,14 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
                 List.of(ScoredValue.of(crussol, 1.0), new ScoredValue<>(grignan, 2.0),
                         new ScoredValue<>(suze, 4.0)));
 
-        assertThat(blockingSortedSetOfPlaces.zunionstore(key, new ZAggregateArgs().weights(2.0, 3.0).min(), "zset1", "zset2")).isEqualTo(3);
+        assertThat(blockingSortedSetOfPlaces.zunionstore(key, new ZAggregateArgs().weights(2.0, 3.0).min(), "zset1", "zset2"))
+                .isEqualTo(3);
         assertThat(rawZrangeWithScores(key)).isEqualTo(
                 List.of(ScoredValue.of(crussol, 2.0), new ScoredValue<>(grignan, 4.0),
                         new ScoredValue<>(suze, 12.0)));
 
-        assertThat(blockingSortedSetOfPlaces.zunionstore(key, new ZAggregateArgs().weights(2.0, 3.0).max(), "zset1", "zset2")).isEqualTo(3);
+        assertThat(blockingSortedSetOfPlaces.zunionstore(key, new ZAggregateArgs().weights(2.0, 3.0).max(), "zset1", "zset2"))
+                .isEqualTo(3);
         assertThat(rawZrangeWithScores(key)).isEqualTo(
                 List.of(new ScoredValue<>(crussol, 6.0), new ScoredValue<>(grignan, 9.0),
                         new ScoredValue<>(suze, 12.0)));
@@ -670,25 +694,29 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
         assertThat(rawZrangeWithScores(key))
                 .isEqualTo(List.of(ScoredValue.of(crussol, 2.0), new ScoredValue<>(grignan, 3.0)));
 
-        assertThat(blockingSortedSetOfPlaces.zinterstore(key, new ZAggregateArgs().weights(2, 3), "zset1", "zset2")).isEqualTo(2);
+        assertThat(blockingSortedSetOfPlaces.zinterstore(key, new ZAggregateArgs().weights(2, 3), "zset1", "zset2"))
+                .isEqualTo(2);
         assertThat(rawZrangeWithScores(key))
                 .isEqualTo(List.of(new ScoredValue<>(crussol, 8.0), new ScoredValue<>(grignan, 13.0)));
 
-        assertThat(blockingSortedSetOfPlaces.zinterstore(key, new ZAggregateArgs().weights(2, 3).sum(), "zset1", "zset2")).isEqualTo(2);
+        assertThat(blockingSortedSetOfPlaces.zinterstore(key, new ZAggregateArgs().weights(2, 3).sum(), "zset1", "zset2"))
+                .isEqualTo(2);
         assertThat(rawZrangeWithScores(key))
                 .isEqualTo(List.of(new ScoredValue<>(crussol, 8.0), new ScoredValue<>(grignan, 13.0)));
 
-        assertThat(blockingSortedSetOfPlaces.zinterstore(key, new ZAggregateArgs().weights(2, 3).min(), "zset1", "zset2")).isEqualTo(2);
+        assertThat(blockingSortedSetOfPlaces.zinterstore(key, new ZAggregateArgs().weights(2, 3).min(), "zset1", "zset2"))
+                .isEqualTo(2);
         assertThat(rawZrangeWithScores(key))
                 .isEqualTo(List.of(ScoredValue.of(crussol, 2.0), new ScoredValue<>(grignan, 4.0)));
 
-        assertThat(blockingSortedSetOfPlaces.zinterstore(key, new ZAggregateArgs().weights(2, 3).max(), "zset1", "zset2")).isEqualTo(2);
+        assertThat(blockingSortedSetOfPlaces.zinterstore(key, new ZAggregateArgs().weights(2, 3).max(), "zset1", "zset2"))
+                .isEqualTo(2);
         assertThat(rawZrangeWithScores(key))
                 .isEqualTo(List.of(new ScoredValue<>(crussol, 6.0), new ScoredValue<>(grignan, 9.0)));
     }
 
     @Test
-    void zsscan() {
+    void zscan() {
         blockingSortedSetOfPlaces.zadd(key, 1.0, crussol);
         ZScanCursor<String> cursor = blockingSortedSetOfPlaces.zscan(key);
         assertThat(cursor.hasNext()).isTrue();
@@ -698,7 +726,7 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void zsscanEmpty() {
+    void zscanEmpty() {
         ZScanCursor<String> cursor = blockingSortedSetOfPlaces.zscan(key);
         assertThat(cursor.hasNext()).isTrue();
         List<ScoredValue<String>> values = cursor.next();
@@ -707,7 +735,7 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void zsscanEmptyAsIterable() {
+    void zscanEmptyAsIterable() {
         ZScanCursor<String> cursor = blockingSortedSetOfPlaces.zscan(key);
         assertThat(cursor.hasNext()).isTrue();
         Iterable<ScoredValue<String>> iterable = cursor.toIterable();
@@ -716,7 +744,7 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void zsscanWithCursorAndArgs() {
+    void zscanWithCursorAndArgs() {
         blockingSortedSetOfPlaces.zadd(key, 1.0, crussol);
         blockingSortedSetOfPlaces.zadd(key, 2.0, grignan);
         blockingSortedSetOfPlaces.zadd(key, 3.0, adhemar);
@@ -744,7 +772,7 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void zscanMultipleAsITerable() {
+    void zscanMultipleAsIterable() {
         populateManyStringEntries();
 
         ZScanCursor<String> cursor = blockingSortedSetOfStrings.zscan(key, new ScanArgs().count(5));
@@ -784,14 +812,14 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    public void zmscore() {
+    void zmscore() {
         blockingSortedSetOfPlaces.zadd("zset1", Map.of(crussol, 1.0, grignan, 2.0));
         assertThat(blockingSortedSetOfPlaces.zmscore("zset1", crussol, suze, grignan))
                 .isEqualTo(List.of(OptionalDouble.of(1.0), OptionalDouble.empty(), OptionalDouble.of(2.0)));
     }
 
     @Test
-    public void zmpopMin() {
+    void zmpopMin() {
         assertThat(blockingSortedSetOfPlaces.zmpopMin("zset1")).isEqualTo(null);
 
         blockingSortedSetOfPlaces.zadd("zset1", Map.of(crussol, 1.0, grignan, 2.0));
@@ -811,7 +839,7 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    public void zmpopMax() {
+    void zmpopMax() {
         assertThat(blockingSortedSetOfPlaces.zmpopMax("zset1")).isEqualTo(null);
 
         blockingSortedSetOfPlaces.zadd("zset1", Map.of(crussol, 1.0, grignan, 2.0));
@@ -831,12 +859,14 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    public void bzmpopMin() {
+    void bzmpopMin() {
         assertThat(blockingSortedSetOfPlaces.bzmpopMin(Duration.ofSeconds(1), "zset1")).isEqualTo(null);
 
         blockingSortedSetOfPlaces.zadd("zset1", Map.of(crussol, 1.0, grignan, 2.0));
-        assertThat(blockingSortedSetOfPlaces.bzmpopMin(Duration.ofSeconds(10), "zset1")).isEqualTo(ScoredValue.of(crussol, 1.0));
-        assertThat(blockingSortedSetOfPlaces.bzmpopMin(Duration.ofSeconds(10), "zset1")).isEqualTo(ScoredValue.of(grignan, 2.0));
+        assertThat(blockingSortedSetOfPlaces.bzmpopMin(Duration.ofSeconds(10), "zset1"))
+                .isEqualTo(ScoredValue.of(crussol, 1.0));
+        assertThat(blockingSortedSetOfPlaces.bzmpopMin(Duration.ofSeconds(10), "zset1"))
+                .isEqualTo(ScoredValue.of(grignan, 2.0));
         assertThat(blockingSortedSetOfPlaces.bzmpopMin(Duration.ofSeconds(1), "zset1")).isNull();
 
         blockingSortedSetOfPlaces.zadd("zset1", Map.of(crussol, 1.0, grignan, 2.0));
@@ -853,12 +883,14 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    public void bzmpopMax() {
+    void bzmpopMax() {
         assertThat(blockingSortedSetOfPlaces.bzmpopMax(Duration.ofSeconds(1), "zset1")).isEqualTo(null);
 
         blockingSortedSetOfPlaces.zadd("zset1", Map.of(crussol, 1.0, grignan, 2.0));
-        assertThat(blockingSortedSetOfPlaces.bzmpopMax(Duration.ofSeconds(10), "zset1")).isEqualTo(ScoredValue.of(grignan, 2.0));
-        assertThat(blockingSortedSetOfPlaces.bzmpopMax(Duration.ofSeconds(10), "zset1")).isEqualTo(ScoredValue.of(crussol, 1.0));
+        assertThat(blockingSortedSetOfPlaces.bzmpopMax(Duration.ofSeconds(10), "zset1"))
+                .isEqualTo(ScoredValue.of(grignan, 2.0));
+        assertThat(blockingSortedSetOfPlaces.bzmpopMax(Duration.ofSeconds(10), "zset1"))
+                .isEqualTo(ScoredValue.of(crussol, 1.0));
         assertThat(blockingSortedSetOfPlaces.bzmpopMax(Duration.ofSeconds(1), "zset1")).isNull();
 
         blockingSortedSetOfPlaces.zadd("zset1", Map.of(crussol, 1.0, grignan, 2.0));
@@ -878,7 +910,8 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
         populateManyStringEntriesForLex();
 
         assertThat(blockingSortedSetOfStrings.zrangebylex(key, new Range<>("-", "+"))).hasSize(100);
-        assertThat(blockingSortedSetOfStrings.zrangebylex(key, new Range<>("-", "+"), new ZRangeArgs().limit(10, 10))).hasSize(10);
+        assertThat(blockingSortedSetOfStrings.zrangebylex(key, new Range<>("-", "+"), new ZRangeArgs().limit(10, 10)))
+                .hasSize(10);
 
         assertThat(blockingSortedSetOfStrings.zrangebylex(key, Range.unbounded())).hasSize(100);
         assertThat(blockingSortedSetOfStrings.zrangebylex(key, new Range<>("value", "zzz"))).hasSize(100);
@@ -973,8 +1006,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
         assertThat(actual)
                 .isEqualTo(List.of(ScoredValue.of(crussol, 1.0), ScoredValue.of(grignan, 2.0)));
     }
-
-    String value = "value";
 
     private void populateManyStringEntries() {
         for (int i = 0; i < 100; i++) {
