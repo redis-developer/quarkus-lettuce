@@ -44,15 +44,7 @@ import io.quarkus.redis.datasource.transactions.TransactionalRedisDataSource;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
-import io.quarkus.redis.runtime.client.lettuce.hash.LettuceBlockingHashCommandsImpl;
-import io.quarkus.redis.runtime.client.lettuce.key.LettuceBlockingKeyCommandsImpl;
-import io.quarkus.redis.runtime.client.lettuce.list.LettuceBlockingListCommandsImpl;
-import io.quarkus.redis.runtime.client.lettuce.set.LettuceBlockingSetCommandsImpl;
-import io.quarkus.redis.runtime.client.lettuce.sortedset.LettuceBlockingSortedSetCommandsImpl;
-import io.quarkus.redis.runtime.client.lettuce.value.LettuceBlockingValueCommandsImpl;
-import io.quarkus.redis.runtime.datasource.BlockingTransactionalRedisDataSourceImpl;
-import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
-import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
+import io.quarkus.redis.runtime.datasource.*;
 import io.vertx.redis.client.Command;
 import io.vertx.redis.client.Response;
 
@@ -261,7 +253,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
     @Override
     public <K, V> ValueCommands<K, V> value(Class<K> redisKeyType, Class<V> valueType) {
         ReactiveValueCommands<K, V> r = reactive.value(redisKeyType, valueType);
-        return new LettuceBlockingValueCommandsImpl<>(this, r, timeout);
+        return new BlockingStringCommandsImpl<>(this, r, timeout);
     }
 
     @Override
@@ -277,14 +269,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
     @Override
     public <K, F, V> HashCommands<K, F, V> hash(Class<K> redisKeyType, Class<F> typeOfField, Class<V> typeOfValue) {
         ReactiveHashCommands<K, F, V> r = reactive.hash(redisKeyType, typeOfField, typeOfValue);
-        return new LettuceBlockingHashCommandsImpl<>(this, r, timeout);
+        return new BlockingHashCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, F, V> HashCommands<K, F, V> hash(TypeReference<K> redisKeyType, TypeReference<F> typeOfField,
             TypeReference<V> typeOfValue) {
         ReactiveHashCommands<K, F, V> r = reactive.hash(redisKeyType, typeOfField, typeOfValue);
-        return new LettuceBlockingHashCommandsImpl<>(this, r, timeout);
+        return new BlockingHashCommandsImpl<>(this, r, timeout);
     }
 
     @Override
@@ -299,7 +291,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K> KeyCommands<K> key(Class<K> redisKeyType) {
-        return new LettuceBlockingKeyCommandsImpl<>(this, reactive.key(redisKeyType), timeout);
+        return new BlockingKeyCommandsImpl<>(this, reactive.key(redisKeyType), timeout);
     }
 
     @Override
@@ -310,37 +302,37 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
     @Override
     public <K, V> SortedSetCommands<K, V> sortedSet(Class<K> redisKeyType, Class<V> valueType) {
         ReactiveSortedSetCommands<K, V> r = reactive.sortedSet(redisKeyType, valueType);
-        return new LettuceBlockingSortedSetCommandsImpl<>(this, r, timeout);
+        return new BlockingSortedSetCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> SortedSetCommands<K, V> sortedSet(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
         ReactiveSortedSetCommands<K, V> r = reactive.sortedSet(redisKeyType, valueType);
-        return new LettuceBlockingSortedSetCommandsImpl<>(this, r, timeout);
+        return new BlockingSortedSetCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> SetCommands<K, V> set(Class<K> redisKeyType, Class<V> memberType) {
         ReactiveSetCommands<K, V> r = reactive.set(redisKeyType, memberType);
-        return new LettuceBlockingSetCommandsImpl<>(this, r, timeout);
+        return new BlockingSetCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> SetCommands<K, V> set(TypeReference<K> redisKeyType, TypeReference<V> memberType) {
         ReactiveSetCommands<K, V> r = reactive.set(redisKeyType, memberType);
-        return new LettuceBlockingSetCommandsImpl<>(this, r, timeout);
+        return new BlockingSetCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> ListCommands<K, V> list(Class<K> redisKeyType, Class<V> memberType) {
         ReactiveListCommands<K, V> r = reactive.list(redisKeyType, memberType);
-        return new LettuceBlockingListCommandsImpl<>(this, r, timeout);
+        return new BlockingListCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> ListCommands<K, V> list(TypeReference<K> redisKeyType, TypeReference<V> memberType) {
         ReactiveListCommands<K, V> r = reactive.list(redisKeyType, memberType);
-        return new LettuceBlockingListCommandsImpl<>(this, r, timeout);
+        return new BlockingListCommandsImpl<>(this, r, timeout);
     }
 
     @Override
