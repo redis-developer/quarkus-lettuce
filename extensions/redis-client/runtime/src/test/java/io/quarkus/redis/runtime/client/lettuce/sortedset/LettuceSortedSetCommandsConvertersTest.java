@@ -272,17 +272,17 @@ class LettuceSortedSetCommandsConvertersTest {
 
     @Test
     void inclusiveLexRange() {
-        Range<String> range = LettuceSortedSetCommandsConverters
+        Range<byte[]> range = LettuceSortedSetCommandsConverters
                 .toLettuceLexRange(new io.quarkus.redis.datasource.sortedset.Range<>("b", "d"));
-        assertThat(range.getLower().getValue()).isEqualTo("b");
+        assertThat(range.getLower().getValue()).isEqualTo("b".getBytes(UTF_8));
         assertThat(range.getLower().isIncluding()).isTrue();
-        assertThat(range.getUpper().getValue()).isEqualTo("d");
+        assertThat(range.getUpper().getValue()).isEqualTo("d".getBytes(UTF_8));
         assertThat(range.getUpper().isIncluding()).isTrue();
     }
 
     @Test
     void exclusiveLexRange() {
-        Range<String> range = LettuceSortedSetCommandsConverters
+        Range<byte[]> range = LettuceSortedSetCommandsConverters
                 .toLettuceLexRange(new io.quarkus.redis.datasource.sortedset.Range<>("b", false, "d", false));
         assertThat(range.getLower().isIncluding()).isFalse();
         assertThat(range.getUpper().isIncluding()).isFalse();
@@ -297,19 +297,19 @@ class LettuceSortedSetCommandsConvertersTest {
         assertThat(LettuceSortedSetCommandsConverters
                 .toLettuceLexRange(new io.quarkus.redis.datasource.sortedset.Range<>("-", "+")).isUnbounded())
                 .isTrue();
-        Range<String> halfOpen = LettuceSortedSetCommandsConverters
+        Range<byte[]> halfOpen = LettuceSortedSetCommandsConverters
                 .toLettuceLexRange(new io.quarkus.redis.datasource.sortedset.Range<>("value99", true, null, true));
-        assertThat(halfOpen.getLower().getValue()).isEqualTo("value99");
+        assertThat(halfOpen.getLower().getValue()).isEqualTo("value99".getBytes(UTF_8));
         assertThat(halfOpen.getUpper().isUnbounded()).isTrue();
     }
 
     /** {@code -} is only a sentinel in the lower bound; as an upper bound it stays a plain member. */
     @Test
     void minusAsAnUpperBoundIsAPlainMember() {
-        Range<String> range = LettuceSortedSetCommandsConverters
+        Range<byte[]> range = LettuceSortedSetCommandsConverters
                 .toLettuceLexRange(new io.quarkus.redis.datasource.sortedset.Range<>("c", "-"));
-        assertThat(range.getLower().getValue()).isEqualTo("c");
-        assertThat(range.getUpper().getValue()).isEqualTo("-");
+        assertThat(range.getLower().getValue()).isEqualTo("c".getBytes(UTF_8));
+        assertThat(range.getUpper().getValue()).isEqualTo("-".getBytes(UTF_8));
         assertThat(range.getUpper().isIncluding()).isTrue();
     }
 
@@ -386,4 +386,5 @@ class LettuceSortedSetCommandsConvertersTest {
             }
         };
     }
+
 }

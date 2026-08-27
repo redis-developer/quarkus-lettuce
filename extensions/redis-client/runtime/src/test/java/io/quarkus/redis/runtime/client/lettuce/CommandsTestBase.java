@@ -1,5 +1,6 @@
 package io.quarkus.redis.runtime.client.lettuce;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.CompletionStage;
@@ -14,6 +15,7 @@ import org.testcontainers.utility.DockerImageName;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.codec.RedisCodec;
 import io.netty.channel.EventLoopGroup;
 import io.quarkus.redis.runtime.client.lettuce.datasource.LettuceBlockingRedisDataSourceImpl;
@@ -31,8 +33,8 @@ public abstract class CommandsTestBase {
     protected static LettuceClientResources lettuceResources;
     protected static RedisClient redisClient;
     protected static RedisURI redisUri;
-    protected static RedisCodec<String, String> codec;
-    protected static StatefulRedisConnection<String, String> connection;
+    protected static RedisCodec<byte[], byte[]> codec;
+    protected static StatefulRedisConnection<byte[], byte[]> connection;
 
     protected final String key = UUID.randomUUID().toString();
 
@@ -49,7 +51,7 @@ public abstract class CommandsTestBase {
 
         redisUri = RedisURI.create(REDIS.getHost(), REDIS.getFirstMappedPort());
         redisClient = RedisClient.create(lettuceResources.clientResources(), redisUri);
-        codec = new QuarkusRedisCodec<>(String.class, String.class);
+        codec = ByteArrayCodec.INSTANCE;
         connection = redisClient.connect(codec);
     }
 
@@ -84,11 +86,11 @@ public abstract class CommandsTestBase {
         return container;
     }
 
-    protected static CompletionStage<StatefulRedisConnection<String, String>> connectAsync() {
+    protected static CompletionStage<StatefulRedisConnection<byte[], byte[]>> connectAsync() {
         return redisClient.connectAsync(codec, redisUri);
     }
 
-    protected static Supplier<CompletionStage<StatefulRedisConnection<String, String>>> connector() {
+    protected static Supplier<CompletionStage<StatefulRedisConnection<byte[], byte[]>>> connector() {
         return CommandsTestBase::connectAsync;
     }
 
@@ -102,6 +104,20 @@ public abstract class CommandsTestBase {
 
     protected static LettuceBlockingRedisDataSourceImpl blockingDataSource(Duration timeout) {
         return new LettuceBlockingRedisDataSourceImpl(reactiveDataSource(), timeout);
+    }
+
+    protected static long connectionCount() {
+        String list = connection.sync().clientList();
+        return list.isEmpty() ? 0 : list.split("\n").length;
+    }
+
+    protected static void rawSet(String key, String value) {
+        connection.sync().set(key.getBytes(StandardCharsets.UTF_8), value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    protected static String rawGet(String key) {
+        byte[] bytes = connection.sync().get(key.getBytes(StandardCharsets.UTF_8));
+        return bytes == null ? null : new String(bytes, StandardCharsets.UTF_8);
     }
 
 }

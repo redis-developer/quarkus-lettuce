@@ -16,6 +16,9 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+
+import io.quarkus.redis.datasource.Person;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.keys.CopyArgs;
@@ -37,7 +40,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     RedisDataSource blockingDs;
     ReactiveKeyCommands<String> reactiveKeys;
     KeyCommands<String> blockingKeys;
-    ValueCommands<String, String> blockingValues;
+    ValueCommands<String, Person> blockingValues;
 
     @BeforeEach
     void initialize() {
@@ -45,7 +48,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
         blockingDs = blockingDataSource();
         reactiveKeys = reactiveDs.key(String.class);
         blockingKeys = blockingDs.key(String.class);
-        blockingValues = blockingDs.value(String.class);
+        blockingValues = blockingDs.value(Person.class);
     }
 
     @Test
@@ -56,75 +59,75 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
 
     @Test
     void del() {
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat((long) blockingKeys.del(key)).isEqualTo(1);
-        blockingValues.set(key + "1", "person7");
-        blockingValues.set(key + "2", "person7");
+        blockingValues.set(key + "1", Person.person7);
+        blockingValues.set(key + "2", Person.person7);
 
         assertThat(blockingKeys.del(key + "1", key + "2")).isEqualTo(2);
     }
 
     @Test
     void unlink() {
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat((long) blockingKeys.unlink(key)).isEqualTo(1);
-        blockingValues.set(key + "1", "person7");
-        blockingValues.set(key + "2", "person7");
+        blockingValues.set(key + "1", Person.person7);
+        blockingValues.set(key + "2", Person.person7);
         assertThat(blockingKeys.unlink(key + "1", key + "2")).isEqualTo(2);
     }
 
     @Test
     void copy() {
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.copy(key, key + "2")).isTrue();
         assertThat(blockingKeys.copy("unknown", key + "2")).isFalse();
-        assertThat(blockingValues.get(key + "2")).isEqualTo("person7");
+        assertThat(blockingValues.get(key + "2")).isEqualTo(Person.person7);
     }
 
     @Test
     void copyWithReplace() {
-        blockingValues.set(key, "person7");
-        blockingValues.set(key + 2, "person1");
+        blockingValues.set(key, Person.person7);
+        blockingValues.set(key + 2, Person.person1);
         assertThat(blockingKeys.copy(key, key + "2", new CopyArgs().replace(true))).isTrue();
-        assertThat(blockingValues.get(key + "2")).isEqualTo("person7");
+        assertThat(blockingValues.get(key + "2")).isEqualTo(Person.person7);
     }
 
     @Test
     void copyWithDestinationDb() {
         blockingDs.withConnection(connection -> {
-            connection.value(String.class).set(key, "person7");
+            connection.value(String.class, Person.class).set(key, Person.person7);
             connection.key(String.class).copy(key, key, new CopyArgs().destinationDb(2));
             connection.select(2);
-            assertThat(connection.value(String.class).get(key)).isEqualTo("person7");
+            assertThat(connection.value(String.class, Person.class).get(key)).isEqualTo(Person.person7);
         });
     }
 
     @Test
     void dump() {
         assertThat(blockingKeys.dump("invalid")).isNull();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.dump(key)).isNotEmpty();
     }
 
     @Test
     void exists() {
         assertThat(blockingKeys.exists(key)).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.exists(key)).isTrue();
     }
 
     @Test
     void existsVariadic() {
         assertThat(blockingKeys.exists(key, "key2", "key3")).isEqualTo(0);
-        blockingValues.set(key, "person7");
-        blockingValues.set("key2", "person7");
+        blockingValues.set(key, Person.person7);
+        blockingValues.set("key2", Person.person7);
         assertThat(blockingKeys.exists(key, "key2", "key3")).isEqualTo(2);
     }
 
     @Test
     void expire() {
         assertThat(blockingKeys.expire(key, 10)).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.expire(key, 10)).isTrue();
         assertThat(blockingKeys.ttl(key)).isBetween(5L, 10L);
 
@@ -135,7 +138,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     @Test
     void expireWithArgs() {
         assertThat(blockingKeys.expire(key, 10, new ExpireArgs().xx())).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.expire(key, 10, new ExpireArgs().nx())).isTrue();
         assertThat(blockingKeys.ttl(key)).isBetween(5L, 10L);
 
@@ -147,7 +150,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     void expireat() {
         Date expiration = new Date(System.currentTimeMillis() + 10000);
         assertThat(blockingKeys.expireat(key, expiration.toInstant().toEpochMilli())).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.expireat(key, expiration.toInstant())).isTrue();
 
         assertThat(blockingKeys.ttl(key)).isGreaterThanOrEqualTo(8);
@@ -160,7 +163,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     void expireatWithArgs() {
         Date expiration = new Date(System.currentTimeMillis() + 10000);
         assertThat(blockingKeys.expireat(key, expiration.toInstant().getEpochSecond(), new ExpireArgs().xx())).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.expireat(key, expiration.toInstant(), new ExpireArgs().nx())).isTrue();
 
         assertThat(blockingKeys.ttl(key)).isGreaterThanOrEqualTo(8);
@@ -175,10 +178,10 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     @Test
     void keys() {
         assertThat(blockingKeys.keys("*")).isEqualTo(List.of());
-        Map<String, String> map = new LinkedHashMap<>();
-        map.put("one", "person1");
-        map.put("two", "person2");
-        map.put("three", "person3");
+        Map<String, Person> map = new LinkedHashMap<>();
+        map.put("one", Person.person1);
+        map.put("two", Person.person2);
+        map.put("three", Person.person3);
         blockingValues.mset(map);
         List<String> k = blockingKeys.keys("???");
         assertThat(k).hasSize(2);
@@ -186,15 +189,38 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     }
 
     @Test
+    void keysWithTypeReferences() {
+        var v = blockingDs.value(new TypeReference<List<String>>() {
+            // Empty on purpose
+        }, new TypeReference<Person>() {
+            // Empty on purpose
+        });
+        var k = blockingDs.key(new TypeReference<List<String>>() {
+            // Empty on purpose
+        });
+
+        assertThat(k.keys("*")).isEqualTo(List.of());
+        Map<List<String>, Person> map = new LinkedHashMap<>();
+        map.put(List.of("one"), Person.person1);
+        map.put(List.of("two"), Person.person2);
+        map.put(List.of("three"), Person.person3);
+        v.mset(map);
+        var l = k.keys("*o*");
+        assertThat(l).hasSize(2);
+        assertThat(l).contains(List.of("one"), List.of("two"));
+        assertThat(l).doesNotContain(List.of("three"));
+    }
+
+    @Test
     void move() {
         blockingDs.withConnection(connection -> {
-            ValueCommands<String, String> commands = connection.value(String.class);
-            commands.set("foo", "person3");
-            commands.set(key, "person7");
+            ValueCommands<String, Person> commands = connection.value(String.class, Person.class);
+            commands.set("foo", Person.person3);
+            commands.set(key, Person.person7);
             assertThat(connection.key(String.class).move(key, 1)).isTrue();
             assertThat(commands.get(key)).isNull();
             connection.select(1);
-            assertThat(commands.get(key)).isEqualTo("person7");
+            assertThat(commands.get(key)).isEqualTo(Person.person7);
         });
 
     }
@@ -202,7 +228,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     @Test
     void persist() {
         assertThat(blockingKeys.persist(key)).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.persist(key)).isFalse();
         blockingKeys.expire(key, 10);
         assertThat(blockingKeys.persist(key)).isTrue();
@@ -211,7 +237,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     @Test
     void pexpire() {
         assertThat(blockingKeys.pexpire(key, 5000)).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.pexpire(key, 5000)).isTrue();
         assertThat(blockingKeys.pttl(key)).isGreaterThan(0).isLessThanOrEqualTo(5000);
 
@@ -222,7 +248,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     @Test
     void pexpireWithArgs() {
         assertThat(blockingKeys.pexpire(key, 5000, new ExpireArgs().xx())).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.pexpire(key, 5000, new ExpireArgs().nx())).isTrue();
         assertThat(blockingKeys.pttl(key)).isGreaterThan(0).isLessThanOrEqualTo(5000);
 
@@ -236,7 +262,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     @Test
     void pexpireWithDuration() {
         assertThat(blockingKeys.pexpire(key, Duration.ofSeconds(5))).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.pexpire(key, Duration.ofSeconds(1))).isTrue();
         assertThat(blockingKeys.pttl(key)).isGreaterThan(0).isLessThanOrEqualTo(1000);
 
@@ -248,7 +274,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     void pexpireat() {
         Instant expiration = new Date(System.currentTimeMillis() + 5000).toInstant();
         assertThat(blockingKeys.pexpireat(key, expiration.getEpochSecond())).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.pexpireat(key, expiration)).isTrue();
         assertThat(blockingKeys.pttl(key)).isGreaterThan(0);
 
@@ -260,7 +286,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     void pexpireatWithArgs() {
         Instant expiration = new Date(System.currentTimeMillis() + 5000).toInstant();
         assertThat(blockingKeys.pexpireat(key, expiration.getEpochSecond(), new ExpireArgs().xx())).isFalse();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.pexpireat(key, expiration, new ExpireArgs().nx())).isTrue();
         assertThat(blockingKeys.pttl(key)).isGreaterThan(0);
 
@@ -271,7 +297,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     @Test
     void pttl() {
         assertThatThrownBy(() -> blockingKeys.pttl(key)).isInstanceOf(RedisKeyNotFoundException.class);
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.pttl(key)).isEqualTo(-1);
         blockingKeys.pexpire(key, 5000);
         assertThat(blockingKeys.pttl(key)).isGreaterThan(0).isLessThanOrEqualTo(5000);
@@ -280,20 +306,20 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     @Test
     void randomkey() {
         assertThat(blockingKeys.randomkey()).isNull();
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.randomkey()).isEqualTo(key);
     }
 
     @Test
     void rename() {
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
 
         blockingKeys.rename(key, key + "X");
         assertThat(blockingValues.get(key)).isNull();
-        assertThat(blockingValues.get(key + "X")).isEqualTo("person7");
-        blockingValues.set(key, "person4");
+        assertThat(blockingValues.get(key + "X")).isEqualTo(Person.person7);
+        blockingValues.set(key, Person.person4);
         blockingKeys.rename(key + "X", key);
-        assertThat(blockingValues.get(key)).isEqualTo("person7");
+        assertThat(blockingValues.get(key)).isEqualTo(Person.person7);
     }
 
     @Test
@@ -303,10 +329,10 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
 
     @Test
     void renamenx() {
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.renamenx(key, key + "X")).isTrue();
-        assertThat(blockingValues.get(key + "X")).isEqualTo("person7");
-        blockingValues.set(key, "person7");
+        assertThat(blockingValues.get(key + "X")).isEqualTo(Person.person7);
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.renamenx(key + "X", key)).isFalse();
     }
 
@@ -318,14 +344,14 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     @Test
     void touch() {
         assertThat((long) blockingKeys.touch(key)).isEqualTo(0);
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat((long) blockingKeys.touch(key, "key2")).isEqualTo(1);
     }
 
     @Test
     void ttl() {
         assertThatThrownBy(() -> blockingKeys.ttl(key)).isInstanceOf(RedisKeyNotFoundException.class);
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.ttl(key)).isEqualTo(-1);
         blockingKeys.expire(key, 10);
         assertThat(blockingKeys.ttl(key)).isEqualTo(10);
@@ -335,17 +361,17 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
     void type() {
         assertThat(blockingKeys.type(key)).isEqualTo(RedisValueType.NONE);
 
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         assertThat(blockingKeys.type(key)).isEqualTo(RedisValueType.STRING);
 
-        blockingDs.hash(String.class).hset(key + "H", "p3", "person3");
+        blockingDs.hash(String.class, String.class, Person.class).hset(key + "H", "p3", Person.person3);
         assertThat(blockingKeys.type(key + "H")).isEqualTo(RedisValueType.HASH);
 
         ListCommands<String, String> lists = blockingDs.list(String.class);
         lists.lpush(key + "L", "1");
         assertThat(blockingKeys.type(key + "L")).isEqualTo(RedisValueType.LIST);
 
-        blockingDs.set(String.class).sadd(key + "S", "person4");
+        blockingDs.set(String.class, Person.class).sadd(key + "S", Person.person4);
         assertThat(blockingKeys.type(key + "S")).isEqualTo(RedisValueType.SET);
 
         SortedSetCommands<String, String> ss = blockingDs.sortedSet(String.class);
@@ -355,7 +381,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
 
     @Test
     void scan() {
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         KeyScanCursor<String> cursor = blockingKeys.scan();
         assertThat(cursor.hasNext()).isTrue();
         assertThat(cursor.next()).containsExactly(key);
@@ -380,7 +406,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
 
     @Test
     void scanWithArgs() {
-        blockingValues.set(key, "person7");
+        blockingValues.set(key, Person.person7);
         KeyScanCursor<String> cursor = blockingKeys.scan(new KeyScanArgs().count(10));
         assertThat(cursor.hasNext()).isTrue();
         assertThat(cursor.next()).containsExactly(key);
@@ -389,8 +415,8 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
 
     @Test
     void scanWithType() {
-        blockingValues.set("key1", "person7");
-        blockingDs.list(String.class).lpush("key2", "person7");
+        blockingValues.set("key1", Person.person7);
+        blockingDs.list(Person.class).lpush("key2", Person.person7);
 
         KeyScanCursor<String> cursor = blockingKeys.scan(new KeyScanArgs().type(RedisValueType.STRING));
         assertThat(cursor.next()).containsExactly("key1");
@@ -447,7 +473,7 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
 
     void populateMany(Set<String> expect) {
         for (int i = 0; i < 100; i++) {
-            blockingValues.set(key + i, "person" + i);
+            blockingValues.set(key + i, new Person("a", "b" + i));
             expect.add(key + i);
         }
     }

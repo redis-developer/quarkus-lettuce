@@ -14,8 +14,7 @@ public final class LettuceHashCommandsConverters {
 
     public static io.lettuce.core.ScanArgs toLettuceScanArgs(ScanArgs quarkus) {
         io.lettuce.core.ScanArgs lettuce = new io.lettuce.core.ScanArgs();
-        Iterable<String> tokens = quarkus.toArgs();
-        var cursor = new ArgTokenCursor(tokens);
+        var cursor = new ArgTokenCursor(quarkus.toArgs());
         while (cursor.hasNext()) {
             String token = cursor.next();
             switch (token) {

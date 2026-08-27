@@ -17,7 +17,6 @@ import io.quarkus.test.common.QuarkusTestResource;
  * Tests that Lettuce beans can be injected using {@code @RedisClientName} qualifier.
  */
 @QuarkusTestResource(RedisTestResource.class)
-@SuppressWarnings("deprecation")
 public class LettuceNamedClientInjectionTest {
 
     @RegisterExtension

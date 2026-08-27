@@ -11,12 +11,14 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
+import io.quarkus.redis.datasource.Person;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
@@ -25,24 +27,21 @@ import io.quarkus.redis.datasource.hash.HashScanCursor;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.hash.ReactiveHashScanCursor;
 import io.quarkus.redis.runtime.client.lettuce.CommandsTestBase;
+import io.vertx.core.json.Json;
 
 class LettuceHashCommandsTest extends CommandsTestBase {
 
-    static final String HELLO = "hello";
-    static final String WORLD = "world";
-    static final String OTHER = "other";
-
     ReactiveRedisDataSource reactiveDs;
     RedisDataSource blockingDs;
-    ReactiveHashCommands<String, String, String> reactiveHash;
-    HashCommands<String, String, String> blockingHash;
+    ReactiveHashCommands<String, String, Person> reactiveHash;
+    HashCommands<String, String, Person> blockingHash;
 
     @BeforeEach
     void initialize() {
         reactiveDs = reactiveDataSource();
         blockingDs = blockingDataSource();
-        reactiveHash = reactiveDs.hash(String.class);
-        blockingHash = blockingDs.hash(String.class);
+        reactiveHash = reactiveDs.hash(Person.class);
+        blockingHash = blockingDs.hash(Person.class);
     }
 
     @Test
@@ -53,68 +52,101 @@ class LettuceHashCommandsTest extends CommandsTestBase {
 
     @Test
     void simpleHset() {
-        blockingHash.hset("my-hash", "field1", HELLO);
-        String value = blockingHash.hget("my-hash", "field1");
-        assertThat(value).isEqualTo(HELLO);
+        blockingHash.hset("my-hash", "field1", Person.person1);
+        Person person = blockingHash.hget("my-hash", "field1");
+        assertThat(person).isEqualTo(Person.person1);
 
         assertThat(blockingHash.hdel("my-hash", "field1")).isEqualTo(1);
-        value = blockingHash.hget("my-hash", "field1");
-        assertThat(value).isNull();
+        person = blockingHash.hget("my-hash", "field1");
+        assertThat(person).isNull();
     }
 
     @Test
     void hsetWithTypeReference() {
-        var h = blockingDs.hash(new TypeReference<String>() {
+        var h = blockingDs.hash(new TypeReference<List<Person>>() {
+            // Empty on purpose.
         });
-        h.hset("my-hash", "l1", HELLO);
-        assertThat(h.hget("my-hash", "l1")).isEqualTo(HELLO);
+        h.hset("my-hash", "l1", List.of(Person.person1, Person.person2));
+        List<Person> person = h.hget("my-hash", "l1");
+        assertThat(person).containsExactly(Person.person1, Person.person2);
 
         assertThat(h.hdel("my-hash", "l1")).isEqualTo(1);
-        assertThat(h.hget("my-hash", "l1")).isNull();
+        person = h.hget("my-hash", "l1");
+        assertThat(person).isNull();
+    }
+
+    @Test
+    void hsetWithTypeReferenceUsingMaps() {
+        var h = blockingDs.hash(new TypeReference<Map<String, Person>>() {
+            // Empty on purpose.
+        });
+        h.hset("my-hash", "l1", Map.of("a", Person.person1, "b", Person.person2));
+        Map<String, Person> person = h.hget("my-hash", "l1");
+        assertThat(person).containsOnly(entry("a", Person.person1), entry("b", Person.person2));
+
+        assertThat(h.hdel("my-hash", "l1")).isEqualTo(1);
+        person = h.hget("my-hash", "l1");
+        assertThat(person).isNull();
     }
 
     @Test
     void hdel() {
         assertThat(blockingHash.hdel(key, "one")).isEqualTo(0);
-        blockingHash.hset(key, "two", HELLO);
+        blockingHash.hset(key, "two", Person.person1);
         assertThat(blockingHash.hdel(key, "one")).isEqualTo(0);
-        blockingHash.hset(key, "one", WORLD);
+        blockingHash.hset(key, "one", Person.person2);
         assertThat(blockingHash.hdel(key, "one")).isEqualTo(1);
-        blockingHash.hset(key, "one", WORLD);
+        blockingHash.hset(key, "one", Person.person2);
         assertThat(blockingHash.hdel(key, "one", "two")).isEqualTo(2);
     }
 
     @Test
     void hexists() {
         assertThat(blockingHash.hexists(key, "one")).isFalse();
-        blockingHash.hset(key, "two", WORLD);
+        blockingHash.hset(key, "two", Person.person2);
         assertThat(blockingHash.hexists(key, "one")).isFalse();
-        blockingHash.hset(key, "one", HELLO);
+        blockingHash.hset(key, "one", Person.person1);
         assertThat(blockingHash.hexists(key, "one")).isTrue();
     }
 
     @Test
     void hget() {
         assertThat(blockingHash.hget(key, "one")).isNull();
-        blockingHash.hset(key, "one", HELLO);
-        assertThat(blockingHash.hget(key, "one")).isEqualTo(HELLO);
+        blockingHash.hset(key, "one", Person.person1);
+        assertThat(blockingHash.hget(key, "one")).isEqualTo(Person.person1);
     }
 
     @Test
     void hgetall() {
         assertThat(blockingHash.hgetall(key).isEmpty()).isTrue();
 
-        blockingHash.hset(key, "zero", OTHER);
-        blockingHash.hset(key, "one", HELLO);
-        blockingHash.hset(key, "two", WORLD);
+        blockingHash.hset(key, "zero", Person.person0);
+        blockingHash.hset(key, "one", Person.person1);
+        blockingHash.hset(key, "two", Person.person2);
 
-        Map<String, String> map = blockingHash.hgetall(key);
+        Map<String, Person> map = blockingHash.hgetall(key);
 
         assertThat(map).hasSize(3);
         assertThat(map.keySet()).containsExactlyInAnyOrder("zero", "one", "two");
-        assertThat(map.values()).containsExactlyInAnyOrder(OTHER, HELLO, WORLD);
+        assertThat(map.values()).containsExactlyInAnyOrder(Person.person0, Person.person1, Person.person2);
 
         assertThat(blockingHash.hgetall("missing")).isEmpty();
+    }
+
+    /**
+     * Reproducer for <a href="https://github.com/quarkusio/quarkus/issues/28837">#28837</a>.
+     */
+    @Test
+    void hgetallUsingIntegers() {
+        var cmd = blockingDs.hash(Integer.class);
+        String key = UUID.randomUUID().toString();
+        assertThat(cmd.hgetall(key).isEmpty()).isTrue();
+
+        cmd.hset(key, Map.of("a", 1, "b", 2, "c", 3));
+
+        Map<String, Integer> map = cmd.hgetall(key);
+
+        assertThat(map).hasSize(3);
     }
 
     @Test
@@ -140,59 +172,61 @@ class LettuceHashCommandsTest extends CommandsTestBase {
 
     private void populate() {
         assertThat(blockingHash.hkeys(key)).isEqualTo(Collections.emptyList());
-        blockingHash.hset(key, "one", HELLO);
-        blockingHash.hset(key, "two", WORLD);
+        blockingHash.hset(key, "one", Person.person1);
+        blockingHash.hset(key, "two", Person.person2);
     }
 
     @Test
     void hlen() {
         assertThat(blockingHash.hlen(key)).isEqualTo(0);
-        blockingHash.hset(key, "one", HELLO);
+        blockingHash.hset(key, "one", Person.person1);
         assertThat(blockingHash.hlen(key)).isEqualTo(1);
     }
 
     @Test
     void hstrlen() {
         assertThat(blockingHash.hstrlen(key, "one")).isEqualTo(0);
-        blockingHash.hset(key, "one", HELLO);
-        assertThat(blockingHash.hstrlen(key, "one")).isEqualTo(HELLO.length());
+        blockingHash.hset(key, "one", Person.person1);
+        assertThat(blockingHash.hstrlen(key, "one")).isEqualTo(Json.encode(Person.person1).length());
     }
 
     @Test
     void hmget() {
         populateForHmget();
-        Map<String, String> values = blockingHash.hmget(key, "one", "missing", "two");
+        Map<String, Person> values = blockingHash.hmget(key, "one", "missing", "two");
         assertThat(values).hasSize(3);
-        assertThat(values).containsExactly(entry("one", HELLO), entry("missing", null), entry("two", WORLD));
+        assertThat(values).containsExactly(entry("one", Person.person1), entry("missing", null),
+                entry("two", Person.person2));
     }
 
     private void populateForHmget() {
-        assertThat(blockingHash.hmget(key, "one", "two")).allSatisfy((f, v) -> assertThat(v).isNull());
-        blockingHash.hset(key, "one", HELLO);
-        blockingHash.hset(key, "two", WORLD);
+        assertThat(blockingHash.hmget(key, "one", "two")).allSatisfy((s, p) -> assertThat(p).isNull());
+        blockingHash.hset(key, "one", Person.person1);
+        blockingHash.hset(key, "two", Person.person2);
     }
 
     @Test
     void hmset() {
-        blockingHash.hmset(key, Map.of("one", HELLO, "two", WORLD));
-        assertThat(blockingHash.hmget(key, "one", "two")).containsExactly(entry("one", HELLO), entry("two", WORLD));
+        blockingHash.hmset(key, Map.of("one", Person.person1, "two", Person.person2));
+        assertThat(blockingHash.hmget(key, "one", "two")).containsExactly(entry("one", Person.person1),
+                entry("two", Person.person2));
     }
 
     @Test
     void hmsetWithNulls() {
-        Map<String, String> map = new LinkedHashMap<>();
+        Map<String, Person> map = new LinkedHashMap<>();
         map.put("one", null);
         blockingHash.hmset(key, map);
-        assertThat(blockingHash.hmget(key, "one")).containsExactly(entry("one", ""));
+        assertThat(blockingHash.hmget(key, "one")).containsExactly(entry("one", null));
 
-        map.put("one", HELLO);
+        map.put("one", Person.person1);
         blockingHash.hmset(key, map);
-        assertThat(blockingHash.hmget(key, "one")).containsExactly(entry("one", HELLO));
+        assertThat(blockingHash.hmget(key, "one")).containsExactly(entry("one", Person.person1));
     }
 
     @Test
     void hrandfield() {
-        blockingHash.hset(key, Map.of("one", HELLO, "two", WORLD, "three", OTHER));
+        blockingHash.hset(key, Map.of("one", Person.person1, "two", Person.person2, "three", Person.person3));
 
         assertThat(blockingHash.hrandfield(key)).isIn("one", "two", "three");
         assertThat(blockingHash.hrandfield(key, 2)).hasSize(2).containsAnyOf("one", "two", "three");
@@ -200,13 +234,13 @@ class LettuceHashCommandsTest extends CommandsTestBase {
 
     @Test
     void hrandfieldWithValues() {
-        Map<String, String> map = Map.of("one", HELLO, "two", WORLD, "three", OTHER);
+        Map<String, Person> map = Map.of("one", Person.person1, "two", Person.person2, "three", Person.person3);
         blockingHash.hset(key, map);
 
         assertThat(blockingHash.hrandfieldWithValues(key, 1))
-                .anySatisfy((f, v) -> assertThat(map.get(f)).isEqualTo(v));
+                .anySatisfy((s, p) -> assertThat(map.get(s)).isEqualTo(p));
         assertThat(blockingHash.hrandfieldWithValues(key, 2)).hasSize(2)
-                .allSatisfy((f, v) -> assertThat(map.get(f)).isEqualTo(v));
+                .allSatisfy((s, p) -> assertThat(map.get(s)).isEqualTo(p));
 
         assertThat(blockingHash.hrandfieldWithValues(key, -20)).isNotEmpty();
         assertThat(blockingHash.hrandfieldWithValues(key, 3)).containsExactlyInAnyOrderEntriesOf(map);
@@ -216,56 +250,57 @@ class LettuceHashCommandsTest extends CommandsTestBase {
 
     @Test
     void hset() {
-        assertThat(blockingHash.hset(key, "one", HELLO)).isTrue();
-        assertThat(blockingHash.hset(key, "one", HELLO)).isFalse();
+        assertThat(blockingHash.hset(key, "one", Person.person1)).isTrue();
+        assertThat(blockingHash.hset(key, "one", Person.person1)).isFalse();
     }
 
     @Test
     void hsetMap() {
-        Map<String, String> map = new LinkedHashMap<>();
-        map.put("two", WORLD);
-        map.put("three", OTHER);
+        Map<String, Person> map = new LinkedHashMap<>();
+        map.put("two", Person.person2);
+        map.put("three", Person.person0);
         assertThat(blockingHash.hset(key, map)).isEqualTo(2);
 
-        map.put("two", WORLD);
+        map.put("two", Person.person2);
         assertThat(blockingHash.hset(key, map)).isEqualTo(0);
-        assertThat(blockingHash.hget(key, "two")).isEqualTo(WORLD);
+        assertThat(blockingHash.hget(key, "two")).isEqualTo(Person.person2);
     }
 
     @Test
     void hsetnx() {
-        blockingHash.hset(key, "one", HELLO);
-        assertThat(blockingHash.hsetnx(key, "one", WORLD)).isFalse();
-        assertThat(blockingHash.hget(key, "one")).isEqualTo(HELLO);
+        blockingHash.hset(key, "one", Person.person1);
+        assertThat(blockingHash.hsetnx(key, "one", Person.person2)).isFalse();
+        assertThat(blockingHash.hget(key, "one")).isEqualTo(Person.person1);
     }
 
     @Test
     void hvals() {
         assertThat(blockingHash.hvals(key)).isEqualTo(List.of());
-        blockingHash.hset(key, "one", HELLO);
-        blockingHash.hset(key, "two", WORLD);
-        List<String> values = blockingHash.hvals(key);
-        assertThat(values).hasSize(2).containsExactly(HELLO, WORLD);
+        blockingHash.hset(key, "one", Person.person1);
+        blockingHash.hset(key, "two", Person.person2);
+        List<Person> values = blockingHash.hvals(key);
+        assertThat(values).hasSize(2)
+                .containsExactly(Person.person1, Person.person2);
     }
 
     @Test
     void hscan() {
-        blockingHash.hset(key, "one", OTHER);
-        HashScanCursor<String, String> cursor = blockingHash.hscan(key);
+        blockingHash.hset(key, "one", Person.person0);
+        HashScanCursor<String, Person> cursor = blockingHash.hscan(key);
 
         assertThat(cursor.hasNext()).isTrue();
-        Map<String, String> next = cursor.next();
+        Map<String, Person> next = cursor.next();
 
-        assertThat(next).containsExactly(entry("one", OTHER));
+        assertThat(next).containsExactly(entry("one", Person.person0));
         assertThat(cursor.hasNext()).isFalse();
     }
 
     @Test
     void hscanEmpty() {
-        HashScanCursor<String, String> cursor = blockingHash.hscan(key);
+        HashScanCursor<String, Person> cursor = blockingHash.hscan(key);
 
         assertThat(cursor.hasNext()).isTrue();
-        Map<String, String> next = cursor.next();
+        Map<String, Person> next = cursor.next();
 
         assertThat(cursor.hasNext()).isFalse();
         assertThat(next).isEmpty();
@@ -273,11 +308,11 @@ class LettuceHashCommandsTest extends CommandsTestBase {
 
     @Test
     void hscanAsIteratorEmpty() {
-        HashScanCursor<String, String> cursor = blockingHash.hscan(key);
-        Iterable<Map.Entry<String, String>> iterable = cursor.toIterable();
+        HashScanCursor<String, Person> cursor = blockingHash.hscan(key);
+        Iterable<Map.Entry<String, Person>> iterable = cursor.toIterable();
 
         List<String> keys = new ArrayList<>();
-        for (Map.Entry<String, String> entry : iterable) {
+        for (Map.Entry<String, Person> entry : iterable) {
             keys.add(entry.getKey());
         }
         assertThat(keys).isEmpty();
@@ -285,25 +320,26 @@ class LettuceHashCommandsTest extends CommandsTestBase {
 
     @Test
     void hscanWithArgs() {
-        blockingHash.hset(key, "one", OTHER);
-        blockingHash.hset(key, "two", HELLO);
-        blockingHash.hset(key, "three", WORLD);
-        HashScanCursor<String, String> cursor = blockingHash.hscan(key, new ScanArgs().count(3));
+        blockingHash.hset(key, "one", Person.person0);
+        blockingHash.hset(key, "two", Person.person1);
+        blockingHash.hset(key, "three", Person.person2);
+        HashScanCursor<String, Person> cursor = blockingHash.hscan(key, new ScanArgs().count(3));
 
         assertThat(cursor.hasNext()).isTrue();
-        Map<String, String> next = cursor.next();
+        Map<String, Person> next = cursor.next();
 
-        assertThat(next).containsExactly(entry("one", OTHER), entry("two", HELLO), entry("three", WORLD));
+        assertThat(next).containsExactly(entry("one", Person.person0), entry("two", Person.person1),
+                entry("three", Person.person2));
         assertThat(cursor.hasNext()).isFalse();
     }
 
     @Test
     void hscanMultiple() {
-        Map<String, String> expect = new LinkedHashMap<>();
-        Map<String, String> check = new LinkedHashMap<>();
+        Map<String, Person> expect = new LinkedHashMap<>();
+        Map<String, Person> check = new LinkedHashMap<>();
         populateManyEntries(expect);
 
-        HashScanCursor<String, String> cursor = blockingHash.hscan(key, new ScanArgs().count(5));
+        HashScanCursor<String, Person> cursor = blockingHash.hscan(key, new ScanArgs().count(5));
         while (cursor.hasNext()) {
             check.putAll(cursor.next());
         }
@@ -313,13 +349,13 @@ class LettuceHashCommandsTest extends CommandsTestBase {
 
     @Test
     void hscanIterator() {
-        Map<String, String> expect = new LinkedHashMap<>();
-        Map<String, String> check = new LinkedHashMap<>();
+        Map<String, Person> expect = new LinkedHashMap<>();
+        Map<String, Person> check = new LinkedHashMap<>();
         populateManyEntries(expect);
 
-        HashScanCursor<String, String> cursor = blockingHash.hscan(key, new ScanArgs().count(5));
-        Iterable<Map.Entry<String, String>> entries = cursor.toIterable();
-        for (Map.Entry<String, String> entry : entries) {
+        HashScanCursor<String, Person> cursor = blockingHash.hscan(key, new ScanArgs().count(5));
+        Iterable<Map.Entry<String, Person>> entries = cursor.toIterable();
+        for (Map.Entry<String, Person> entry : entries) {
             check.put(entry.getKey(), entry.getValue());
         }
 
@@ -329,12 +365,12 @@ class LettuceHashCommandsTest extends CommandsTestBase {
 
     @Test
     void hscanMatch() {
-        Map<String, String> expect = new LinkedHashMap<>();
-        Map<String, String> check = new HashMap<>();
+        Map<String, Person> expect = new LinkedHashMap<>();
+        Map<String, Person> check = new HashMap<>();
 
         populateManyEntries(expect);
 
-        HashScanCursor<String, String> cursor = blockingHash.hscan(key, new ScanArgs().match("f1*"));
+        HashScanCursor<String, Person> cursor = blockingHash.hscan(key, new ScanArgs().match("f1*"));
         while (cursor.hasNext()) {
             check.putAll(cursor.next());
         }
@@ -342,9 +378,9 @@ class LettuceHashCommandsTest extends CommandsTestBase {
         assertThat(check).hasSize(11);
     }
 
-    private void populateManyEntries(Map<String, String> expect) {
+    private void populateManyEntries(Map<String, Person> expect) {
         for (int i = 0; i < 100; i++) {
-            expect.put("f" + i, "hello" + i);
+            expect.put("f" + i, new Person("name" + i, ""));
         }
         blockingHash.hset(key, expect);
     }
@@ -370,24 +406,14 @@ class LettuceHashCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void fieldTypeMustMatchKeyType() {
-        assertThatThrownBy(() -> blockingDs.hash(String.class, Integer.class, String.class))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("field type");
-        assertThatThrownBy(() -> reactiveDs.hash(String.class, Integer.class, String.class))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("field type");
-    }
-
-    @Test
     void hscanReactiveToMulti() {
-        Map<String, String> expect = new LinkedHashMap<>();
+        Map<String, Person> expect = new LinkedHashMap<>();
         populateManyEntries(expect);
 
-        ReactiveHashScanCursor<String, String> cursor = reactiveHash.hscan(key, new ScanArgs().count(5));
-        List<Map.Entry<String, String>> entries = cursor.toMulti().collect().asList().await().atMost(TIMEOUT);
+        ReactiveHashScanCursor<String, Person> cursor = reactiveHash.hscan(key, new ScanArgs().count(5));
+        List<Map.Entry<String, Person>> entries = cursor.toMulti().collect().asList().await().atMost(TIMEOUT);
 
-        Map<String, String> check = new LinkedHashMap<>();
+        Map<String, Person> check = new LinkedHashMap<>();
         entries.forEach(e -> check.put(e.getKey(), e.getValue()));
         assertThat(check).isEqualTo(expect);
         assertThat(cursor.hasNext()).isFalse();
@@ -395,9 +421,9 @@ class LettuceHashCommandsTest extends CommandsTestBase {
 
     @Test
     void hscanCursorId() {
-        blockingHash.hset(key, "one", HELLO);
+        blockingHash.hset(key, "one", Person.person1);
 
-        ReactiveHashScanCursor<String, String> cursor = reactiveHash.hscan(key);
+        ReactiveHashScanCursor<String, Person> cursor = reactiveHash.hscan(key);
         assertThat(cursor.cursorId()).isEqualTo(0L);
 
         cursor.next().await().atMost(TIMEOUT);

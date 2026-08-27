@@ -1,6 +1,5 @@
 package io.quarkus.redis.runtime.client.lettuce.key;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -24,17 +23,16 @@ import io.smallrye.mutiny.Uni;
  * Java type as the Vert.x backend.
  *
  * @param <K> the key type
- * @param <V> the value type used by the underlying connection
  */
-public class LettuceReactiveTransactionalKeyCommandsImpl<K, V>
+public class LettuceReactiveTransactionalKeyCommandsImpl<K>
         implements ReactiveTransactionalKeyCommands<K> {
 
     private final ReactiveTransactionalRedisDataSource dataSource;
-    private final LettuceReactiveKeyCommandsImpl<K, V> reactive;
+    private final LettuceReactiveKeyCommandsImpl<K> reactive;
     private final LettuceTransactionHolder tx;
 
     public LettuceReactiveTransactionalKeyCommandsImpl(ReactiveTransactionalRedisDataSource dataSource,
-            LettuceReactiveKeyCommandsImpl<K, V> reactive, LettuceTransactionHolder tx) {
+            LettuceReactiveKeyCommandsImpl<K> reactive, LettuceTransactionHolder tx) {
         this.dataSource = dataSource;
         this.reactive = reactive;
         this.tx = tx;
@@ -63,8 +61,7 @@ public class LettuceReactiveTransactionalKeyCommandsImpl<K, V>
 
     @Override
     public Uni<Void> dump(K key) {
-        return tx.enqueue(reactive._dump(key),
-                bytes -> bytes == null ? null : new String(bytes, StandardCharsets.UTF_8));
+        return tx.enqueue(reactive._dump(key), reactive::decodeString);
     }
 
     @Override
@@ -125,7 +122,7 @@ public class LettuceReactiveTransactionalKeyCommandsImpl<K, V>
 
     @Override
     public Uni<Void> keys(String pattern) {
-        return tx.enqueue(reactive._keys(pattern), v -> v);
+        return tx.enqueue(reactive._keys(pattern), reactive::decodeListOfKeys);
     }
 
     @Override
@@ -190,7 +187,7 @@ public class LettuceReactiveTransactionalKeyCommandsImpl<K, V>
 
     @Override
     public Uni<Void> randomkey() {
-        return tx.enqueue(reactive._randomkey(), v -> v);
+        return tx.enqueue(reactive._randomkey(), reactive::decodeK);
     }
 
     @Override
@@ -225,4 +222,5 @@ public class LettuceReactiveTransactionalKeyCommandsImpl<K, V>
     public final Uni<Void> unlink(K... keys) {
         return tx.enqueue(reactive._unlink(keys), v -> v == null ? null : v.intValue());
     }
+
 }

@@ -16,8 +16,7 @@ public final class LettuceListCommandsConverters {
 
     public static io.lettuce.core.LPosArgs toLettuceLPosArgs(LPosArgs quarkus) {
         io.lettuce.core.LPosArgs lettuce = new io.lettuce.core.LPosArgs();
-        Iterable<Object> tokens = quarkus.toArgs();
-        var cursor = new ArgTokenCursor(tokens);
+        var cursor = new ArgTokenCursor(quarkus.toArgs());
         while (cursor.hasNext()) {
             String token = cursor.next();
             switch (token) {
@@ -31,8 +30,7 @@ public final class LettuceListCommandsConverters {
 
     public static io.lettuce.core.SortArgs toLettuceSortArgs(SortArgs quarkus) {
         io.lettuce.core.SortArgs lettuce = new io.lettuce.core.SortArgs();
-        Iterable<Object> tokens = quarkus.toArgs();
-        var cursor = new ArgTokenCursor(tokens);
+        var cursor = new ArgTokenCursor(quarkus.toArgs());
         while (cursor.hasNext()) {
             String token = cursor.next();
             switch (token) {

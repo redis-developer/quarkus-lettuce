@@ -3,8 +3,8 @@ package io.quarkus.redis.runtime.client.lettuce.hash;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.util.Map;
+import java.util.function.Function;
 
-import io.lettuce.core.MapScanCursor;
 import io.lettuce.core.ScanArgs;
 import io.lettuce.core.ScanCursor;
 import io.lettuce.core.api.async.RedisHashAsyncCommands;
@@ -22,22 +22,27 @@ import io.smallrye.mutiny.Uni;
  */
 public class LettuceReactiveHashScanCursorImpl<F, V> implements ReactiveHashScanCursor<F, V> {
 
-    private final RedisHashAsyncCommands<F, V> hash;
-    private final F key;
+    private final RedisHashAsyncCommands<byte[], byte[]> hash;
+    private final byte[] key;
     private final ScanArgs scanArgs;
+    private final Function<Map<byte[], byte[]>, Map<F, V>> decoder;
     private ScanCursor cursor = ScanCursor.INITIAL;
 
-    public LettuceReactiveHashScanCursorImpl(RedisHashAsyncCommands<F, V> hash, F key) {
-        this(hash, key, new ScanArgs());
+    public LettuceReactiveHashScanCursorImpl(RedisHashAsyncCommands<byte[], byte[]> hash, byte[] key,
+            Function<Map<byte[], byte[]>, Map<F, V>> decoder) {
+        this(hash, key, new ScanArgs(), decoder);
     }
 
-    public LettuceReactiveHashScanCursorImpl(RedisHashAsyncCommands<F, V> hash, F key, ScanArgs scanArgs) {
+    public LettuceReactiveHashScanCursorImpl(RedisHashAsyncCommands<byte[], byte[]> hash, byte[] key, ScanArgs scanArgs,
+            Function<Map<byte[], byte[]>, Map<F, V>> decoder) {
         nonNull(hash, "hash");
         nonNull(key, "key");
         nonNull(scanArgs, "scanArgs");
+        nonNull(decoder, "decoder");
         this.hash = hash;
         this.key = key;
         this.scanArgs = scanArgs;
+        this.decoder = decoder;
     }
 
     @Override
@@ -51,7 +56,7 @@ public class LettuceReactiveHashScanCursorImpl<F, V> implements ReactiveHashScan
         final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
         return LettuceResult.toUni(() -> hash.hscan(key, current, scanArgs))
                 .invoke(mc -> this.cursor = mc)
-                .map(MapScanCursor::getMap);
+                .map(mc -> decoder.apply(mc.getMap()));
     }
 
     @Override

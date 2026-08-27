@@ -5,14 +5,14 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.positive;
 
+import java.lang.reflect.Type;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
 
 import io.lettuce.core.RedisFuture;
 import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.api.async.RedisKeyAsyncCommands;
-import io.lettuce.core.api.async.RedisSetAsyncCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.SortArgs;
@@ -20,11 +20,11 @@ import io.quarkus.redis.datasource.set.ReactiveSScanCursor;
 import io.quarkus.redis.datasource.set.ReactiveSetCommands;
 import io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
+import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
 /**
- * Lettuce-backed implementation of {@link ReactiveSetCommands}, on top of
- * {@link RedisSetAsyncCommands} plus {@link RedisKeyAsyncCommands} for {@code SORT}.
+ * Lettuce-backed implementation of {@link ReactiveSetCommands}.
  *
  * @param <K> the key type
  * @param <V> the member type
@@ -36,16 +36,9 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     private final ReactiveRedisDataSource dataSource;
 
-    private final RedisSetAsyncCommands<K, V> set = async;
-
-    /**
-     * {@code SORT} lives in Lettuce's key commands, not its set commands.
-     */
-    private final RedisKeyAsyncCommands<K, V> sortable = async;
-
     public LettuceReactiveSetCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<K, V> connection) {
-        super(connection);
+            StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type valueType) {
+        super(connection, keyType, valueType, new Marshaller(keyType, valueType));
         this.dataSource = dataSource;
     }
 
@@ -63,9 +56,8 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     @SafeVarargs
     final Supplier<RedisFuture<Long>> _sadd(K key, V... values) {
         nonNull(key, "key");
-        // `members` is the name the Vert.x backend validates under, see the class Javadoc.
         notNullOrEmpty(values, "members");
-        return () -> set.sadd(key, values);
+        return () -> async.sadd(marshaller.encode(key), marshaller.encodeAsArray(values));
     }
 
     @Override
@@ -75,17 +67,17 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     Supplier<RedisFuture<Long>> _scard(K key) {
         nonNull(key, "key");
-        return () -> set.scard(key);
+        return () -> async.scard(marshaller.encode(key));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Set<V>> sdiff(K... keys) {
-        return LettuceResult.toUni(_sdiff(keys));
+        return LettuceResult.toUni(_sdiff(keys)).map(this::decodeSetOfValue);
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Set<V>>> _sdiff(K... keys) {
+    final Supplier<RedisFuture<Set<byte[]>>> _sdiff(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
@@ -93,7 +85,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
                 throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
-        return () -> set.sdiff(keys);
+        return () -> async.sdiff(marshaller.encodeAsArray(keys));
     }
 
     @SafeVarargs
@@ -112,17 +104,17 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
                 throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
-        return () -> set.sdiffstore(destination, keys);
+        return () -> async.sdiffstore(marshaller.encode(destination), marshaller.encodeAsArray(keys));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Set<V>> sinter(K... keys) {
-        return LettuceResult.toUni(_sinter(keys));
+        return LettuceResult.toUni(_sinter(keys)).map(this::decodeSetOfValue);
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Set<V>>> _sinter(K... keys) {
+    final Supplier<RedisFuture<Set<byte[]>>> _sinter(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
@@ -130,7 +122,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
                 throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
-        return () -> set.sinter(keys);
+        return () -> async.sinter(marshaller.encodeAsArray(keys));
     }
 
     @SafeVarargs
@@ -148,7 +140,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
                 throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
-        return () -> set.sintercard(keys);
+        return () -> async.sintercard(marshaller.encodeAsArray(keys));
     }
 
     @SafeVarargs
@@ -167,7 +159,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
                 throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
-        return () -> set.sintercard(limit, keys);
+        return () -> async.sintercard(limit, marshaller.encodeAsArray(keys));
     }
 
     @SafeVarargs
@@ -185,7 +177,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
                 throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
-        return () -> set.sinterstore(destination, keys);
+        return () -> async.sinterstore(marshaller.encode(destination), marshaller.encodeAsArray(keys));
     }
 
     @Override
@@ -196,30 +188,30 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     Supplier<RedisFuture<Boolean>> _sismember(K key, V member) {
         nonNull(key, "key");
         nonNull(member, "member");
-        return () -> set.sismember(key, member);
+        return () -> async.sismember(marshaller.encode(key), marshaller.encode(member));
     }
 
     @Override
     public Uni<Set<V>> smembers(K key) {
-        return LettuceResult.toUni(_smembers(key));
+        return LettuceResult.toUni(_smembers(key)).map(this::decodeSetOfValue);
     }
 
-    Supplier<RedisFuture<Set<V>>> _smembers(K key) {
+    Supplier<RedisFuture<Set<byte[]>>> _smembers(K key) {
         nonNull(key, "key");
-        return () -> set.smembers(key);
+        return () -> async.smembers(marshaller.encode(key));
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<Boolean>> smismember(K key, V... members) {
-        return LettuceResult.toUni(_smismember(key, members)).map(LettuceReactiveSetCommandsImpl::orEmpty);
+        return LettuceResult.toUni(_smismember(key, members)).map(AbstractLettuceCommands::orEmpty);
     }
 
     @SafeVarargs
     final Supplier<RedisFuture<List<Boolean>>> _smismember(K key, V... members) {
         nonNull(key, "key");
         notNullOrEmpty(members, "members");
-        return () -> set.smismember(key, members);
+        return () -> async.smismember(marshaller.encode(key), marshaller.encodeAsArray(members));
     }
 
     @Override
@@ -231,48 +223,50 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(source, "source");
         nonNull(destination, "destination");
         nonNull(member, "member");
-        return () -> set.smove(source, destination, member);
+        return () -> async.smove(marshaller.encode(source), marshaller.encode(destination), marshaller.encode(member));
     }
 
     @Override
     public Uni<V> spop(K key) {
-        return LettuceResult.toUni(_spop(key));
+        return LettuceResult.toUni(_spop(key)).map(this::decodeV);
     }
 
-    Supplier<RedisFuture<V>> _spop(K key) {
+    Supplier<RedisFuture<byte[]>> _spop(K key) {
         nonNull(key, "key");
-        return () -> set.spop(key);
+        return () -> async.spop(marshaller.encode(key));
     }
 
     @Override
     public Uni<Set<V>> spop(K key, int count) {
-        return LettuceResult.toUni(_spop(key, count));
+        return LettuceResult.toUni(_spop(key, count)).map(this::decodeSetOfValue);
     }
 
-    Supplier<RedisFuture<Set<V>>> _spop(K key, int count) {
+    Supplier<RedisFuture<Set<byte[]>>> _spop(K key, int count) {
         nonNull(key, "key");
         positive(count, "count");
-        return () -> set.spop(key, count);
+        return () -> async.spop(marshaller.encode(key), count);
     }
 
     @Override
     public Uni<V> srandmember(K key) {
-        return LettuceResult.toUni(_srandmember(key));
+        return LettuceResult.toUni(_srandmember(key)).map(this::decodeV);
     }
 
-    Supplier<RedisFuture<V>> _srandmember(K key) {
+    Supplier<RedisFuture<byte[]>> _srandmember(K key) {
         nonNull(key, "key");
-        return () -> set.srandmember(key);
+        return () -> async.srandmember(marshaller.encode(key));
     }
 
     @Override
     public Uni<List<V>> srandmember(K key, int count) {
-        return LettuceResult.toUni(_srandmember(key, count)).map(LettuceReactiveSetCommandsImpl::orEmpty);
+        return LettuceResult.toUni(_srandmember(key, count))
+                .map(AbstractLettuceCommands::orEmpty)
+                .map(this::decodeListOfValue);
     }
 
-    Supplier<RedisFuture<List<V>>> _srandmember(K key, int count) {
+    Supplier<RedisFuture<List<byte[]>>> _srandmember(K key, int count) {
         nonNull(key, "key");
-        return () -> set.srandmember(key, count);
+        return () -> async.srandmember(marshaller.encode(key), count);
     }
 
     @SafeVarargs
@@ -286,17 +280,17 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(key, "key");
         notNullOrEmpty(members, "members");
         doesNotContainNull(members, "members");
-        return () -> set.srem(key, members);
+        return () -> async.srem(marshaller.encode(key), marshaller.encodeAsArray(members));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Set<V>> sunion(K... keys) {
-        return LettuceResult.toUni(_sunion(keys));
+        return LettuceResult.toUni(_sunion(keys)).map(this::decodeSetOfValue);
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Set<V>>> _sunion(K... keys) {
+    final Supplier<RedisFuture<Set<byte[]>>> _sunion(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
@@ -304,7 +298,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
                 throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
-        return () -> set.sunion(keys);
+        return () -> async.sunion(marshaller.encodeAsArray(keys));
     }
 
     @SafeVarargs
@@ -323,21 +317,21 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
                 throw new IllegalArgumentException("`keys` must contain at least 2 keys");
             };
         }
-        return () -> set.sunionstore(destination, keys);
+        return () -> async.sunionstore(marshaller.encode(destination), marshaller.encodeAsArray(keys));
     }
 
     @Override
     public ReactiveSScanCursor<V> sscan(K key) {
         nonNull(key, "key");
-        return new LettuceReactiveSScanCursorImpl<>(set, key);
+        return new LettuceReactiveSScanCursorImpl<>(async, marshaller.encode(key), this::decodeListOfValue);
     }
 
     @Override
     public ReactiveSScanCursor<V> sscan(K key, ScanArgs scanArgs) {
         nonNull(key, "key");
         nonNull(scanArgs, "scanArgs");
-        return new LettuceReactiveSScanCursorImpl<>(set, key,
-                LettuceSetCommandsConverters.toLettuceScanArgs(scanArgs));
+        return new LettuceReactiveSScanCursorImpl<>(async, marshaller.encode(key),
+                LettuceSetCommandsConverters.toLettuceScanArgs(scanArgs), this::decodeListOfValue);
     }
 
     @Override
@@ -347,14 +341,16 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     @Override
     public Uni<List<V>> sort(K key, SortArgs sortArguments) {
-        return LettuceResult.toUni(_sort(key, sortArguments)).map(LettuceReactiveSetCommandsImpl::orEmpty);
+        return LettuceResult.toUni(_sort(key, sortArguments))
+                .map(AbstractLettuceCommands::orEmpty)
+                .map(this::decodeListOfValue);
     }
 
-    Supplier<RedisFuture<List<V>>> _sort(K key, SortArgs sortArguments) {
+    Supplier<RedisFuture<List<byte[]>>> _sort(K key, SortArgs sortArguments) {
         nonNull(key, "key");
         nonNull(sortArguments, "sortArguments");
         io.lettuce.core.SortArgs lettuceArgs = LettuceSetCommandsConverters.toLettuceSortArgs(sortArguments);
-        return () -> sortable.sort(key, lettuceArgs);
+        return () -> async.sort(marshaller.encode(key), lettuceArgs);
     }
 
     @Override
@@ -367,11 +363,20 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(destination, "destination");
         nonNull(args, "args");
         io.lettuce.core.SortArgs lettuceArgs = LettuceSetCommandsConverters.toLettuceSortArgs(args);
-        return () -> sortable.sortStore(key, lettuceArgs, destination);
+        return () -> async.sortStore(marshaller.encode(key), lettuceArgs, marshaller.encode(destination));
     }
 
     @Override
     public Uni<Long> sortAndStore(K key, K destination) {
         return sortAndStore(key, destination, DEFAULT_SORT_ARGS);
     }
+
+    Set<V> decodeSetOfValue(Set<byte[]> members) {
+        Set<V> decoded = new LinkedHashSet<>(members.size());
+        for (byte[] member : members) {
+            decoded.add(decodeV(member));
+        }
+        return decoded;
+    }
+
 }

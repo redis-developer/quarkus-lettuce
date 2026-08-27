@@ -1,5 +1,6 @@
 package io.quarkus.redis.runtime.client.lettuce.sortedset;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -22,8 +23,7 @@ public final class LettuceSortedSetCommandsConverters {
 
     public static io.lettuce.core.ScanArgs toLettuceScanArgs(ScanArgs quarkus) {
         io.lettuce.core.ScanArgs lettuce = new io.lettuce.core.ScanArgs();
-        Iterable<String> tokens = quarkus.toArgs();
-        var cursor = new ArgTokenCursor(tokens);
+        var cursor = new ArgTokenCursor(quarkus.toArgs());
         while (cursor.hasNext()) {
             String token = cursor.next();
             switch (token) {
@@ -37,8 +37,7 @@ public final class LettuceSortedSetCommandsConverters {
 
     public static io.lettuce.core.SortArgs toLettuceSortArgs(SortArgs quarkus) {
         io.lettuce.core.SortArgs lettuce = new io.lettuce.core.SortArgs();
-        Iterable<Object> tokens = quarkus.toArgs();
-        var cursor = new ArgTokenCursor(tokens);
+        var cursor = new ArgTokenCursor(quarkus.toArgs());
         while (cursor.hasNext()) {
             String token = cursor.next();
             switch (token) {
@@ -107,8 +106,7 @@ public final class LettuceSortedSetCommandsConverters {
     private static <T extends io.lettuce.core.ZAggregateArgs> T apply(ZAggregateArgs quarkus, T lettuce) {
         List<Double> weights = new ArrayList<>();
         String aggregate = null;
-        Iterable<Object> tokens = quarkus.toArgs();
-        var cursor = new ArgTokenCursor(tokens);
+        var cursor = new ArgTokenCursor(quarkus.toArgs());
         while (cursor.hasNext()) {
             String token = cursor.next();
             switch (token) {
@@ -145,21 +143,21 @@ public final class LettuceSortedSetCommandsConverters {
         return lettuce;
     }
 
-    public static io.lettuce.core.Range<String> toLettuceLexRange(Range<String> range) {
-        io.lettuce.core.Range.Boundary<String> lower = toLexBoundary(range.getLowerBound());
-        io.lettuce.core.Range.Boundary<String> upper = toLexBoundary(range.getUpperBound());
+    public static io.lettuce.core.Range<byte[]> toLettuceLexRange(Range<String> range) {
+        io.lettuce.core.Range.Boundary<byte[]> lower = toLexBoundary(range.getLowerBound());
+        io.lettuce.core.Range.Boundary<byte[]> upper = toLexBoundary(range.getUpperBound());
         return io.lettuce.core.Range.from(lower, upper);
     }
 
-    private static io.lettuce.core.Range.Boundary<String> toLexBoundary(String bound) {
+    private static io.lettuce.core.Range.Boundary<byte[]> toLexBoundary(String bound) {
         if ("-".equals(bound) || "+".equals(bound)) {
             return io.lettuce.core.Range.Boundary.unbounded();
         }
         if (bound.startsWith("(")) {
-            return io.lettuce.core.Range.Boundary.excluding(bound.substring(1));
+            return io.lettuce.core.Range.Boundary.excluding(bound.substring(1).getBytes(StandardCharsets.UTF_8));
         }
         if (bound.startsWith("[")) {
-            return io.lettuce.core.Range.Boundary.including(bound.substring(1));
+            return io.lettuce.core.Range.Boundary.including(bound.substring(1).getBytes(StandardCharsets.UTF_8));
         }
         throw new IllegalStateException("Unexpected lexicographical boundary: " + bound);
     }

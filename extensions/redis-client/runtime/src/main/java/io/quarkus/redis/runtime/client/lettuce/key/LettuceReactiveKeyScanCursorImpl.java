@@ -3,7 +3,9 @@ package io.quarkus.redis.runtime.client.lettuce.key;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 
 import io.lettuce.core.KeyScanArgs;
 import io.lettuce.core.ScanCursor;
@@ -18,23 +20,27 @@ import io.smallrye.mutiny.Uni;
  * {@link #next()} calls until it wraps back to the initial position.
  *
  * @param <K> the key type
- * @param <V> the value type
  */
-public class LettuceReactiveKeyScanCursorImpl<K, V> implements ReactiveKeyScanCursor<K> {
+public class LettuceReactiveKeyScanCursorImpl<K> implements ReactiveKeyScanCursor<K> {
 
-    private final RedisAsyncCommands<K, V> async;
+    private final RedisAsyncCommands<byte[], byte[]> async;
     private final KeyScanArgs keyScanArgs;
+    private final Function<List<byte[]>, List<K>> decoder;
     private ScanCursor cursor = ScanCursor.INITIAL;
 
-    public LettuceReactiveKeyScanCursorImpl(RedisAsyncCommands<K, V> async) {
-        this(async, new KeyScanArgs());
+    public LettuceReactiveKeyScanCursorImpl(RedisAsyncCommands<byte[], byte[]> async,
+            Function<List<byte[]>, List<K>> decoder) {
+        this(async, new KeyScanArgs(), decoder);
     }
 
-    public LettuceReactiveKeyScanCursorImpl(RedisAsyncCommands<K, V> async, KeyScanArgs keyScanArgs) {
+    public LettuceReactiveKeyScanCursorImpl(RedisAsyncCommands<byte[], byte[]> async, KeyScanArgs keyScanArgs,
+            Function<List<byte[]>, List<K>> decoder) {
         nonNull(async, "async");
         nonNull(keyScanArgs, "args");
+        nonNull(decoder, "decoder");
         this.async = async;
         this.keyScanArgs = keyScanArgs;
+        this.decoder = decoder;
     }
 
     @Override
@@ -48,7 +54,7 @@ public class LettuceReactiveKeyScanCursorImpl<K, V> implements ReactiveKeyScanCu
         final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
         return LettuceResult.toUni(() -> async.scan(current, keyScanArgs))
                 .invoke(kc -> this.cursor = kc)
-                .map(kc -> new LinkedHashSet<>(kc.getKeys()));
+                .map(kc -> new LinkedHashSet<>(decoder.apply(kc.getKeys())));
     }
 
     @Override

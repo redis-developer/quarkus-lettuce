@@ -33,11 +33,6 @@ import io.vertx.core.json.Json;
 class LettuceValueCommandsTest extends CommandsTestBase {
 
     static final String REQUIRES_BITMAP_GROUP = "The 'bitmap' command group is not implemented on the Lettuce backend yet";
-    static final String REQUIRES_TYPE_REFERENCE_SUPPORT = "value(TypeReference, TypeReference) is not implemented on the "
-            + "Lettuce backend yet";
-    static final String REQUIRES_TYPED_CODECS = "The Lettuce backend routes every command group through the shared "
-            + "String/String connection (LettuceReactiveRedisDataSourceImpl.value casts the connection instead of applying "
-            + "a codec for the requested types), so byte[] values fail to encode";
 
     final String value = UUID.randomUUID().toString();
 
@@ -314,7 +309,6 @@ class LettuceValueCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_TYPED_CODECS)
     void binary() {
         byte[] content = new byte[2048];
         new Random().nextBytes(content);
@@ -330,7 +324,6 @@ class LettuceValueCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_TYPE_REFERENCE_SUPPORT)
     void setWithTypeReference() {
         KeyCommands<String> keys = blockingDs.key(String.class);
         var values = blockingDs.value(new TypeReference<List<Person>>() {

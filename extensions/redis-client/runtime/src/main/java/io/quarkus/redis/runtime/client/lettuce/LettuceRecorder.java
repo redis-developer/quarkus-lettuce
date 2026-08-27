@@ -48,7 +48,7 @@ public class LettuceRecorder {
     private static volatile LettuceClientResources sharedResources;
     private static volatile io.vertx.mutiny.core.Vertx mutinyVertx;
     private static final Map<String, LettuceConnectionFactory> factories = new ConcurrentHashMap<>();
-    private static final Map<String, StatefulRedisConnection<String, String>> connections = new ConcurrentHashMap<>();
+    private static final Map<String, StatefulRedisConnection<byte[], byte[]>> connections = new ConcurrentHashMap<>();
     private static final Map<String, LettuceReactiveRedisDataSourceImpl> reactiveDataSources = new ConcurrentHashMap<>();
 
     public LettuceRecorder(RuntimeValue<RedisConfig> runtimeConfig) {
@@ -98,7 +98,7 @@ public class LettuceRecorder {
     @SuppressWarnings("unchecked")
     public Supplier<ReactiveRedisDataSource> getReactiveDataSource(String name) {
         return () -> reactiveDataSources.computeIfAbsent(name, k -> {
-            StatefulRedisConnection<String, String> conn = (StatefulRedisConnection<String, String>) getConnection(k).get();
+            StatefulRedisConnection<byte[], byte[]> conn = (StatefulRedisConnection<byte[], byte[]>) getConnection(k).get();
             LettuceConnectionFactory factory = factories.get(k);
             return new LettuceReactiveRedisDataSourceImpl(mutinyVertx, conn, factory::connectAsync);
         });
@@ -139,7 +139,7 @@ public class LettuceRecorder {
 
     public void cleanup(ShutdownContext context) {
         context.addShutdownTask(() -> {
-            for (Map.Entry<String, StatefulRedisConnection<String, String>> entry : connections.entrySet()) {
+            for (Map.Entry<String, StatefulRedisConnection<byte[], byte[]>> entry : connections.entrySet()) {
                 try {
                     entry.getValue().close();
                 } catch (Exception e) {

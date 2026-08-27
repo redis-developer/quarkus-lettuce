@@ -54,7 +54,7 @@ public class LettuceReactiveTransactionalHashCommandsImpl<K, F, V> implements Re
 
     @Override
     public Uni<Void> hget(K key, F field) {
-        return tx.enqueue(reactive._hget(key, field), v -> v);
+        return tx.enqueue(reactive._hget(key, field), reactive::decodeV);
     }
 
     @Override
@@ -69,12 +69,12 @@ public class LettuceReactiveTransactionalHashCommandsImpl<K, F, V> implements Re
 
     @Override
     public Uni<Void> hgetall(K key) {
-        return tx.enqueue(reactive._hgetall(key), v -> v);
+        return tx.enqueue(reactive._hgetall(key), reactive::decodeMap);
     }
 
     @Override
     public Uni<Void> hkeys(K key) {
-        return tx.enqueue(reactive._hkeys(key), v -> v);
+        return tx.enqueue(reactive._hkeys(key), reactive::decodeListOfField);
     }
 
     @Override
@@ -85,7 +85,7 @@ public class LettuceReactiveTransactionalHashCommandsImpl<K, F, V> implements Re
     @SafeVarargs
     @Override
     public final Uni<Void> hmget(K key, F... fields) {
-        return tx.enqueue(reactive._hmget(key, fields), reactive::toMap);
+        return tx.enqueue(reactive._hmget(key, fields), results -> reactive.decodeAsOrderedMap(fields, results));
     }
 
     @Deprecated
@@ -96,17 +96,17 @@ public class LettuceReactiveTransactionalHashCommandsImpl<K, F, V> implements Re
 
     @Override
     public Uni<Void> hrandfield(K key) {
-        return tx.enqueue(reactive._hrandfield(key), v -> v);
+        return tx.enqueue(reactive._hrandfield(key), reactive::decodeF);
     }
 
     @Override
     public Uni<Void> hrandfield(K key, long count) {
-        return tx.enqueue(reactive._hrandfield(key, count), v -> v);
+        return tx.enqueue(reactive._hrandfield(key, count), reactive::decodeListOfField);
     }
 
     @Override
     public Uni<Void> hrandfieldWithValues(K key, long count) {
-        return tx.enqueue(reactive._hrandfieldWithValues(key, count), reactive::toMap);
+        return tx.enqueue(reactive._hrandfieldWithValues(key, count), reactive::decodeFieldWithValueMap);
     }
 
     @Override
@@ -131,6 +131,6 @@ public class LettuceReactiveTransactionalHashCommandsImpl<K, F, V> implements Re
 
     @Override
     public Uni<Void> hvals(K key) {
-        return tx.enqueue(reactive._hvals(key), v -> v);
+        return tx.enqueue(reactive._hvals(key), reactive::decodeListOfValue);
     }
 }

@@ -8,7 +8,7 @@ import org.jboss.logging.Logger;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.resource.ClientResources;
 
 /**
@@ -48,24 +48,24 @@ public class LettuceConnectionFactory {
     }
 
     /**
-     * Opens a new stateful connection to Redis using String codec.
+     * Opens a new stateful connection to Redis using {@link ByteArrayCodec} codec.
      *
      * @return a new {@link StatefulRedisConnection}
      */
-    public StatefulRedisConnection<String, String> connect() {
-        return redisClient.connect(StringCodec.UTF8);
+    public StatefulRedisConnection<byte[], byte[]> connect() {
+        return redisClient.connect(ByteArrayCodec.INSTANCE);
     }
 
     /**
-     * Opens a new stateful connection to Redis asynchronously using String codec.
+     * Opens a new stateful connection to Redis asynchronously using the byte-array codec.
      * <p>
      * Unlike {@link #connect()}, this never blocks the calling thread and is therefore safe to
      * invoke from an event loop; the returned stage completes once the connection is established.
      *
      * @return a {@link CompletionStage} completing with a new {@link StatefulRedisConnection}
      */
-    public CompletionStage<StatefulRedisConnection<String, String>> connectAsync() {
-        return redisClient.connectAsync(StringCodec.UTF8, redisUri);
+    public CompletionStage<StatefulRedisConnection<byte[], byte[]>> connectAsync() {
+        return redisClient.connectAsync(ByteArrayCodec.INSTANCE, redisUri);
     }
 
     /**

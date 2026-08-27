@@ -3,7 +3,7 @@ package io.quarkus.redis.runtime.client.lettuce.datasource;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.ProtocolKeyword;
 import io.quarkus.redis.datasource.autosuggest.ReactiveTransactionalAutoSuggestCommands;
@@ -60,7 +60,7 @@ import io.vertx.redis.client.Command;
 public class LettuceReactiveTransactionalRedisDataSourceImpl implements ReactiveTransactionalRedisDataSource {
 
     private final LettuceReactiveRedisDataSourceImpl reactive;
-    private final StatefulRedisConnection<String, String> connection;
+    private final StatefulRedisConnection<byte[], byte[]> connection;
     private final LettuceTransactionHolder tx;
 
     public LettuceReactiveTransactionalRedisDataSourceImpl(LettuceReactiveRedisDataSourceImpl reactive,
@@ -99,7 +99,7 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     @Override
     public <K> ReactiveTransactionalKeyCommands<K> key(Class<K> redisKeyType) {
         nonNull(redisKeyType, "redisKeyType");
-        LettuceReactiveKeyCommandsImpl<K, Object> reactiveKey = (LettuceReactiveKeyCommandsImpl<K, Object>) reactive
+        LettuceReactiveKeyCommandsImpl<K> reactiveKey = (LettuceReactiveKeyCommandsImpl<K>) reactive
                 .key(redisKeyType);
         return new LettuceReactiveTransactionalKeyCommandsImpl<>(this, reactiveKey, tx);
     }
@@ -221,8 +221,8 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     }
 
     private Uni<Void> enqueueRaw(ProtocolKeyword type, String... args) {
-        LettuceVertxResponseOutput<String, String> output = new LettuceVertxResponseOutput<>(StringCodec.UTF8);
-        CommandArgs<String, String> commandArgs = new CommandArgs<>(StringCodec.UTF8);
+        LettuceVertxResponseOutput<byte[], byte[]> output = new LettuceVertxResponseOutput<>(ByteArrayCodec.INSTANCE);
+        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE);
         if (args != null) {
             for (String arg : args) {
                 if (arg != null) {
