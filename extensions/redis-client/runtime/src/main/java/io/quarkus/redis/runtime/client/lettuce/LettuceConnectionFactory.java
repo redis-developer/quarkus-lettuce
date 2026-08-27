@@ -27,12 +27,13 @@ public class LettuceConnectionFactory {
     /**
      * Creates a Lettuce {@link RedisClient} using the given shared resources and Redis URI.
      *
+     * @param clientName the Quarkus Redis client name, used for logging
      * @param clientResources shared client resources (with Vert.x event loops)
      * @param redisUri the Redis connection URI (e.g. {@code redis://localhost:6379})
      */
-    public LettuceConnectionFactory(ClientResources clientResources, URI redisUri) {
+    public LettuceConnectionFactory(String clientName, ClientResources clientResources, URI redisUri) {
         RedisURI lettuceUri = RedisURI.create(redisUri);
-        LOGGER.infof("Creating Lettuce RedisClient for %s:%d", lettuceUri.getHost(), lettuceUri.getPort());
+        LOGGER.infof("Creating Lettuce RedisClient '%s' for %s:%d", clientName, lettuceUri.getHost(), lettuceUri.getPort());
         this.redisClient = RedisClient.create(clientResources, lettuceUri);
         this.redisUri = lettuceUri;
     }
@@ -40,11 +41,12 @@ public class LettuceConnectionFactory {
     /**
      * Creates a Lettuce {@link RedisClient} using the given shared resources and Redis URI string.
      *
+     * @param clientName the Quarkus Redis client name, used for logging
      * @param clientResources shared client resources (with Vert.x event loops)
      * @param redisUri the Redis connection URI string (e.g. {@code redis://localhost:6379})
      */
-    public LettuceConnectionFactory(ClientResources clientResources, String redisUri) {
-        this(clientResources, URI.create(redisUri));
+    public LettuceConnectionFactory(String clientName, ClientResources clientResources, String redisUri) {
+        this(clientName, clientResources, URI.create(redisUri));
     }
 
     /**

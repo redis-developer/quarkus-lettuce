@@ -142,8 +142,8 @@ public class RedisConfigClientNamesTest {
             }
 
             @Override
-            public Optional<Backend> backend() {
-                return Optional.empty();
+            public RedisBackendBuildItem.Backend backend() {
+                return RedisBackendBuildItem.Backend.VERTX;
             }
         };
     }

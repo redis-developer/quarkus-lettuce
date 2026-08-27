@@ -100,19 +100,7 @@ public interface RedisBuildTimeConfig {
      * Defaults to {@code vertx}. Set to {@code lettuce} to opt in to the Lettuce-backed implementation;
      * {@code lettuce-core} must then be on the classpath.
      */
-    java.util.Optional<Backend> backend();
+    @WithDefault("vertx")
+    RedisBackendBuildItem.Backend backend();
 
-    /**
-     * Available Redis client backends.
-     */
-    enum Backend {
-        /**
-         * Use the Vert.x Redis client (default).
-         */
-        VERTX,
-        /**
-         * Use the Lettuce Redis client. Requires {@code lettuce-core} on the classpath.
-         */
-        LETTUCE
-    }
 }
