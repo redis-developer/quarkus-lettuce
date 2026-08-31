@@ -32,16 +32,17 @@ class LettuceTransactionalSetCommandsTest extends CommandsTestBase {
             assertThat(set.getDataSource()).isEqualTo(tx);
             set.sadd(key, "a", "b", "c", "d");
             set.sadd(key, "c", "1");
+            set.sismember(key, "1");
             set.spop(key);
             set.scard(key);
-            set.sismember(key, "1");
         });
         assertThat(result.size()).isEqualTo(5);
         assertThat(result.discarded()).isFalse();
         assertThat((int) result.get(0)).isEqualTo(4);
         assertThat((int) result.get(1)).isEqualTo(1);
-        assertThat((String) result.get(2)).isNotBlank();
-        assertThat((long) result.get(3)).isEqualTo(4);
+        assertThat((boolean) result.get(2)).isTrue();
+        assertThat((String) result.get(3)).isNotBlank();
+        assertThat((long) result.get(4)).isEqualTo(4);
     }
 
     @Test
@@ -50,16 +51,17 @@ class LettuceTransactionalSetCommandsTest extends CommandsTestBase {
             ReactiveTransactionalSetCommands<String, String> set = tx.set(String.class);
             return set.sadd(key, "a", "b", "c", "d")
                     .chain(() -> set.sadd(key, "c", "1"))
+                    .chain(() -> set.sismember(key, "1"))
                     .chain(() -> set.spop(key))
-                    .chain(() -> set.scard(key))
-                    .chain(() -> set.sismember(key, "1"));
+                    .chain(() -> set.scard(key));
         }).await().atMost(Duration.ofSeconds(5));
         assertThat(result.size()).isEqualTo(5);
         assertThat(result.discarded()).isFalse();
         assertThat((int) result.get(0)).isEqualTo(4);
         assertThat((int) result.get(1)).isEqualTo(1);
-        assertThat((String) result.get(2)).isNotBlank();
-        assertThat((long) result.get(3)).isEqualTo(4);
+        assertThat((boolean) result.get(2)).isTrue();
+        assertThat((String) result.get(3)).isNotBlank();
+        assertThat((long) result.get(4)).isEqualTo(4);
     }
 
 }
