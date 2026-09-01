@@ -1,6 +1,7 @@
 package io.quarkus.redis.runtime.client.lettuce;
 
 import java.time.Duration;
+import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Supplier;
 
@@ -32,6 +33,8 @@ public abstract class CommandsTestBase {
     protected static RedisURI redisUri;
     protected static RedisCodec<String, String> codec;
     protected static StatefulRedisConnection<String, String> connection;
+
+    protected final String key = UUID.randomUUID().toString();
 
     @BeforeAll
     static void setUp() {
