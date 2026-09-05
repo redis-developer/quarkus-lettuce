@@ -72,12 +72,21 @@ public abstract class AbstractLettuceCommands<K, V> {
         return duration.toMillis() / 1_000.0d;
     }
 
-    protected <A, B> Map<byte[], byte[]> encodeMap(Map<A, B> map) {
+    protected <A, B> Map<byte[], byte[]> encodeMapWithNullableValues(Map<A, B> map) {
         Map<byte[], byte[]> encoded = new LinkedHashMap<>(map.size());
         for (Map.Entry<A, B> e : map.entrySet()) {
             byte[] value = marshaller.encode(e.getValue());
             encoded.put(marshaller.encode(nonNull(e.getKey(), "map key")),
                     value != null ? value : "null".getBytes(StandardCharsets.UTF_8));
+        }
+        return encoded;
+    }
+
+    protected <A, B> Map<byte[], byte[]> encodeMap(Map<A, B> map) {
+        Map<byte[], byte[]> encoded = new LinkedHashMap<>(map.size());
+        for (Map.Entry<A, B> e : map.entrySet()) {
+            byte[] value = marshaller.encode(e.getValue());
+            encoded.put(marshaller.encode(nonNull(e.getKey(), "map key")), nonNull(value, "value"));
         }
         return encoded;
     }

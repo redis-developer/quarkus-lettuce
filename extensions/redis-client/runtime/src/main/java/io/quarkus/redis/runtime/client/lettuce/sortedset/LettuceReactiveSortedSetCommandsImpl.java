@@ -565,6 +565,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     final Supplier<RedisFuture<List<Double>>> _zmscore(K key, V... values) {
         nonNull(key, "key");
         notNullOrEmpty(values, "values");
+        doesNotContainNull(values, "values");
         return () -> async.zmscore(marshaller.encode(key), marshaller.encodeAsArray(values));
     }
 

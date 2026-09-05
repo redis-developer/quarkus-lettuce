@@ -169,7 +169,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
                 throw new IllegalArgumentException("`map` must not be empty");
             };
         }
-        return () -> async.hmset(marshaller.encode(key), encodeMap(map));
+        return () -> async.hmset(marshaller.encode(key), encodeMapWithNullableValues(map));
     }
 
     @Override

@@ -57,6 +57,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     final Supplier<RedisFuture<Long>> _sadd(K key, V... values) {
         nonNull(key, "key");
         notNullOrEmpty(values, "members");
+        doesNotContainNull(values, "members");
         return () -> async.sadd(marshaller.encode(key), marshaller.encodeAsArray(values));
     }
 
@@ -172,6 +173,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     final Supplier<RedisFuture<Long>> _sinterstore(K destination, K... keys) {
         nonNull(destination, "destination");
         notNullOrEmpty(keys, "keys");
+        doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
             return () -> {
                 throw new IllegalArgumentException("`keys` must contain at least 2 keys");
@@ -211,6 +213,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     final Supplier<RedisFuture<List<Boolean>>> _smismember(K key, V... members) {
         nonNull(key, "key");
         notNullOrEmpty(members, "members");
+        doesNotContainNull(members, "members");
         return () -> async.smismember(marshaller.encode(key), marshaller.encodeAsArray(members));
     }
 
