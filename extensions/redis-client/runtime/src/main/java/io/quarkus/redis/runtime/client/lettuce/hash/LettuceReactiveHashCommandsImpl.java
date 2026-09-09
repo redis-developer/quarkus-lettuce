@@ -14,24 +14,17 @@ import java.util.function.Supplier;
 import io.lettuce.core.KeyValue;
 import io.lettuce.core.RedisFuture;
 import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.api.async.RedisHashAsyncCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.hash.ReactiveHashScanCursor;
 import io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands;
 import io.quarkus.redis.runtime.client.lettuce.LettuceResult;
+import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
 /**
  * Lettuce-backed implementation of {@link ReactiveHashCommands}.
- * <p>
- * Lettuce models the hash commands as {@link RedisHashAsyncCommands}, whose <em>key</em> type
- * parameter covers both the Redis key and the hash fields — it has no separate field type. The
- * field type {@code <F>} is therefore bound to that parameter and the Redis key is routed through
- * it as well (see {@link #asField(Object)}), so both are encoded by the connection codec's key
- * codec. That is only correct when {@code <K>} and {@code <F>} are the same type, which the
- * constructor enforces — a mismatch is rejected with an {@link IllegalArgumentException}.
  *
  * @param <K> the key type
  * @param <F> the field type
@@ -41,20 +34,13 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         implements ReactiveHashCommands<K, F, V> {
 
     private final ReactiveRedisDataSource dataSource;
-
-    @SuppressWarnings("unchecked")
-    private final RedisHashAsyncCommands<F, V> hash = (RedisHashAsyncCommands<F, V>) async;
+    private final Type fieldType;
 
     public LettuceReactiveHashCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<K, V> connection, Type keyType, Type fieldType) {
-        super(connection);
-        if (!keyType.equals(fieldType)) {
-            throw new IllegalArgumentException("The Lettuce backend requires the hash field type to be the same as"
-                    + " the Redis key type, because Lettuce's hash commands encode both with the connection codec's"
-                    + " key codec. Got key type `" + keyType.getTypeName() + "` and field type `"
-                    + fieldType.getTypeName() + "`. Use quarkus.redis.backend=vertx for differing types.");
-        }
+            StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type fieldType, Type valueType) {
+        super(connection, keyType, valueType, new Marshaller(keyType, fieldType, valueType));
         this.dataSource = dataSource;
+        this.fieldType = fieldType;
     }
 
     @Override
@@ -73,7 +59,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         notNullOrEmpty(fields, "fields");
         doesNotContainNull(fields, "fields");
-        return () -> hash.hdel(asField(key), fields);
+        return () -> async.hdel(marshaller.encode(key), marshaller.encodeAsArray(fields));
     }
 
     @Override
@@ -84,18 +70,18 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     Supplier<RedisFuture<Boolean>> _hexists(K key, F field) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return () -> hash.hexists(asField(key), field);
+        return () -> async.hexists(marshaller.encode(key), marshaller.encode(field));
     }
 
     @Override
     public Uni<V> hget(K key, F field) {
-        return LettuceResult.toUni(_hget(key, field));
+        return LettuceResult.toUni(_hget(key, field)).map(this::decodeV);
     }
 
-    Supplier<RedisFuture<V>> _hget(K key, F field) {
+    Supplier<RedisFuture<byte[]>> _hget(K key, F field) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return () -> hash.hget(asField(key), field);
+        return () -> async.hget(marshaller.encode(key), marshaller.encode(field));
     }
 
     @Override
@@ -106,7 +92,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     Supplier<RedisFuture<Long>> _hincrby(K key, F field, long amount) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return () -> hash.hincrby(asField(key), field, amount);
+        return () -> async.hincrby(marshaller.encode(key), marshaller.encode(field), amount);
     }
 
     @Override
@@ -117,27 +103,27 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     Supplier<RedisFuture<Double>> _hincrbyfloat(K key, F field, double amount) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return () -> hash.hincrbyfloat(asField(key), field, amount);
+        return () -> async.hincrbyfloat(marshaller.encode(key), marshaller.encode(field), amount);
     }
 
     @Override
     public Uni<Map<F, V>> hgetall(K key) {
-        return LettuceResult.toUni(_hgetall(key));
+        return LettuceResult.toUni(_hgetall(key)).map(this::decodeMap);
     }
 
-    Supplier<RedisFuture<Map<F, V>>> _hgetall(K key) {
+    Supplier<RedisFuture<Map<byte[], byte[]>>> _hgetall(K key) {
         nonNull(key, "key");
-        return () -> hash.hgetall(asField(key));
+        return () -> async.hgetall(marshaller.encode(key));
     }
 
     @Override
     public Uni<List<F>> hkeys(K key) {
-        return LettuceResult.toUni(_hkeys(key));
+        return LettuceResult.toUni(_hkeys(key)).map(this::decodeListOfField);
     }
 
-    Supplier<RedisFuture<List<F>>> _hkeys(K key) {
+    Supplier<RedisFuture<List<byte[]>>> _hkeys(K key) {
         nonNull(key, "key");
-        return () -> hash.hkeys(asField(key));
+        return () -> async.hkeys(marshaller.encode(key));
     }
 
     @Override
@@ -147,17 +133,17 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
 
     Supplier<RedisFuture<Long>> _hlen(K key) {
         nonNull(key, "key");
-        return () -> hash.hlen(asField(key));
+        return () -> async.hlen(marshaller.encode(key));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Map<F, V>> hmget(K key, F... fields) {
-        return LettuceResult.toUni(_hmget(key, fields)).map(this::toMap);
+        return LettuceResult.toUni(_hmget(key, fields)).map(r -> decodeAsOrderedMap(fields, r));
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<KeyValue<F, V>>>> _hmget(K key, F... fields) {
+    final Supplier<RedisFuture<List<KeyValue<byte[], byte[]>>>> _hmget(K key, F... fields) {
         nonNull(key, "key");
         doesNotContainNull(fields, "fields");
         if (fields.length == 0) {
@@ -165,7 +151,8 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
                 throw new IllegalArgumentException("`fields` must not be empty");
             };
         }
-        return () -> hash.hmget(asField(key), fields);
+        byte[][] encodedFields = marshaller.encodeAsArray(fields);
+        return () -> async.hmget(marshaller.encode(key), encodedFields);
     }
 
     @Deprecated
@@ -182,52 +169,52 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
                 throw new IllegalArgumentException("`map` must not be empty");
             };
         }
-        return () -> hash.hmset(asField(key), map);
+        return () -> async.hmset(marshaller.encode(key), encodeMapWithNullableValues(map));
     }
 
     @Override
     public Uni<F> hrandfield(K key) {
-        return LettuceResult.toUni(_hrandfield(key));
+        return LettuceResult.toUni(_hrandfield(key)).map(this::decodeF);
     }
 
-    Supplier<RedisFuture<F>> _hrandfield(K key) {
+    Supplier<RedisFuture<byte[]>> _hrandfield(K key) {
         nonNull(key, "key");
-        return () -> hash.hrandfield(asField(key));
+        return () -> async.hrandfield(marshaller.encode(key));
     }
 
     @Override
     public Uni<List<F>> hrandfield(K key, long count) {
-        return LettuceResult.toUni(_hrandfield(key, count));
+        return LettuceResult.toUni(_hrandfield(key, count)).map(this::decodeListOfField);
     }
 
-    Supplier<RedisFuture<List<F>>> _hrandfield(K key, long count) {
+    Supplier<RedisFuture<List<byte[]>>> _hrandfield(K key, long count) {
         nonNull(key, "key");
         positive(count, "count");
-        return () -> hash.hrandfield(asField(key), count);
+        return () -> async.hrandfield(marshaller.encode(key), count);
     }
 
     @Override
     public Uni<Map<F, V>> hrandfieldWithValues(K key, long count) {
-        return LettuceResult.toUni(_hrandfieldWithValues(key, count)).map(this::toMap);
+        return LettuceResult.toUni(_hrandfieldWithValues(key, count)).map(this::decodeFieldWithValueMap);
     }
 
-    Supplier<RedisFuture<List<KeyValue<F, V>>>> _hrandfieldWithValues(K key, long count) {
+    Supplier<RedisFuture<List<KeyValue<byte[], byte[]>>>> _hrandfieldWithValues(K key, long count) {
         nonNull(key, "key");
-        return () -> hash.hrandfieldWithvalues(asField(key), count);
+        return () -> async.hrandfieldWithvalues(marshaller.encode(key), count);
     }
 
     @Override
     public ReactiveHashScanCursor<F, V> hscan(K key) {
         nonNull(key, "key");
-        return new LettuceReactiveHashScanCursorImpl<>(hash, asField(key));
+        return new LettuceReactiveHashScanCursorImpl<>(async, marshaller.encode(key), this::decodeMap);
     }
 
     @Override
     public ReactiveHashScanCursor<F, V> hscan(K key, ScanArgs scanArgs) {
         nonNull(key, "key");
         nonNull(scanArgs, "scanArgs");
-        return new LettuceReactiveHashScanCursorImpl<>(hash, asField(key),
-                LettuceHashCommandsConverters.toLettuceScanArgs(scanArgs));
+        return new LettuceReactiveHashScanCursorImpl<>(async, marshaller.encode(key),
+                LettuceHashCommandsConverters.toLettuceScanArgs(scanArgs), this::decodeMap);
     }
 
     @Override
@@ -239,7 +226,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(field, "field");
         nonNull(value, "value");
-        return () -> hash.hset(asField(key), field, value);
+        return () -> async.hset(marshaller.encode(key), marshaller.encode(field), marshaller.encode(value));
     }
 
     @Override
@@ -255,7 +242,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
                 throw new IllegalArgumentException("`map` must not be empty");
             };
         }
-        return () -> hash.hset(asField(key), map);
+        return () -> async.hset(marshaller.encode(key), encodeMap(map));
     }
 
     @Override
@@ -267,7 +254,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(field, "field");
         nonNull(value, "value");
-        return () -> hash.hsetnx(asField(key), field, value);
+        return () -> async.hsetnx(marshaller.encode(key), marshaller.encode(field), marshaller.encode(value));
     }
 
     @Override
@@ -278,36 +265,41 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     Supplier<RedisFuture<Long>> _hstrlen(K key, F field) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return () -> hash.hstrlen(asField(key), field);
+        return () -> async.hstrlen(marshaller.encode(key), marshaller.encode(field));
     }
 
     @Override
     public Uni<List<V>> hvals(K key) {
-        return LettuceResult.toUni(_hvals(key));
+        return LettuceResult.toUni(_hvals(key)).map(this::decodeListOfValue);
     }
 
-    Supplier<RedisFuture<List<V>>> _hvals(K key) {
+    Supplier<RedisFuture<List<byte[]>>> _hvals(K key) {
         nonNull(key, "key");
-        return () -> hash.hvals(asField(key));
+        return () -> async.hvals(marshaller.encode(key));
     }
 
-    /**
-     * Routes the Redis key through the field codec. The cast is safe because the constructor rejects
-     * a field type that differs from the key type (see class Javadoc).
-     */
-    @SuppressWarnings("unchecked")
-    private F asField(K key) {
-        return (F) key;
+    F decodeF(byte[] bytes) {
+        return marshaller.decode(fieldType, bytes);
     }
 
-    /**
-     * Collapses Lettuce's {@code List<KeyValue>} (from hmget / hrandfield-with-values) into a map.
-     */
-    Map<F, V> toMap(List<KeyValue<F, V>> entries) {
-        Map<F, V> result = new LinkedHashMap<>();
-        for (KeyValue<F, V> entry : entries) {
-            result.put(entry.getKey(), entry.getValueOrElse(null));
+    Map<F, V> decodeMap(Map<byte[], byte[]> map) {
+        Map<F, V> decoded = new LinkedHashMap<>(map.size());
+        for (Map.Entry<byte[], byte[]> e : map.entrySet()) {
+            decoded.put(decodeF(e.getKey()), decodeV(e.getValue()));
         }
-        return result;
+        return decoded;
     }
+
+    Map<F, V> decodeFieldWithValueMap(List<KeyValue<byte[], byte[]>> entries) {
+        Map<F, V> map = new LinkedHashMap<>();
+        for (KeyValue<byte[], byte[]> entry : entries) {
+            map.put(decodeF(entry.getKey()), decodeV(entry.getValueOrElse(null)));
+        }
+        return map;
+    }
+
+    List<F> decodeListOfField(List<byte[]> list) {
+        return list.stream().map(this::decodeF).toList();
+    }
+
 }

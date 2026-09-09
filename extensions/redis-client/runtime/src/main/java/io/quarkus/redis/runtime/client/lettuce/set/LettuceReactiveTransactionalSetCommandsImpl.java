@@ -1,7 +1,10 @@
 package io.quarkus.redis.runtime.client.lettuce.set;
 
+import static io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands.orEmpty;
+
 import io.quarkus.redis.datasource.set.ReactiveTransactionalSetCommands;
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
+import io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands;
 import io.quarkus.redis.runtime.client.lettuce.datasource.LettuceTransactionHolder;
 import io.smallrye.mutiny.Uni;
 
@@ -49,7 +52,7 @@ public class LettuceReactiveTransactionalSetCommandsImpl<K, V> implements Reacti
     @SafeVarargs
     @Override
     public final Uni<Void> sdiff(K... keys) {
-        return tx.enqueue(reactive._sdiff(keys), v -> v);
+        return tx.enqueue(reactive._sdiff(keys), reactive::decodeSetOfValue);
     }
 
     @SafeVarargs
@@ -61,7 +64,7 @@ public class LettuceReactiveTransactionalSetCommandsImpl<K, V> implements Reacti
     @SafeVarargs
     @Override
     public final Uni<Void> sinter(K... keys) {
-        return tx.enqueue(reactive._sinter(keys), v -> v);
+        return tx.enqueue(reactive._sinter(keys), reactive::decodeSetOfValue);
     }
 
     @SafeVarargs
@@ -89,13 +92,13 @@ public class LettuceReactiveTransactionalSetCommandsImpl<K, V> implements Reacti
 
     @Override
     public Uni<Void> smembers(K key) {
-        return tx.enqueue(reactive._smembers(key), v -> v);
+        return tx.enqueue(reactive._smembers(key), reactive::decodeSetOfValue);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> smismember(K key, V... members) {
-        return tx.enqueue(reactive._smismember(key, members), LettuceReactiveSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._smismember(key, members), AbstractLettuceCommands::orEmpty);
     }
 
     @Override
@@ -105,22 +108,22 @@ public class LettuceReactiveTransactionalSetCommandsImpl<K, V> implements Reacti
 
     @Override
     public Uni<Void> spop(K key) {
-        return tx.enqueue(reactive._spop(key), v -> v);
+        return tx.enqueue(reactive._spop(key), reactive::decodeV);
     }
 
     @Override
     public Uni<Void> spop(K key, int count) {
-        return tx.enqueue(reactive._spop(key, count), v -> v);
+        return tx.enqueue(reactive._spop(key, count), reactive::decodeSetOfValue);
     }
 
     @Override
     public Uni<Void> srandmember(K key) {
-        return tx.enqueue(reactive._srandmember(key), v -> v);
+        return tx.enqueue(reactive._srandmember(key), reactive::decodeV);
     }
 
     @Override
     public Uni<Void> srandmember(K key, int count) {
-        return tx.enqueue(reactive._srandmember(key, count), LettuceReactiveSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._srandmember(key, count), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @SafeVarargs
@@ -132,7 +135,7 @@ public class LettuceReactiveTransactionalSetCommandsImpl<K, V> implements Reacti
     @SafeVarargs
     @Override
     public final Uni<Void> sunion(K... keys) {
-        return tx.enqueue(reactive._sunion(keys), v -> v);
+        return tx.enqueue(reactive._sunion(keys), reactive::decodeSetOfValue);
     }
 
     @SafeVarargs
@@ -140,4 +143,5 @@ public class LettuceReactiveTransactionalSetCommandsImpl<K, V> implements Reacti
     public final Uni<Void> sunionstore(K destination, K... keys) {
         return tx.enqueue(reactive._sunionstore(destination, keys), v -> v);
     }
+
 }

@@ -2,6 +2,7 @@ package io.quarkus.redis.runtime.client.lettuce;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -53,7 +54,7 @@ class LettuceClientResourcesTest {
         lettuceResources = new LettuceClientResources(vertxEventLoops);
 
         String redisUri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
-        connectionFactory = new LettuceConnectionFactory(lettuceResources.clientResources(), redisUri);
+        connectionFactory = new LettuceConnectionFactory("test", lettuceResources.clientResources(), redisUri);
     }
 
     @AfterAll
@@ -73,8 +74,8 @@ class LettuceClientResourcesTest {
 
     @Test
     void pingViaAsyncApi() throws Exception {
-        try (StatefulRedisConnection<String, String> connection = connectionFactory.connect()) {
-            RedisAsyncCommands<String, String> async = connection.async();
+        try (StatefulRedisConnection<byte[], byte[]> connection = connectionFactory.connect()) {
+            RedisAsyncCommands<byte[], byte[]> async = connection.async();
 
             CompletionStage<String> result = async.ping().toCompletableFuture();
             String pong = result.toCompletableFuture().get(5, TimeUnit.SECONDS);
@@ -85,8 +86,8 @@ class LettuceClientResourcesTest {
 
     @Test
     void completionStageToUniConversion() {
-        try (StatefulRedisConnection<String, String> connection = connectionFactory.connect()) {
-            RedisAsyncCommands<String, String> async = connection.async();
+        try (StatefulRedisConnection<byte[], byte[]> connection = connectionFactory.connect()) {
+            RedisAsyncCommands<byte[], byte[]> async = connection.async();
 
             // Use Supplier form to preserve Uni laziness
             Uni<String> uni = Uni.createFrom().completionStage(() -> async.ping().toCompletableFuture());
@@ -98,21 +99,24 @@ class LettuceClientResourcesTest {
 
     @Test
     void setAndGetViaAsyncApi() {
-        try (StatefulRedisConnection<String, String> connection = connectionFactory.connect()) {
-            RedisAsyncCommands<String, String> async = connection.async();
+        try (StatefulRedisConnection<byte[], byte[]> connection = connectionFactory.connect()) {
+            RedisAsyncCommands<byte[], byte[]> async = connection.async();
 
-            Uni<String> setResult = Uni.createFrom().completionStage(() -> async.set("test-key", "test-value"));
+            byte[] key = "test-key".getBytes(StandardCharsets.UTF_8);
+            byte[] value = "test-value".getBytes(StandardCharsets.UTF_8);
+
+            Uni<String> setResult = Uni.createFrom().completionStage(() -> async.set(key, value));
             assertThat(setResult.await().atMost(Duration.ofSeconds(5))).isEqualTo("OK");
 
-            Uni<String> getResult = Uni.createFrom().completionStage(() -> async.get("test-key"));
-            assertThat(getResult.await().atMost(Duration.ofSeconds(5))).isEqualTo("test-value");
+            Uni<byte[]> getResult = Uni.createFrom().completionStage(() -> async.get(key));
+            assertThat(getResult.await().atMost(Duration.ofSeconds(5))).isEqualTo(value);
         }
     }
 
     @Test
     void lettuceUsesVertxEventLoopThreads() throws Exception {
-        try (StatefulRedisConnection<String, String> connection = connectionFactory.connect()) {
-            RedisAsyncCommands<String, String> async = connection.async();
+        try (StatefulRedisConnection<byte[], byte[]> connection = connectionFactory.connect()) {
+            RedisAsyncCommands<byte[], byte[]> async = connection.async();
 
             // Execute a command and capture the thread name from the completion callback.
             // BLPOP on a missing key blocks server-side (~200ms), guaranteeing the future is
@@ -120,8 +124,9 @@ class LettuceClientResourcesTest {
             // PING, the response can arrive before thenAccept registers, and a callback added
             // to an already-completed future runs inline on the test thread — seen as a flaky
             // failure ("main" instead of an event-loop thread) on slower CI JVMs.
-            CompletionStage<KeyValue<String, String>> future = async
-                    .blpop(0.2, "lettuce-event-loop-test-missing-key").toCompletableFuture();
+            CompletionStage<KeyValue<byte[], byte[]>> future = async
+                    .blpop(0.2, "lettuce-event-loop-test-missing-key".getBytes(StandardCharsets.UTF_8))
+                    .toCompletableFuture();
             String[] callbackThreadName = new String[1];
 
             future.thenAccept(result -> {

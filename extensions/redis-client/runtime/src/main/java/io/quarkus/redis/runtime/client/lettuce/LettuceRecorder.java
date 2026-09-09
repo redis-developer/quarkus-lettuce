@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 import org.jboss.logging.Logger;
 
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.codec.StringCodec;
 import io.netty.channel.EventLoopGroup;
 import io.quarkus.arc.ActiveResult;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -48,7 +49,8 @@ public class LettuceRecorder {
     private static volatile LettuceClientResources sharedResources;
     private static volatile io.vertx.mutiny.core.Vertx mutinyVertx;
     private static final Map<String, LettuceConnectionFactory> factories = new ConcurrentHashMap<>();
-    private static final Map<String, StatefulRedisConnection<String, String>> connections = new ConcurrentHashMap<>();
+    private static final Map<String, StatefulRedisConnection<byte[], byte[]>> connections = new ConcurrentHashMap<>();
+    private static final Map<String, StatefulRedisConnection<String, String>> stringConnections = new ConcurrentHashMap<>();
     private static final Map<String, LettuceReactiveRedisDataSourceImpl> reactiveDataSources = new ConcurrentHashMap<>();
 
     public LettuceRecorder(RuntimeValue<RedisConfig> runtimeConfig) {
@@ -72,10 +74,8 @@ public class LettuceRecorder {
                     LOGGER.warnf("No hosts configured for Lettuce Redis client '%s' — skipping", name);
                     continue;
                 }
-                String redisUri = hosts.get().iterator().next().toString();
-
-                LOGGER.infof("Creating Lettuce RedisClient '%s' for %s", name, redisUri);
-                factories.putIfAbsent(name, new LettuceConnectionFactory(sharedResources.clientResources(), redisUri));
+                URI redisUri = hosts.get().iterator().next();
+                factories.putIfAbsent(name, new LettuceConnectionFactory(name, sharedResources.clientResources(), redisUri));
             }
         }
     }
@@ -89,16 +89,22 @@ public class LettuceRecorder {
     }
 
     public Supplier<Object> getConnection(String name) {
-        return () -> connections.computeIfAbsent(name, k -> {
+        return () -> stringConnections.computeIfAbsent(name, k -> {
             LOGGER.infof("Opening StatefulRedisConnection for client '%s'", k);
+            return factories.get(k).getRedisClient().connect(StringCodec.UTF8);
+        });
+    }
+
+    private static StatefulRedisConnection<byte[], byte[]> dataSourceConnection(String name) {
+        return connections.computeIfAbsent(name, k -> {
+            LOGGER.infof("Opening data source StatefulRedisConnection for client '%s'", k);
             return factories.get(k).connect();
         });
     }
 
-    @SuppressWarnings("unchecked")
     public Supplier<ReactiveRedisDataSource> getReactiveDataSource(String name) {
         return () -> reactiveDataSources.computeIfAbsent(name, k -> {
-            StatefulRedisConnection<String, String> conn = (StatefulRedisConnection<String, String>) getConnection(k).get();
+            StatefulRedisConnection<byte[], byte[]> conn = dataSourceConnection(k);
             LettuceConnectionFactory factory = factories.get(k);
             return new LettuceReactiveRedisDataSourceImpl(mutinyVertx, conn, factory::connectAsync);
         });
@@ -139,14 +145,8 @@ public class LettuceRecorder {
 
     public void cleanup(ShutdownContext context) {
         context.addShutdownTask(() -> {
-            for (Map.Entry<String, StatefulRedisConnection<String, String>> entry : connections.entrySet()) {
-                try {
-                    entry.getValue().close();
-                } catch (Exception e) {
-                    LOGGER.warnf(e, "Error closing Lettuce connection for client '%s'", entry.getKey());
-                }
-            }
-            connections.clear();
+            closeConnections(connections);
+            closeConnections(stringConnections);
             reactiveDataSources.clear();
 
             for (Map.Entry<String, LettuceConnectionFactory> entry : factories.entrySet()) {
@@ -164,5 +164,16 @@ public class LettuceRecorder {
             }
             mutinyVertx = null;
         });
+    }
+
+    private static void closeConnections(Map<String, ? extends StatefulRedisConnection<?, ?>> connectionsByClient) {
+        for (Map.Entry<String, ? extends StatefulRedisConnection<?, ?>> entry : connectionsByClient.entrySet()) {
+            try {
+                entry.getValue().close();
+            } catch (Exception e) {
+                LOGGER.warnf(e, "Error closing Lettuce connection for client '%s'", entry.getKey());
+            }
+        }
+        connectionsByClient.clear();
     }
 }

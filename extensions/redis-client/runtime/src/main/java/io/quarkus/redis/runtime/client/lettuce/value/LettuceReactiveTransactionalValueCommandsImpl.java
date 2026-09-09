@@ -6,6 +6,7 @@ import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSo
 import io.quarkus.redis.datasource.value.GetExArgs;
 import io.quarkus.redis.datasource.value.ReactiveTransactionalValueCommands;
 import io.quarkus.redis.datasource.value.SetArgs;
+import io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands;
 import io.quarkus.redis.runtime.client.lettuce.datasource.LettuceTransactionHolder;
 import io.smallrye.mutiny.Uni;
 
@@ -58,27 +59,27 @@ public class LettuceReactiveTransactionalValueCommandsImpl<K, V>
 
     @Override
     public Uni<Void> get(K key) {
-        return tx.enqueue(reactive._get(key), v -> v);
+        return tx.enqueue(reactive._get(key), reactive::decodeV);
     }
 
     @Override
     public Uni<Void> getdel(K key) {
-        return tx.enqueue(reactive._getdel(key), v -> v);
+        return tx.enqueue(reactive._getdel(key), reactive::decodeV);
     }
 
     @Override
     public Uni<Void> getex(K key, GetExArgs args) {
-        return tx.enqueue(reactive._getex(key, args), v -> v);
+        return tx.enqueue(reactive._getex(key, args), reactive::decodeV);
     }
 
     @Override
     public Uni<Void> getrange(K key, long start, long end) {
-        return tx.enqueue(reactive._getrange(key, start, end), v -> v == null ? null : v.toString());
+        return tx.enqueue(reactive._getrange(key, start, end), reactive::decodeString);
     }
 
     @Override
     public Uni<Void> getset(K key, V value) {
-        return tx.enqueue(reactive._getset(key, value), v -> v);
+        return tx.enqueue(reactive._getset(key, value), reactive::decodeV);
     }
 
     @Override
@@ -109,7 +110,7 @@ public class LettuceReactiveTransactionalValueCommandsImpl<K, V>
     @SafeVarargs
     @Override
     public final Uni<Void> mget(K... keys) {
-        return tx.enqueue(reactive._mget(keys), reactive::toOrderedMap);
+        return tx.enqueue(reactive._mget(keys), results -> reactive.decodeAsOrderedMap(keys, results));
     }
 
     @Override
@@ -139,22 +140,22 @@ public class LettuceReactiveTransactionalValueCommandsImpl<K, V>
 
     @Override
     public Uni<Void> setAndChanged(K key, V value) {
-        return tx.enqueue(reactive._set(key, value), LettuceReactiveValueCommandsImpl::isOk);
+        return tx.enqueue(reactive._set(key, value), AbstractLettuceCommands::isOk);
     }
 
     @Override
     public Uni<Void> setAndChanged(K key, V value, SetArgs setArgs) {
-        return tx.enqueue(reactive._set(key, value, setArgs), LettuceReactiveValueCommandsImpl::isOk);
+        return tx.enqueue(reactive._set(key, value, setArgs), AbstractLettuceCommands::isOk);
     }
 
     @Override
     public Uni<Void> setGet(K key, V value) {
-        return tx.enqueue(reactive._setGet(key, value), v -> v);
+        return tx.enqueue(reactive._setGet(key, value), reactive::decodeV);
     }
 
     @Override
     public Uni<Void> setGet(K key, V value, SetArgs setArgs) {
-        return tx.enqueue(reactive._setGet(key, value, setArgs), v -> v);
+        return tx.enqueue(reactive._setGet(key, value, setArgs), reactive::decodeV);
     }
 
     @Override

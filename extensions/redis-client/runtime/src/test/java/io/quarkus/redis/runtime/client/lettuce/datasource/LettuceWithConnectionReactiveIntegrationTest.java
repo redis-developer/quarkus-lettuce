@@ -4,80 +4,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
-import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
-import io.lettuce.core.RedisClient;
-import io.lettuce.core.RedisURI;
-import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.codec.StringCodec;
-import io.netty.channel.EventLoopGroup;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
-import io.quarkus.redis.runtime.client.lettuce.LettuceClientResources;
+import io.quarkus.redis.runtime.client.lettuce.CommandsTestBase;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.Cancellable;
-import io.vertx.core.internal.VertxInternal;
-import io.vertx.mutiny.core.Vertx;
 import io.vertx.redis.client.Response;
 
-@SuppressWarnings("resource")
-class LettuceWithConnectionReactiveIntegrationTest {
+class LettuceWithConnectionReactiveIntegrationTest extends CommandsTestBase {
 
-    static final Duration TIMEOUT = Duration.ofSeconds(5);
+    ReactiveRedisDataSource ds;
 
-    static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withExposedPorts(6379);
-
-    static Vertx vertx;
-    static LettuceClientResources lettuceResources;
-    static RedisClient redisClient;
-    static StatefulRedisConnection<String, String> sharedConnection;
-    static LettuceReactiveRedisDataSourceImpl ds;
-
-    @BeforeAll
-    static void setUp() {
-        REDIS.start();
-        vertx = Vertx.vertx();
-        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).eventLoopGroup();
-        lettuceResources = new LettuceClientResources(loops);
-        String uri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
-        redisClient = RedisClient.create(lettuceResources.clientResources(), uri);
-        sharedConnection = redisClient.connect(StringCodec.UTF8);
-        ds = new LettuceReactiveRedisDataSourceImpl(vertx, sharedConnection,
-                () -> redisClient.connectAsync(StringCodec.UTF8, RedisURI.create(uri)));
-    }
-
-    @AfterAll
-    static void tearDown() {
-        if (sharedConnection != null) {
-            sharedConnection.close();
-        }
-        if (redisClient != null) {
-            redisClient.shutdown();
-        }
-        if (lettuceResources != null) {
-            lettuceResources.shutdown();
-        }
-        if (vertx != null) {
-            vertx.closeAndAwait();
-        }
-        REDIS.stop();
-    }
-
-    private static long clientId(ReactiveRedisDataSource rds) {
-        return rds.execute("CLIENT", "ID").map(Response::toLong).await().atMost(TIMEOUT);
-    }
-
-    private static long connectionCount() {
-        String list = sharedConnection.sync().clientList();
-        return list.isEmpty() ? 0 : list.split("\n").length;
+    @BeforeEach
+    void initialize() {
+        ds = reactiveDataSource();
     }
 
     @Test
@@ -87,7 +32,7 @@ class LettuceWithConnectionReactiveIntegrationTest {
                 .map(Response::toLong)
                 .invoke(captured::set)
                 .replaceWithVoid()).await().atMost(TIMEOUT);
-        long sharedId = sharedConnection.sync().clientId();
+        long sharedId = connection.sync().clientId();
         assertThat(captured.get()).isPositive().isNotEqualTo(sharedId);
     }
 
@@ -120,7 +65,7 @@ class LettuceWithConnectionReactiveIntegrationTest {
     @Test
     void releasesConnectionOnFailure() {
         long before = connectionCount();
-        assertThatThrownBy(() -> ds.withConnection(rds -> Uni.createFrom().<Void> failure(new RuntimeException("boom")))
+        assertThatThrownBy(() -> ds.withConnection(rds -> Uni.createFrom().failure(new RuntimeException("boom")))
                 .await().atMost(TIMEOUT)).hasMessageContaining("boom");
         await().atMost(TIMEOUT).until(() -> connectionCount() == before);
     }
@@ -132,7 +77,7 @@ class LettuceWithConnectionReactiveIntegrationTest {
         AtomicLong capturedId = new AtomicLong(-1);
         cancellable.set(ds.withConnection(rds -> rds.execute("CLIENT", "ID").map(Response::toLong)
                 .invoke(capturedId::set)
-                .chain(() -> Uni.createFrom().<Void> nothing())).subscribe().with(x -> {
+                .chain(() -> Uni.createFrom().nothing())).subscribe().with(x -> {
                 }, t -> {
                 }));
         await().atMost(TIMEOUT).until(() -> capturedId.get() != -1);
@@ -144,8 +89,10 @@ class LettuceWithConnectionReactiveIntegrationTest {
     void thousandIterationsDoNotLeakConnections() {
         long before = connectionCount();
         for (int i = 0; i < 1000; i++) {
-            ds.withConnection(rds -> rds.execute("CLIENT", "ID").replaceWithVoid()).await().atMost(TIMEOUT);
+            ds.withConnection(rds -> rds.value(String.class, Integer.class).incr(key)
+                    .replaceWithVoid()).await().atMost(TIMEOUT);
         }
+        assertThat(ds.value(String.class, Integer.class).get(key).await().atMost(TIMEOUT)).isEqualTo(1000);
         await().atMost(TIMEOUT).until(() -> connectionCount() <= before + 1);
     }
 
@@ -167,12 +114,13 @@ class LettuceWithConnectionReactiveIntegrationTest {
     @Test
     void connectorFailurePropagatesAndDoesNotLeak() {
         LettuceReactiveRedisDataSourceImpl brokenDs = new LettuceReactiveRedisDataSourceImpl(
-                vertx, sharedConnection, () -> {
+                vertx, connection, () -> {
                     throw new RuntimeException("connector boom");
                 });
         long before = connectionCount();
-        assertThatThrownBy(() -> brokenDs.withConnection(rds -> Uni.createFrom().<Void> voidItem())
+        assertThatThrownBy(() -> brokenDs.withConnection(rds -> Uni.createFrom().voidItem())
                 .await().atMost(TIMEOUT)).hasMessageContaining("connector boom");
         assertThat(connectionCount()).isEqualTo(before);
     }
+
 }

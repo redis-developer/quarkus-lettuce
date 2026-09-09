@@ -145,31 +145,31 @@ public class LettuceProcessor {
         if (!QuarkusClassLoader.isClassPresentAtRuntime("io.lettuce.core.RedisClient")) {
             return;
         }
-        // Lettuce ships a native-image.properties that pins DefaultCommandLatencyCollector and its
-        // NoOpPauseDetectorWrapper for build-time initialization. That transitively triggers the
-        // DefaultPauseDetectorWrapper <clinit>, which references the optional LatencyUtils dependency
-        // (org.LatencyUtils.PauseDetector). LatencyUtils is not on our classpath, so the build fails.
-        // Drop the vendor file and pin the affected classes to runtime initialization instead.
+        // Lettuce ships a native-image.properties that explicitly lists DefaultCommandLatencyCollector,
+        // its NoOpPauseDetectorWrapper and DefaultPauseDetectorWrapper for build-time initialization.
+        // native-image eagerly initializes explicitly listed classes, and linking DefaultPauseDetectorWrapper
+        // requires the optional LatencyUtils dependency (org.LatencyUtils.PauseDetector). Without LatencyUtils
+        // on the classpath (the default for the Vert.x backend, where Lettuce is present but unused) that
+        // eager initialization fails, so drop the vendor file.
+        //
+        // Do NOT pin these classes to runtime initialization. Quarkus initializes classes at build time by
+        // default, which runs DefaultCommandLatencyCollector.<clinit> on the host JVM: PauseDetectorWrapper.create()
+        // checks for LatencyUtils/HdrHistogram and only instantiates DefaultPauseDetectorWrapper when both are
+        // present. Forcing runtime initialization instead compiles the <clinit> into the image, and the
+        // --link-at-build-time analysis then rejects the unresolved DefaultPauseDetectorWrapper.<init>()
+        // reference whenever LatencyUtils is absent. Apps using the Lettuce backend are required to add
+        // LatencyUtils and HdrHistogram (see validateNativeDependencies), so both paths work with build-time init.
         excludeConfig.produce(new ExcludeConfigBuildItem("io\\.lettuce\\.lettuce-core",
                 "/META-INF/native-image/io\\.lettuce/lettuce-core/native-image\\.properties"));
-        runtimeInit.produce(new RuntimeInitializedClassBuildItem(
-                "io.lettuce.core.metrics.DefaultCommandLatencyCollector"));
-        runtimeInit.produce(new RuntimeInitializedClassBuildItem(
-                "io.lettuce.core.metrics.DefaultCommandLatencyCollector$DefaultPauseDetectorWrapper"));
-        runtimeInit.produce(new RuntimeInitializedClassBuildItem(
-                "io.lettuce.core.metrics.DefaultCommandLatencyCollector$NoOpPauseDetectorWrapper"));
         // RedisClient.create() is folded at build time, which transitively materializes a
         // DefaultClientResources.Builder holding a DnsAddressResolverGroup (whose DnsNameResolverBuilder
         // is runtime-init by default). Defer the factory and its supporting classes to runtime init.
+        // DefaultClientResources.DEFAULT_ADDRESS_RESOLVER_GROUP is the static that builds the
+        // DnsAddressResolverGroup in Lettuce 7.x (the former AddressResolverGroupProvider holder class
+        // no longer exists).
         runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.RedisClient"));
         runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.DefaultClientResources"));
         runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.DefaultClientResources$Builder"));
-        // AddressResolverGroupProvider and its inner DefaultDnsAddressResolverGroupWrapper hold a static
-        // DnsAddressResolverGroup whose dnsResolverBuilder references io.netty.resolver.dns.DnsNameResolverBuilder
-        // (runtime-init by default).
-        runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.AddressResolverGroupProvider"));
-        runtimeInit.produce(new RuntimeInitializedClassBuildItem(
-                "io.lettuce.core.resource.AddressResolverGroupProvider$DefaultDnsAddressResolverGroupWrapper"));
     }
 
     @BuildStep

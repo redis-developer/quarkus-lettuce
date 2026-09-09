@@ -4,79 +4,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
-import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
-import io.lettuce.core.RedisClient;
-import io.lettuce.core.RedisURI;
-import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.codec.StringCodec;
-import io.netty.channel.EventLoopGroup;
-import io.quarkus.redis.runtime.client.lettuce.LettuceClientResources;
-import io.vertx.core.internal.VertxInternal;
-import io.vertx.mutiny.core.Vertx;
+import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.runtime.client.lettuce.CommandsTestBase;
 
-@SuppressWarnings("resource")
-class LettuceWithConnectionBlockingIntegrationTest {
+class LettuceWithConnectionBlockingIntegrationTest extends CommandsTestBase {
 
-    static final Duration TIMEOUT = Duration.ofSeconds(5);
+    RedisDataSource ds;
 
-    static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withExposedPorts(6379);
-
-    static Vertx vertx;
-    static LettuceClientResources lettuceResources;
-    static RedisClient redisClient;
-    static StatefulRedisConnection<String, String> sharedConnection;
-    static LettuceBlockingRedisDataSourceImpl ds;
-
-    @BeforeAll
-    static void setUp() {
-        REDIS.start();
-        vertx = Vertx.vertx();
-        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).eventLoopGroup();
-        lettuceResources = new LettuceClientResources(loops);
-        String uri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
-        redisClient = RedisClient.create(lettuceResources.clientResources(), uri);
-        sharedConnection = redisClient.connect(StringCodec.UTF8);
-        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, sharedConnection,
-                () -> redisClient.connectAsync(StringCodec.UTF8, RedisURI.create(uri)));
-        ds = new LettuceBlockingRedisDataSourceImpl(reactive, TIMEOUT);
-    }
-
-    @AfterAll
-    static void tearDown() {
-        if (sharedConnection != null) {
-            sharedConnection.close();
-        }
-        if (redisClient != null) {
-            redisClient.shutdown();
-        }
-        if (lettuceResources != null) {
-            lettuceResources.shutdown();
-        }
-        if (vertx != null) {
-            vertx.closeAndAwait();
-        }
-        REDIS.stop();
-    }
-
-    private static long connectionCount() {
-        String list = sharedConnection.sync().clientList();
-        return list.isEmpty() ? 0 : list.split("\n").length;
+    @BeforeEach
+    void initialize() {
+        ds = blockingDataSource();
     }
 
     @Test
     void runsBlockOnPinnedConnection() {
         AtomicLong captured = new AtomicLong();
         ds.withConnection(rds -> captured.set(rds.execute("CLIENT", "ID").toLong()));
-        long sharedId = sharedConnection.sync().clientId();
+        long sharedId = connection.sync().clientId();
         assertThat(captured.get()).isPositive().isNotEqualTo(sharedId);
     }
 
@@ -118,8 +67,9 @@ class LettuceWithConnectionBlockingIntegrationTest {
     void thousandIterationsDoNotLeakConnections() {
         long before = connectionCount();
         for (int i = 0; i < 1000; i++) {
-            ds.withConnection(rds -> rds.execute("CLIENT", "ID"));
+            ds.withConnection(rds -> rds.value(String.class, Integer.class).incr(key));
         }
+        assertThat(ds.value(String.class, Integer.class).get(key)).isEqualTo(1000);
         await().atMost(TIMEOUT).until(() -> connectionCount() <= before + 1);
     }
 
@@ -127,4 +77,5 @@ class LettuceWithConnectionBlockingIntegrationTest {
     void rejectsNullConsumer() {
         assertThatThrownBy(() -> ds.withConnection(null)).isInstanceOf(NullPointerException.class);
     }
+
 }

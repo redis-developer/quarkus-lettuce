@@ -1,5 +1,7 @@
 package io.quarkus.redis.runtime.client.lettuce.sortedset;
 
+import static io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands.orEmpty;
+
 import java.time.Duration;
 import java.util.Map;
 
@@ -11,6 +13,7 @@ import io.quarkus.redis.datasource.sortedset.ZAddArgs;
 import io.quarkus.redis.datasource.sortedset.ZAggregateArgs;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
+import io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands;
 import io.quarkus.redis.runtime.client.lettuce.datasource.LettuceTransactionHolder;
 import io.smallrye.mutiny.Uni;
 
@@ -21,11 +24,6 @@ import io.smallrye.mutiny.Uni;
  * non-transactional command-builder seam ({@code reactive._zxxx(...)}) for validation and argument
  * conversion, then registers the {@link io.lettuce.core.RedisFuture} together with a result mapper on
  * the {@link LettuceTransactionHolder}.
- * <p>
- * Every mapper mirrors the {@code .map(...)} of the matching non-transactional command, so
- * {@code TransactionResult.get(i)} yields the type that command returns. Where the Vert.x transactional
- * decoder disagrees with its own non-transactional one — it decodes {@code ZADD} with arguments as a
- * plain boolean instead of comparing the reply to {@code 1} — the non-transactional shape wins.
  *
  * @param <K> the key type
  * @param <V> the type of the scored member
@@ -52,7 +50,7 @@ public class LettuceReactiveTransactionalSortedSetCommandsImpl<K, V>
 
     @Override
     public Uni<Void> zadd(K key, double score, V member) {
-        return tx.enqueue(reactive._zadd(key, score, member), LettuceReactiveSortedSetCommandsImpl::asBoolean);
+        return tx.enqueue(reactive._zadd(key, score, member), AbstractLettuceCommands::asBoolean);
     }
 
     @Override
@@ -68,7 +66,7 @@ public class LettuceReactiveTransactionalSortedSetCommandsImpl<K, V>
 
     @Override
     public Uni<Void> zadd(K key, ZAddArgs zAddArgs, double score, V member) {
-        return tx.enqueue(reactive._zadd(key, zAddArgs, score, member), LettuceReactiveSortedSetCommandsImpl::asBoolean);
+        return tx.enqueue(reactive._zadd(key, zAddArgs, score, member), AbstractLettuceCommands::asBoolean);
     }
 
     @Override
@@ -94,7 +92,7 @@ public class LettuceReactiveTransactionalSortedSetCommandsImpl<K, V>
 
     @Override
     public Uni<Void> zcard(K key) {
-        return tx.enqueue(reactive._zcard(key), LettuceReactiveSortedSetCommandsImpl::orZero);
+        return tx.enqueue(reactive._zcard(key), AbstractLettuceCommands::orZero);
     }
 
     @Override
@@ -105,13 +103,13 @@ public class LettuceReactiveTransactionalSortedSetCommandsImpl<K, V>
     @SafeVarargs
     @Override
     public final Uni<Void> zdiff(K... keys) {
-        return tx.enqueue(reactive._zdiff(keys), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zdiff(keys), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zdiffWithScores(K... keys) {
-        return tx.enqueue(reactive._zdiffWithScores(keys), LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+        return tx.enqueue(reactive._zdiffWithScores(keys), reactive::decodeScoredValues);
     }
 
     @SafeVarargs
@@ -128,26 +126,26 @@ public class LettuceReactiveTransactionalSortedSetCommandsImpl<K, V>
     @SafeVarargs
     @Override
     public final Uni<Void> zinter(ZAggregateArgs arguments, K... keys) {
-        return tx.enqueue(reactive._zinter(arguments, keys), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zinter(arguments, keys), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zinter(K... keys) {
-        return tx.enqueue(reactive._zinter(keys), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zinter(keys), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zinterWithScores(ZAggregateArgs arguments, K... keys) {
         return tx.enqueue(reactive._zinterWithScores(arguments, keys),
-                LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+                reactive::decodeScoredValues);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zinterWithScores(K... keys) {
-        return tx.enqueue(reactive._zinterWithScores(keys), LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+        return tx.enqueue(reactive._zinterWithScores(keys), reactive::decodeScoredValues);
     }
 
     @SafeVarargs
@@ -182,164 +180,164 @@ public class LettuceReactiveTransactionalSortedSetCommandsImpl<K, V>
     @SafeVarargs
     @Override
     public final Uni<Void> zmpopMin(K... keys) {
-        return tx.enqueue(reactive._zmpopMin(keys), LettuceReactiveSortedSetCommandsImpl::popped);
+        return tx.enqueue(reactive._zmpopMin(keys), reactive::decodePopped);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zmpopMin(int count, K... keys) {
-        return tx.enqueue(reactive._zmpopMin(count, keys), LettuceReactiveSortedSetCommandsImpl::poppedList);
+        return tx.enqueue(reactive._zmpopMin(count, keys), reactive::decodePoppedList);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zmpopMax(K... keys) {
-        return tx.enqueue(reactive._zmpopMax(keys), LettuceReactiveSortedSetCommandsImpl::popped);
+        return tx.enqueue(reactive._zmpopMax(keys), reactive::decodePopped);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zmpopMax(int count, K... keys) {
-        return tx.enqueue(reactive._zmpopMax(count, keys), LettuceReactiveSortedSetCommandsImpl::poppedList);
+        return tx.enqueue(reactive._zmpopMax(count, keys), reactive::decodePoppedList);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> bzmpopMin(Duration timeout, K... keys) {
-        return tx.enqueue(reactive._bzmpopMin(timeout, keys), LettuceReactiveSortedSetCommandsImpl::popped);
+        return tx.enqueue(reactive._bzmpopMin(timeout, keys), reactive::decodePopped);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> bzmpopMin(Duration timeout, int count, K... keys) {
         return tx.enqueue(reactive._bzmpopMin(timeout, count, keys),
-                LettuceReactiveSortedSetCommandsImpl::poppedList);
+                reactive::decodePoppedList);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> bzmpopMax(Duration timeout, K... keys) {
-        return tx.enqueue(reactive._bzmpopMax(timeout, keys), LettuceReactiveSortedSetCommandsImpl::popped);
+        return tx.enqueue(reactive._bzmpopMax(timeout, keys), reactive::decodePopped);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> bzmpopMax(Duration timeout, int count, K... keys) {
         return tx.enqueue(reactive._bzmpopMax(timeout, count, keys),
-                LettuceReactiveSortedSetCommandsImpl::poppedList);
+                reactive::decodePoppedList);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zmscore(K key, V... members) {
-        return tx.enqueue(reactive._zmscore(key, members), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zmscore(key, members), AbstractLettuceCommands::orEmpty);
     }
 
     @Override
     public Uni<Void> zpopmax(K key) {
-        return tx.enqueue(reactive._zpopmax(key), LettuceReactiveSortedSetCommandsImpl::poppedOrEmpty);
+        return tx.enqueue(reactive._zpopmax(key), reactive::decodeScoredValueOrEmpty);
     }
 
     @Override
     public Uni<Void> zpopmax(K key, int count) {
-        return tx.enqueue(reactive._zpopmax(key, count), LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+        return tx.enqueue(reactive._zpopmax(key, count), reactive::decodeScoredValues);
     }
 
     @Override
     public Uni<Void> zpopmin(K key) {
-        return tx.enqueue(reactive._zpopmin(key), LettuceReactiveSortedSetCommandsImpl::poppedOrEmpty);
+        return tx.enqueue(reactive._zpopmin(key), reactive::decodeScoredValueOrEmpty);
     }
 
     @Override
     public Uni<Void> zpopmin(K key, int count) {
-        return tx.enqueue(reactive._zpopmin(key, count), LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+        return tx.enqueue(reactive._zpopmin(key, count), reactive::decodeScoredValues);
     }
 
     @Override
     public Uni<Void> zrandmember(K key) {
-        return tx.enqueue(reactive._zrandmember(key), v -> v);
+        return tx.enqueue(reactive._zrandmember(key), reactive::decodeV);
     }
 
     @Override
     public Uni<Void> zrandmember(K key, int count) {
-        return tx.enqueue(reactive._zrandmember(key, count), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zrandmember(key, count), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @Override
     public Uni<Void> zrandmemberWithScores(K key) {
-        return tx.enqueue(reactive._zrandmemberWithScores(key), LettuceReactiveSortedSetCommandsImpl::poppedOrEmpty);
+        return tx.enqueue(reactive._zrandmemberWithScores(key), reactive::decodeScoredValueOrEmpty);
     }
 
     @Override
     public Uni<Void> zrandmemberWithScores(K key, int count) {
         return tx.enqueue(reactive._zrandmemberWithScores(key, count),
-                LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+                reactive::decodeScoredValues);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> bzpopmin(Duration timeout, K... keys) {
-        return tx.enqueue(reactive._bzpopmin(timeout, keys), LettuceReactiveSortedSetCommandsImpl::toKeyValue);
+        return tx.enqueue(reactive._bzpopmin(timeout, keys), reactive::decodeKeyValue);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> bzpopmax(Duration timeout, K... keys) {
-        return tx.enqueue(reactive._bzpopmax(timeout, keys), LettuceReactiveSortedSetCommandsImpl::toKeyValue);
+        return tx.enqueue(reactive._bzpopmax(timeout, keys), reactive::decodeKeyValue);
     }
 
     @Override
     public Uni<Void> zrange(K key, long start, long stop, ZRangeArgs args) {
-        return tx.enqueue(reactive._zrange(key, start, stop, args), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zrange(key, start, stop, args), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @Override
     public Uni<Void> zrangeWithScores(K key, long start, long stop, ZRangeArgs args) {
         return tx.enqueue(reactive._zrangeWithScores(key, start, stop, args),
-                LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+                reactive::decodeScoredValues);
     }
 
     @Override
     public Uni<Void> zrange(K key, long start, long stop) {
-        return tx.enqueue(reactive._zrange(key, start, stop), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zrange(key, start, stop), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @Override
     public Uni<Void> zrangeWithScores(K key, long start, long stop) {
         return tx.enqueue(reactive._zrangeWithScores(key, start, stop),
-                LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+                reactive::decodeScoredValues);
     }
 
     @Override
     public Uni<Void> zrangebylex(K key, Range<String> range, ZRangeArgs args) {
-        return tx.enqueue(reactive._zrangebylex(key, range, args), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zrangebylex(key, range, args), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @Override
     public Uni<Void> zrangebylex(K key, Range<String> range) {
-        return tx.enqueue(reactive._zrangebylex(key, range), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zrangebylex(key, range), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @Override
     public Uni<Void> zrangebyscore(K key, ScoreRange<Double> range, ZRangeArgs args) {
-        return tx.enqueue(reactive._zrangebyscore(key, range, args), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zrangebyscore(key, range, args), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @Override
     public Uni<Void> zrangebyscoreWithScores(K key, ScoreRange<Double> range, ZRangeArgs args) {
         return tx.enqueue(reactive._zrangebyscoreWithScores(key, range, args),
-                LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+                reactive::decodeScoredValues);
     }
 
     @Override
     public Uni<Void> zrangebyscore(K key, ScoreRange<Double> range) {
-        return tx.enqueue(reactive._zrangebyscore(key, range), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zrangebyscore(key, range), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @Override
     public Uni<Void> zrangebyscoreWithScores(K key, ScoreRange<Double> range) {
         return tx.enqueue(reactive._zrangebyscoreWithScores(key, range),
-                LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+                reactive::decodeScoredValues);
     }
 
     @Override
@@ -411,25 +409,25 @@ public class LettuceReactiveTransactionalSortedSetCommandsImpl<K, V>
     @SafeVarargs
     @Override
     public final Uni<Void> zunion(ZAggregateArgs args, K... keys) {
-        return tx.enqueue(reactive._zunion(args, keys), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zunion(args, keys), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zunion(K... keys) {
-        return tx.enqueue(reactive._zunion(keys), LettuceReactiveSortedSetCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._zunion(keys), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zunionWithScores(ZAggregateArgs args, K... keys) {
-        return tx.enqueue(reactive._zunionWithScores(args, keys), LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+        return tx.enqueue(reactive._zunionWithScores(args, keys), reactive::decodeScoredValues);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Void> zunionWithScores(K... keys) {
-        return tx.enqueue(reactive._zunionWithScores(keys), LettuceReactiveSortedSetCommandsImpl::toScoredValues);
+        return tx.enqueue(reactive._zunionWithScores(keys), reactive::decodeScoredValues);
     }
 
     @SafeVarargs
@@ -443,4 +441,5 @@ public class LettuceReactiveTransactionalSortedSetCommandsImpl<K, V>
     public final Uni<Void> zunionstore(K destination, K... keys) {
         return tx.enqueue(reactive._zunionstore(destination, keys), v -> v);
     }
+
 }

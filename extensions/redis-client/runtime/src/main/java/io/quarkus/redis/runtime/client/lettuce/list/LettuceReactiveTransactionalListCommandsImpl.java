@@ -1,11 +1,14 @@
 package io.quarkus.redis.runtime.client.lettuce.list;
 
+import static io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands.orEmpty;
+
 import java.time.Duration;
 
 import io.quarkus.redis.datasource.list.LPosArgs;
 import io.quarkus.redis.datasource.list.Position;
 import io.quarkus.redis.datasource.list.ReactiveTransactionalListCommands;
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
+import io.quarkus.redis.runtime.client.lettuce.AbstractLettuceCommands;
 import io.quarkus.redis.runtime.client.lettuce.datasource.LettuceTransactionHolder;
 import io.smallrye.mutiny.Uni;
 
@@ -43,7 +46,8 @@ public class LettuceReactiveTransactionalListCommandsImpl<K, V> implements React
     @Override
     public Uni<Void> blmove(K source, K destination, Position positionInSource, Position positionInDest,
             Duration timeout) {
-        return tx.enqueue(reactive._blmove(source, destination, positionInSource, positionInDest, timeout), v -> v);
+        return tx.enqueue(reactive._blmove(source, destination, positionInSource, positionInDest, timeout),
+                reactive::decodeV);
     }
 
     @SafeVarargs
@@ -73,12 +77,12 @@ public class LettuceReactiveTransactionalListCommandsImpl<K, V> implements React
     @Deprecated
     @Override
     public Uni<Void> brpoplpush(Duration timeout, K source, K destination) {
-        return tx.enqueue(reactive._brpoplpush(timeout, source, destination), v -> v);
+        return tx.enqueue(reactive._brpoplpush(timeout, source, destination), reactive::decodeV);
     }
 
     @Override
     public Uni<Void> lindex(K key, long index) {
-        return tx.enqueue(reactive._lindex(key, index), v -> v);
+        return tx.enqueue(reactive._lindex(key, index), reactive::decodeV);
     }
 
     @Override
@@ -98,7 +102,8 @@ public class LettuceReactiveTransactionalListCommandsImpl<K, V> implements React
 
     @Override
     public Uni<Void> lmove(K source, K destination, Position positionInSource, Position positionInDestination) {
-        return tx.enqueue(reactive._lmove(source, destination, positionInSource, positionInDestination), v -> v);
+        return tx.enqueue(reactive._lmove(source, destination, positionInSource, positionInDestination),
+                reactive::decodeV);
     }
 
     @SafeVarargs
@@ -115,12 +120,12 @@ public class LettuceReactiveTransactionalListCommandsImpl<K, V> implements React
 
     @Override
     public Uni<Void> lpop(K key) {
-        return tx.enqueue(reactive._lpop(key), v -> v);
+        return tx.enqueue(reactive._lpop(key), reactive::decodeV);
     }
 
     @Override
     public Uni<Void> lpop(K key, int count) {
-        return tx.enqueue(reactive._lpop(key, count), LettuceReactiveListCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._lpop(key, count), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @Override
@@ -135,12 +140,12 @@ public class LettuceReactiveTransactionalListCommandsImpl<K, V> implements React
 
     @Override
     public Uni<Void> lpos(K key, V element, int count) {
-        return tx.enqueue(reactive._lpos(key, element, count), LettuceReactiveListCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._lpos(key, element, count), AbstractLettuceCommands::orEmpty);
     }
 
     @Override
     public Uni<Void> lpos(K key, V element, int count, LPosArgs args) {
-        return tx.enqueue(reactive._lpos(key, element, count, args), LettuceReactiveListCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._lpos(key, element, count, args), AbstractLettuceCommands::orEmpty);
     }
 
     @SafeVarargs
@@ -157,7 +162,7 @@ public class LettuceReactiveTransactionalListCommandsImpl<K, V> implements React
 
     @Override
     public Uni<Void> lrange(K key, long start, long stop) {
-        return tx.enqueue(reactive._lrange(key, start, stop), LettuceReactiveListCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._lrange(key, start, stop), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @Override
@@ -177,18 +182,18 @@ public class LettuceReactiveTransactionalListCommandsImpl<K, V> implements React
 
     @Override
     public Uni<Void> rpop(K key) {
-        return tx.enqueue(reactive._rpop(key), v -> v);
+        return tx.enqueue(reactive._rpop(key), reactive::decodeV);
     }
 
     @Override
     public Uni<Void> rpop(K key, int count) {
-        return tx.enqueue(reactive._rpop(key, count), LettuceReactiveListCommandsImpl::orEmpty);
+        return tx.enqueue(reactive._rpop(key, count), list -> reactive.decodeListOfValue(orEmpty(list)));
     }
 
     @Deprecated
     @Override
     public Uni<Void> rpoplpush(K source, K destination) {
-        return tx.enqueue(reactive._rpoplpush(source, destination), v -> v);
+        return tx.enqueue(reactive._rpoplpush(source, destination), reactive::decodeV);
     }
 
     @SafeVarargs

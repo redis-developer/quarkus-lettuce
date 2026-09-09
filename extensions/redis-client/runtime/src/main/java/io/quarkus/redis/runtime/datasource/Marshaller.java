@@ -25,7 +25,7 @@ import io.vertx.redis.client.ResponseType;
 
 public class Marshaller {
 
-    public static final TypeReference<String> STRING_TYPE_REFERENCE = new TypeReference<String>() {
+    public static final TypeReference<String> STRING_TYPE_REFERENCE = new TypeReference<>() {
         // Empty on purpose
     };
 
@@ -65,6 +65,17 @@ public class Marshaller {
         for (T o : objects) {
             byte[] r = encode(o);
             result.add(r);
+        }
+        return result;
+    }
+
+    @SafeVarargs
+    public final <T> byte[][] encodeAsArray(T... objects) {
+        nonNull(objects, "objects");
+        byte[][] result = new byte[objects.length][];
+        for (int i = 0; i < objects.length; i++) {
+            byte[] r = encode(objects[i]);
+            result[i] = r;
         }
         return result;
     }

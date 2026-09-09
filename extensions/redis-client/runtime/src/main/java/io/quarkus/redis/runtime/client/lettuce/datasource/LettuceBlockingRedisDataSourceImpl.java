@@ -117,7 +117,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         // Await the connection and run the user block on the calling (worker) thread. Running it
         // inside the reactive withConnection pipeline would execute it on the event loop thread
         // that completed the connection, where the block's blocking calls would deadlock.
-        try (StatefulRedisConnection<String, String> conn = reactive.openConnection().await().atMost(timeout)) {
+        try (StatefulRedisConnection<byte[], byte[]> conn = reactive.openConnection().await().atMost(timeout)) {
             LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl
                     .pinnedTo(reactive.getVertx(), conn);
             consumer.accept(pinnedTo(pinnedReactive, timeout));
@@ -127,7 +127,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
     @Override
     public TransactionResult withTransaction(Consumer<TransactionalRedisDataSource> tx) {
         nonNull(tx, "tx");
-        StatefulRedisConnection<String, String> conn = acquire();
+        StatefulRedisConnection<byte[], byte[]> conn = acquire();
         try {
             LettuceTransactionHolder holder = new LettuceTransactionHolder();
             BlockingTransactionalRedisDataSourceImpl source = transactionalSource(conn, holder);
@@ -144,11 +144,12 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         nonNull(tx, "tx");
         notNullOrEmpty(watchedKeys, "watchedKeys");
         doesNotContainNull(watchedKeys, "watchedKeys");
-        StatefulRedisConnection<String, String> conn = acquire();
+        StatefulRedisConnection<byte[], byte[]> conn = acquire();
         try {
             LettuceTransactionHolder holder = new LettuceTransactionHolder();
             BlockingTransactionalRedisDataSourceImpl source = transactionalSource(conn, holder);
-            LettuceResult.toBlocking(conn.async().watch(watchedKeys), timeout);
+            LettuceResult.toBlocking(conn.async().watch(LettuceReactiveRedisDataSourceImpl.encodeKeys(watchedKeys)),
+                    timeout);
             LettuceResult.toBlocking(conn.async().multi(), timeout);
             runTxBlock(conn, source, () -> tx.accept(source));
             return assembleResult(conn, holder, source.discarded());
@@ -164,7 +165,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         nonNull(tx, "tx");
         notNullOrEmpty(watchedKeys, "watchedKeys");
         doesNotContainNull(watchedKeys, "watchedKeys");
-        StatefulRedisConnection<String, String> conn = acquire();
+        StatefulRedisConnection<byte[], byte[]> conn = acquire();
         try {
             LettuceTransactionHolder holder = new LettuceTransactionHolder();
             LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl.pinnedTo(
@@ -172,7 +173,8 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
             BlockingTransactionalRedisDataSourceImpl source = new BlockingTransactionalRedisDataSourceImpl(
                     new LettuceReactiveTransactionalRedisDataSourceImpl(pinnedReactive, holder), timeout);
 
-            LettuceResult.toBlocking(conn.async().watch(watchedKeys), timeout);
+            LettuceResult.toBlocking(conn.async().watch(LettuceReactiveRedisDataSourceImpl.encodeKeys(watchedKeys)),
+                    timeout);
             I input;
             try {
                 input = preTx.apply(pinnedTo(pinnedReactive, timeout));
@@ -203,7 +205,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
      * Obtains the connection for a transaction: reuse the pinned outer connection when nested
      * inside {@code withConnection}, otherwise open a fresh one via the connector.
      */
-    private StatefulRedisConnection<String, String> acquire() {
+    private StatefulRedisConnection<byte[], byte[]> acquire() {
         return pinned ? reactive.getConnection() : reactive.openConnection().await().atMost(timeout);
     }
 
@@ -211,13 +213,13 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
      * Releases a transaction connection. A pinned (reused) connection is left open for the outer
      * scope to release; a freshly opened one is closed here.
      */
-    private void release(StatefulRedisConnection<String, String> conn) {
+    private void release(StatefulRedisConnection<byte[], byte[]> conn) {
         if (!pinned) {
             LettuceResult.toBlocking(conn.closeAsync(), timeout);
         }
     }
 
-    private BlockingTransactionalRedisDataSourceImpl transactionalSource(StatefulRedisConnection<String, String> conn,
+    private BlockingTransactionalRedisDataSourceImpl transactionalSource(StatefulRedisConnection<byte[], byte[]> conn,
             LettuceTransactionHolder holder) {
         LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl.pinnedTo(
                 reactive.getVertx(), conn);
@@ -230,7 +232,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
      * discarded) and re-throws the original exception, attaching any {@code DISCARD} failure as
      * suppressed. Mirrors the Vert.x backend's abort path.
      */
-    private void runTxBlock(StatefulRedisConnection<String, String> conn,
+    private void runTxBlock(StatefulRedisConnection<byte[], byte[]> conn,
             BlockingTransactionalRedisDataSourceImpl source, Runnable block) {
         try {
             block.run();
@@ -246,7 +248,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         }
     }
 
-    private TransactionResult assembleResult(StatefulRedisConnection<String, String> conn,
+    private TransactionResult assembleResult(StatefulRedisConnection<byte[], byte[]> conn,
             LettuceTransactionHolder holder, boolean discarded) {
         if (discarded) {
             return TransactionResultImpl.DISCARDED;
@@ -266,12 +268,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, V> ValueCommands<K, V> value(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("value(TypeReference, TypeReference)");
+        ReactiveValueCommands<K, V> r = reactive.value(redisKeyType, valueType);
+        return new BlockingStringCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> StringCommands<K, V> string(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("string");
+        ReactiveValueCommands<K, V> r = reactive.value(redisKeyType, valueType);
+        return new BlockingStringCommandsImpl<>(this, r, timeout);
     }
 
     @Override
@@ -304,7 +308,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K> KeyCommands<K> key(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("key(TypeReference)");
+        return new BlockingKeyCommandsImpl<>(this, reactive.key(redisKeyType), timeout);
     }
 
     @Override

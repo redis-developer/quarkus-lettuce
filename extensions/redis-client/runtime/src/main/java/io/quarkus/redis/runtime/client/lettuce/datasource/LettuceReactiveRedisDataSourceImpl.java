@@ -5,6 +5,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletionStage;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -13,7 +14,7 @@ import java.util.function.Supplier;
 import com.fasterxml.jackson.core.type.TypeReference;
 
 import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandType;
 import io.lettuce.core.protocol.ProtocolKeyword;
@@ -72,24 +73,24 @@ import io.vertx.redis.client.Response;
 public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSource {
 
     private final Vertx vertx;
-    private final StatefulRedisConnection<String, String> connection;
-    private final Supplier<CompletionStage<StatefulRedisConnection<String, String>>> connector;
+    private final StatefulRedisConnection<byte[], byte[]> connection;
+    private final Supplier<CompletionStage<StatefulRedisConnection<byte[], byte[]>>> connector;
     private final boolean pinned;
 
-    public LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<String, String> connection,
-            Supplier<CompletionStage<StatefulRedisConnection<String, String>>> connector) {
+    public LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<byte[], byte[]> connection,
+            Supplier<CompletionStage<StatefulRedisConnection<byte[], byte[]>>> connector) {
         this(vertx, connection, connector, false);
     }
 
-    private LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<String, String> connection,
-            Supplier<CompletionStage<StatefulRedisConnection<String, String>>> connector, boolean pinned) {
+    private LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<byte[], byte[]> connection,
+            Supplier<CompletionStage<StatefulRedisConnection<byte[], byte[]>>> connector, boolean pinned) {
         this.vertx = nonNull(vertx, "vertx");
         this.connection = nonNull(connection, "connection");
         this.connector = connector;
         this.pinned = pinned;
     }
 
-    static LettuceReactiveRedisDataSourceImpl pinnedTo(Vertx vertx, StatefulRedisConnection<String, String> connection) {
+    static LettuceReactiveRedisDataSourceImpl pinnedTo(Vertx vertx, StatefulRedisConnection<byte[], byte[]> connection) {
         return new LettuceReactiveRedisDataSourceImpl(vertx, connection, null, true);
     }
 
@@ -97,7 +98,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         return vertx;
     }
 
-    public StatefulRedisConnection<String, String> getConnection() {
+    public StatefulRedisConnection<byte[], byte[]> getConnection() {
         return connection;
     }
 
@@ -114,8 +115,8 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     }
 
     private Uni<Response> dispatch(ProtocolKeyword type, String... args) {
-        LettuceVertxResponseOutput<String, String> output = new LettuceVertxResponseOutput<>(StringCodec.UTF8);
-        CommandArgs<String, String> commandArgs = new CommandArgs<>(StringCodec.UTF8);
+        LettuceVertxResponseOutput<byte[], byte[]> output = new LettuceVertxResponseOutput<>(ByteArrayCodec.INSTANCE);
+        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE);
         if (args != null) {
             for (String arg : args) {
                 if (arg != null) {
@@ -158,7 +159,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     /**
      * Opens a fresh connection from the connector, without blocking the caller.
      */
-    Uni<StatefulRedisConnection<String, String>> openConnection() {
+    Uni<StatefulRedisConnection<byte[], byte[]>> openConnection() {
         return LettuceResult.toUni(connector);
     }
 
@@ -208,7 +209,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * open for the outer scope to release. Otherwise, a fresh connection is opened via the
      * {@code connector} and closed on every termination path.
      */
-    private <T> Uni<T> withTxConnection(Function<StatefulRedisConnection<String, String>, Uni<T>> body) {
+    private <T> Uni<T> withTxConnection(Function<StatefulRedisConnection<byte[], byte[]>, Uni<T>> body) {
         if (pinned) {
             return Uni.createFrom().deferred(() -> body.apply(connection));
         }
@@ -217,7 +218,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                         .onTermination().call(() -> LettuceResult.toUni(conn::closeAsync).replaceWithVoid()));
     }
 
-    private Uni<TransactionResult> runTx(StatefulRedisConnection<String, String> conn,
+    private Uni<TransactionResult> runTx(StatefulRedisConnection<byte[], byte[]> conn,
             Function<ReactiveTransactionalRedisDataSource, Uni<Void>> tx, String[] watchedKeys) {
         LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn);
         LettuceTransactionHolder holder = new LettuceTransactionHolder();
@@ -242,7 +243,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                 });
     }
 
-    private <I> Uni<OptimisticLockingTransactionResult<I>> runOptimisticTx(StatefulRedisConnection<String, String> conn,
+    private <I> Uni<OptimisticLockingTransactionResult<I>> runOptimisticTx(StatefulRedisConnection<byte[], byte[]> conn,
             Function<ReactiveRedisDataSource, Uni<I>> preTx,
             BiFunction<I, ReactiveTransactionalRedisDataSource, Uni<Void>> tx, String[] watchedKeys) {
         LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn);
@@ -276,8 +277,17 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                         }));
     }
 
-    private Uni<Void> watch(StatefulRedisConnection<String, String> conn, String[] keys) {
-        return LettuceResult.toUni(() -> conn.async().watch(keys)).replaceWithVoid();
+    private Uni<Void> watch(StatefulRedisConnection<byte[], byte[]> conn, String[] keys) {
+        byte[][] encodedKeys = encodeKeys(keys);
+        return LettuceResult.toUni(() -> conn.async().watch(encodedKeys)).replaceWithVoid();
+    }
+
+    static byte[][] encodeKeys(String[] keys) {
+        byte[][] encodedKeys = new byte[keys.length][];
+        for (int i = 0; i < keys.length; i++) {
+            encodedKeys[i] = keys[i].getBytes(StandardCharsets.UTF_8);
+        }
+        return encodedKeys;
     }
 
     /**
@@ -285,7 +295,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * (unless the user already discarded) and re-propagates the original failure, attaching any
      * {@code DISCARD} failure as suppressed. Mirrors the Vert.x backend's abort path.
      */
-    private static <T> Uni<T> abort(StatefulRedisConnection<String, String> conn, LettuceTransactionHolder holder,
+    private static <T> Uni<T> abort(StatefulRedisConnection<byte[], byte[]> conn, LettuceTransactionHolder holder,
             Throwable failure) {
         if (holder.discarded()) {
             return Uni.createFrom().failure(failure);
@@ -303,19 +313,21 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     public <K, V> ReactiveValueCommands<K, V> value(Class<K> redisKeyType, Class<V> valueType) {
         nonNull(redisKeyType, "redisKeyType");
         nonNull(valueType, "valueType");
-        @SuppressWarnings("unchecked")
-        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
-        return new LettuceReactiveValueCommandsImpl<>(this, typedConnection);
+        return new LettuceReactiveValueCommandsImpl<>(this, connection, redisKeyType, valueType);
     }
 
     @Override
     public <K, V> ReactiveValueCommands<K, V> value(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("value(TypeReference, TypeReference)");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        return new LettuceReactiveValueCommandsImpl<>(this, connection, redisKeyType.getType(), valueType.getType());
     }
 
     @Override
     public <K, V> ReactiveStringCommands<K, V> string(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("string");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        return new LettuceReactiveValueCommandsImpl<>(this, connection, redisKeyType, valueType);
     }
 
     @Override
@@ -323,9 +335,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         nonNull(redisKeyType, "redisKeyType");
         nonNull(fieldType, "fieldType");
         nonNull(valueType, "valueType");
-        @SuppressWarnings("unchecked")
-        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
-        return new LettuceReactiveHashCommandsImpl<>(this, typedConnection, redisKeyType, fieldType);
+        return new LettuceReactiveHashCommandsImpl<>(this, connection, redisKeyType, fieldType, valueType);
     }
 
     @Override
@@ -334,9 +344,8 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         nonNull(redisKeyType, "redisKeyType");
         nonNull(fieldType, "fieldType");
         nonNull(valueType, "valueType");
-        @SuppressWarnings("unchecked")
-        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
-        return new LettuceReactiveHashCommandsImpl<>(this, typedConnection, redisKeyType.getType(), fieldType.getType());
+        return new LettuceReactiveHashCommandsImpl<>(this, connection, redisKeyType.getType(), fieldType.getType(),
+                valueType.getType());
     }
 
     @Override
@@ -352,68 +361,55 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     @Override
     public <K> ReactiveKeyCommands<K> key(Class<K> redisKeyType) {
         nonNull(redisKeyType, "redisKeyType");
-        @SuppressWarnings({ "unchecked", "rawtypes" })
-        StatefulRedisConnection<K, Object> typedConnection = (StatefulRedisConnection) connection;
-        return new LettuceReactiveKeyCommandsImpl<>(this, typedConnection);
+        return new LettuceReactiveKeyCommandsImpl<>(this, connection, redisKeyType);
     }
 
     @Override
     public <K> ReactiveKeyCommands<K> key(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("key(TypeReference)");
+        nonNull(redisKeyType, "redisKeyType");
+        return new LettuceReactiveKeyCommandsImpl<>(this, connection, redisKeyType.getType());
     }
 
     @Override
     public <K, V> ReactiveSortedSetCommands<K, V> sortedSet(Class<K> redisKeyType, Class<V> valueType) {
         nonNull(redisKeyType, "redisKeyType");
         nonNull(valueType, "valueType");
-        @SuppressWarnings("unchecked")
-        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
-        return new LettuceReactiveSortedSetCommandsImpl<>(this, typedConnection, valueType);
+        return new LettuceReactiveSortedSetCommandsImpl<>(this, connection, redisKeyType, valueType);
     }
 
     @Override
     public <K, V> ReactiveSortedSetCommands<K, V> sortedSet(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
         nonNull(redisKeyType, "redisKeyType");
         nonNull(valueType, "valueType");
-        @SuppressWarnings("unchecked")
-        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
-        return new LettuceReactiveSortedSetCommandsImpl<>(this, typedConnection, valueType.getType());
+        return new LettuceReactiveSortedSetCommandsImpl<>(this, connection, redisKeyType.getType(), valueType.getType());
     }
 
     @Override
     public <K, V> ReactiveSetCommands<K, V> set(Class<K> redisKeyType, Class<V> memberType) {
         nonNull(redisKeyType, "redisKeyType");
         nonNull(memberType, "memberType");
-        @SuppressWarnings("unchecked")
-        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
-        return new LettuceReactiveSetCommandsImpl<>(this, typedConnection);
+        return new LettuceReactiveSetCommandsImpl<>(this, connection, redisKeyType, memberType);
     }
 
     @Override
     public <K, V> ReactiveSetCommands<K, V> set(TypeReference<K> redisKeyType, TypeReference<V> memberType) {
         nonNull(redisKeyType, "redisKeyType");
         nonNull(memberType, "memberType");
-        @SuppressWarnings("unchecked")
-        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
-        return new LettuceReactiveSetCommandsImpl<>(this, typedConnection);
+        return new LettuceReactiveSetCommandsImpl<>(this, connection, redisKeyType.getType(), memberType.getType());
     }
 
     @Override
     public <K, V> ReactiveListCommands<K, V> list(Class<K> redisKeyType, Class<V> memberType) {
         nonNull(redisKeyType, "redisKeyType");
         nonNull(memberType, "memberType");
-        @SuppressWarnings("unchecked")
-        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
-        return new LettuceReactiveListCommandsImpl<>(this, typedConnection);
+        return new LettuceReactiveListCommandsImpl<>(this, connection, redisKeyType, memberType);
     }
 
     @Override
     public <K, V> ReactiveListCommands<K, V> list(TypeReference<K> redisKeyType, TypeReference<V> memberType) {
         nonNull(redisKeyType, "redisKeyType");
         nonNull(memberType, "memberType");
-        @SuppressWarnings("unchecked")
-        StatefulRedisConnection<K, V> typedConnection = (StatefulRedisConnection<K, V>) connection;
-        return new LettuceReactiveListCommandsImpl<>(this, typedConnection);
+        return new LettuceReactiveListCommandsImpl<>(this, connection, redisKeyType.getType(), memberType.getType());
     }
 
     @Override

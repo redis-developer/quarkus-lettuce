@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
+import io.quarkus.redis.datasource.Person;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
@@ -25,180 +26,206 @@ import io.quarkus.redis.runtime.client.lettuce.CommandsTestBase;
 
 class LettuceSetCommandsTest extends CommandsTestBase {
 
+    static final Person person1 = new Person("luke", "skywalker");
+    static final Person person2 = new Person("anakin", "skywalker");
+    static final Person person3 = new Person("greedo", "");
+    static final Person person4 = new Person("jabba", "desilijic tiure");
+    static final Person person5 = new Person("wedge", "antilles");
+
     ReactiveRedisDataSource reactiveDs;
     RedisDataSource blockingDs;
-    ReactiveSetCommands<String, String> reactiveSet;
-    SetCommands<String, String> blockingSet;
+    ReactiveSetCommands<String, Person> reactiveSets;
+    SetCommands<String, Person> blockingSets;
 
     @BeforeEach
     void initialize() {
         reactiveDs = reactiveDataSource();
         blockingDs = blockingDataSource();
-        reactiveSet = reactiveDs.set(String.class);
-        blockingSet = blockingDs.set(String.class);
+        reactiveSets = reactiveDs.set(Person.class);
+        blockingSets = blockingDs.set(Person.class);
     }
 
     @Test
     void getDataSource() {
-        assertThat(reactiveDs).isEqualTo(reactiveSet.getDataSource());
-        assertThat(blockingDs).isEqualTo(blockingSet.getDataSource());
+        assertThat(reactiveDs).isEqualTo(reactiveSets.getDataSource());
+        assertThat(blockingDs).isEqualTo(blockingSets.getDataSource());
     }
 
     @Test
     void sadd() {
-        assertThat(blockingSet.sadd(key, "a")).isEqualTo(1);
-        assertThat(blockingSet.sadd(key, "a")).isEqualTo(0);
-        assertThat(blockingSet.smembers(key)).isEqualTo(Set.of("a"));
-        assertThat(blockingSet.sadd(key, "b", "c")).isEqualTo(2);
-        assertThat(blockingSet.smembers(key)).isEqualTo(Set.of("a", "b", "c"));
+        assertThat(blockingSets.sadd(key, person1)).isEqualTo(1L);
+        assertThat(blockingSets.sadd(key, person1)).isEqualTo(0);
+        assertThat(blockingSets.smembers(key)).isEqualTo(Set.of(person1));
+        assertThat(blockingSets.sadd(key, person2, person3)).isEqualTo(2);
+        assertThat(blockingSets.smembers(key)).isEqualTo(Set.of(person1, person2, person3));
     }
 
     @Test
     void scard() {
-        assertThat(blockingSet.scard(key)).isEqualTo(0);
-        blockingSet.sadd(key, "a");
-        assertThat(blockingSet.scard(key)).isEqualTo(1);
+        assertThat(blockingSets.scard(key)).isEqualTo(0);
+        blockingSets.sadd(key, person1);
+        assertThat((long) blockingSets.scard(key)).isEqualTo(1);
     }
 
     @Test
     void sdiff() {
         populate();
-        assertThat(blockingSet.sdiff("key1", "key2", "key3")).isEqualTo(Set.of("b", "d"));
+        assertThat(blockingSets.sdiff("key1", "key2", "key3")).isEqualTo(Set.of(person2, person4));
     }
 
     @Test
     void sdiffstore() {
         populate();
-        assertThat(blockingSet.sdiffstore("newset", "key1", "key2", "key3")).isEqualTo(2);
-        assertThat(blockingSet.smembers("newset")).containsOnly("b", "d");
+        assertThat(blockingSets.sdiffstore("newset", "key1", "key2", "key3")).isEqualTo(2);
+        assertThat(blockingSets.smembers("newset")).containsOnly(person2, person4);
     }
 
     @Test
     void sinter() {
         populate();
-        assertThat(blockingSet.sinter("key1", "key2", "key3")).isEqualTo(Set.of("c"));
-        assertThat(blockingSet.sintercard("key1", "key2", "key3")).isEqualTo(1);
-        assertThat(blockingSet.sintercard(2, "key1", "key2", "key3")).isEqualTo(1);
+        assertThat(blockingSets.sinter("key1", "key2", "key3")).isEqualTo(Set.of(person3));
+        assertThat(blockingSets.sintercard("key1", "key2", "key3")).isEqualTo(1L);
+        assertThat(blockingSets.sintercard(2, "key1", "key2", "key3")).isEqualTo(1L);
     }
 
     @Test
     void sinterstore() {
         populate();
-        assertThat(blockingSet.sinterstore("newset", "key1", "key2", "key3")).isEqualTo(1);
-        assertThat(blockingSet.smembers("newset")).containsExactly("c");
+        assertThat(blockingSets.sinterstore("newset", "key1", "key2", "key3")).isEqualTo(1);
+        assertThat(blockingSets.smembers("newset")).containsExactly(person3);
     }
 
     @Test
     void sismember() {
-        assertThat(blockingSet.sismember(key, "a")).isFalse();
-        blockingSet.sadd(key, "a");
-        assertThat(blockingSet.sismember(key, "a")).isTrue();
-    }
-
-    @Test
-    void smembersOnMissingKey() {
-        assertThat(blockingSet.smembers("missing")).isEmpty();
-    }
-
-    @Test
-    void smismember() {
-        assertThat(blockingSet.smismember(key, "a")).isEqualTo(List.of(false));
-        blockingSet.sadd(key, "a");
-        assertThat(blockingSet.smismember(key, "a")).isEqualTo(List.of(true));
-        assertThat(blockingSet.smismember(key, "b", "a")).isEqualTo(List.of(false, true));
+        assertThat(blockingSets.sismember(key, person1)).isFalse();
+        blockingSets.sadd(key, person1);
+        assertThat(blockingSets.sismember(key, person1)).isTrue();
     }
 
     @Test
     void smove() {
-        blockingSet.sadd(key, "a", "b", "c");
-        assertThat(blockingSet.smove(key, "key1", "d")).isFalse();
-        assertThat(blockingSet.smove(key, "key1", "a")).isTrue();
-        assertThat(blockingSet.smembers(key)).isEqualTo(Set.of("b", "c"));
-        assertThat(blockingSet.smembers("key1")).isEqualTo(Set.of("a"));
+        blockingSets.sadd(key, person1, person2, person3);
+        assertThat(blockingSets.smove(key, "key1", person4)).isFalse();
+        assertThat(blockingSets.smove(key, "key1", person1)).isTrue();
+        assertThat(blockingSets.smembers(key)).isEqualTo(Set.of(person2, person3));
+        assertThat(blockingSets.smembers("key1")).isEqualTo(Set.of(person1));
+    }
+
+    @Test
+    void smembers() {
+        populate();
+        assertThat(blockingSets.smembers(key)).isEqualTo(Set.of(person1, person2, person3));
+    }
+
+    @Test
+    void smembersOnMissingKey() {
+        assertThat(blockingSets.smembers("missing")).isEmpty();
+    }
+
+    @Test
+    void smismember() {
+        assertThat(blockingSets.smismember(key, person1)).isEqualTo(List.of(false));
+        blockingSets.sadd(key, person1);
+        assertThat(blockingSets.smismember(key, person1)).isEqualTo(List.of(true));
+        assertThat(blockingSets.smismember(key, person2, person1)).isEqualTo(List.of(false, true));
     }
 
     @Test
     void spop() {
-        assertThat(blockingSet.spop(key)).isNull();
-        blockingSet.sadd(key, "a", "b", "c");
-        String popped = blockingSet.spop(key);
-        assertThat(Set.of("a", "b", "c")).contains(popped);
-        assertThat(blockingSet.smembers(key)).doesNotContain(popped).hasSize(2);
+        assertThat(blockingSets.spop(key)).isNull();
+        blockingSets.sadd(key, person1, person2, person3);
+        Person rand = blockingSets.spop(key);
+        assertThat(Set.of(person1, person2, person3).contains(rand)).isTrue();
+        assertThat(blockingSets.smembers(key).contains(rand)).isFalse();
     }
 
     @Test
     void spopMultiple() {
-        assertThat(blockingSet.spop(key, 2)).isEmpty();
-        blockingSet.sadd(key, "a", "b", "c");
-        Set<String> popped = blockingSet.spop(key, 2);
-        assertThat(popped).hasSize(2);
-        assertThat(Set.of("a", "b", "c")).containsAll(popped);
-        assertThat(blockingSet.scard(key)).isEqualTo(1);
+        assertThat(blockingSets.spop(key, 2)).isEmpty();
+        blockingSets.sadd(key, person1, person2, person3);
+        Set<Person> rand = blockingSets.spop(key, 2);
+        assertThat(rand).hasSize(2);
+        assertThat(Set.of(person1, person2, person3).containsAll(rand)).isTrue();
+        assertThat(blockingSets.scard(key)).isEqualTo(1);
     }
 
     @Test
     void srandmember() {
-        assertThat(blockingSet.srandmember(key)).isNull();
-        assertThat(blockingSet.srandmember(key, 3)).isEmpty();
+        assertThat(blockingSets.srandmember(key)).isNull();
+        assertThat(blockingSets.srandmember(key, 3)).isEmpty();
 
-        blockingSet.sadd(key, "a", "b", "c", "d");
-        assertThat(Set.of("a", "b", "c", "d")).contains(blockingSet.srandmember(key));
-        assertThat(blockingSet.smembers(key)).isEqualTo(Set.of("a", "b", "c", "d"));
-
-        List<String> picked = blockingSet.srandmember(key, 3);
-        assertThat(picked).hasSize(3);
-        assertThat(Set.of("a", "b", "c", "d")).containsAll(picked);
-    }
-
-    /** A negative count is a legal SRANDMEMBER request for duplicates, so it is not validated. */
-    @Test
-    void srandmemberWithNegativeCountReturnsDuplicates() {
-        blockingSet.sadd(key, "a", "b");
-        assertThat(blockingSet.srandmember(key, -10)).hasSize(10);
+        blockingSets.sadd(key, person1, person2, person3, person4);
+        assertThat(Set.of(person1, person2, person3, person4).contains(blockingSets.srandmember(key))).isTrue();
+        assertThat(blockingSets.smembers(key)).isEqualTo(Set.of(person1, person2, person3, person4));
+        List<Person> rand = blockingSets.srandmember(key, 3);
+        assertThat(rand).hasSize(3);
+        assertThat(Set.of(person1, person2, person3, person4).containsAll(rand)).isTrue();
+        // A negative count is a legal SRANDMEMBER request for duplicates, so it is not validated.
+        List<Person> randWithDuplicates = blockingSets.srandmember(key, -10);
+        assertThat(randWithDuplicates).hasSize(10);
     }
 
     @Test
     void srem() {
-        blockingSet.sadd(key, "a", "b", "c");
-        assertThat(blockingSet.srem(key, "d")).isEqualTo(0);
-        assertThat(blockingSet.srem(key, "b")).isEqualTo(1);
-        assertThat(blockingSet.smembers(key)).isEqualTo(Set.of("a", "c"));
-        assertThat(blockingSet.srem(key, "a", "c")).isEqualTo(2);
-        assertThat(blockingSet.smembers(key)).isEmpty();
+        blockingSets.sadd(key, person1, person2, person3);
+        assertThat(blockingSets.srem(key, person4)).isEqualTo(0);
+        assertThat(blockingSets.srem(key, person2)).isEqualTo(1);
+        assertThat(blockingSets.smembers(key)).isEqualTo(Set.of(person1, person3));
+        assertThat(blockingSets.srem(key, person1, person3)).isEqualTo(2);
+        assertThat(blockingSets.smembers(key)).isEqualTo(Set.of());
+    }
+
+    @Test
+    void sremEmpty() {
+        assertThatThrownBy(() -> blockingSets.srem(key)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @SuppressWarnings("ConfusingArgumentToVarargsMethod")
+    @Test
+    void sremNulls() {
+        assertThatThrownBy(() -> blockingSets.srem(key, null)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void sunion() {
         populate();
-        assertThat(blockingSet.sunion("key1", "key2", "key3")).isEqualTo(Set.of("a", "b", "c", "d", "e"));
+        assertThat(blockingSets.sunion("key1", "key2", "key3"))
+                .isEqualTo(Set.of(person1, person2, person3, person4, person5));
+    }
+
+    @Test
+    void sunionEmpty() {
+        assertThatThrownBy(() -> blockingSets.sunion()).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void sunionstore() {
         populate();
-        assertThat(blockingSet.sunionstore("newset", "key1", "key2", "key3")).isEqualTo(5);
-        assertThat(blockingSet.smembers("newset")).isEqualTo(Set.of("a", "b", "c", "d", "e"));
+        assertThat(blockingSets.sunionstore("newset", "key1", "key2", "key3")).isEqualTo(5);
+        assertThat(blockingSets.smembers("newset")).isEqualTo(Set.of(person1, person2, person3, person4, person5));
     }
 
     @Test
     void sscan() {
-        blockingSet.sadd(key, "a");
-        SScanCursor<String> cursor = blockingSet.sscan(key);
+        blockingSets.sadd(key, person1);
+        SScanCursor<Person> cursor = blockingSets.sscan(key);
 
         assertThat(cursor.hasNext()).isTrue();
-        List<String> list = cursor.next();
+
+        List<Person> list = cursor.next();
 
         assertThat(cursor.hasNext()).isFalse();
         assertThat(cursor.cursorId()).isEqualTo(0);
-        assertThat(list).containsExactly("a");
+        assertThat(list).hasSize(1).containsExactly(person1);
     }
 
     @Test
     void sscanEmpty() {
-        SScanCursor<String> cursor = blockingSet.sscan(key);
+        SScanCursor<Person> cursor = blockingSets.sscan(key);
 
         assertThat(cursor.hasNext()).isTrue();
-        List<String> list = cursor.next();
+
+        List<Person> list = cursor.next();
 
         assertThat(cursor.hasNext()).isFalse();
         assertThat(list).isEmpty();
@@ -206,114 +233,148 @@ class LettuceSetCommandsTest extends CommandsTestBase {
 
     @Test
     void sscanEmptyAsIterable() {
-        SScanCursor<String> cursor = blockingSet.sscan(key);
+        SScanCursor<Person> cursor = blockingSets.sscan(key);
 
         assertThat(cursor.hasNext()).isTrue();
-        assertThat(cursor.toIterable()).isEmpty();
+
+        Iterable<Person> iterable = cursor.toIterable();
+        assertThat(iterable).isEmpty();
         assertThat(cursor.hasNext()).isFalse();
     }
 
     @Test
-    void sscanWithArgs() {
-        blockingSet.sadd(key, "a");
-        SScanCursor<String> cursor = blockingSet.sscan(key, new ScanArgs().count(3));
+    void sscanWithCursorAndArgs() {
+        blockingSets.sadd(key, person1);
+        SScanCursor<Person> cursor = blockingSets.sscan(key, new ScanArgs().count(3));
 
         assertThat(cursor.hasNext()).isTrue();
-        assertThat(cursor.next()).containsExactly("a");
+
+        List<Person> list = cursor.next();
+
         assertThat(cursor.hasNext()).isFalse();
+        assertThat(list).hasSize(1).containsExactly(person1);
     }
 
     @Test
     void sscanMultiple() {
-        Set<String> expected = populateMany();
+        Set<String> expect = new HashSet<>();
+        Set<String> check = new HashSet<>();
+        SetCommands<String, String> set = blockingDs.set(String.class, String.class);
+        populateMany(expect, set);
 
-        Set<String> found = new HashSet<>();
-        SScanCursor<String> cursor = blockingSet.sscan(key, new ScanArgs().count(5));
+        SScanCursor<String> cursor = set.sscan(key, new ScanArgs().count(5));
         while (cursor.hasNext()) {
-            found.addAll(cursor.next());
+            check.addAll(cursor.next());
         }
 
-        assertThat(found).containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(check).containsExactlyInAnyOrderElementsOf(expect);
     }
 
     @Test
     void sscanMultipleAsIterable() {
-        Set<String> expected = populateMany();
+        Set<String> expect = new HashSet<>();
+        Set<String> check = new HashSet<>();
+        SetCommands<String, String> set = blockingDs.set(String.class, String.class);
+        populateMany(expect, set);
 
-        Set<String> found = new HashSet<>();
-        SScanCursor<String> cursor = blockingSet.sscan(key, new ScanArgs().count(5));
-        for (String member : cursor.toIterable()) {
-            found.add(member);
+        SScanCursor<String> cursor = set.sscan(key, new ScanArgs().count(5));
+        Iterable<String> iterable = cursor.toIterable();
+        for (String s : iterable) {
+            check.add(s);
         }
 
-        assertThat(found).containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(check).containsExactlyInAnyOrderElementsOf(expect);
     }
 
     @Test
     void sscanMatch() {
-        populateMany();
+        Set<String> expect = new HashSet<>();
+        Set<String> check = new HashSet<>();
+        SetCommands<String, String> set = blockingDs.set(String.class, String.class);
+        populateMany(expect, set);
 
-        Set<String> found = new HashSet<>();
-        SScanCursor<String> cursor = blockingSet.sscan(key, new ScanArgs().count(200).match("hello1*"));
+        SScanCursor<String> cursor = set.sscan(key, new ScanArgs().count(200).match("hello1*"));
         while (cursor.hasNext()) {
-            found.addAll(cursor.next());
+            check.addAll(cursor.next());
         }
 
         // hello1 plus hello10..hello19
-        assertThat(found).hasSize(11);
+        assertThat(check).hasSize(11);
     }
 
     @Test
     void sscanReactiveAsMulti() {
-        Set<String> expected = populateMany();
+        Set<String> expect = new HashSet<>();
+        populateMany(expect, blockingDs.set(String.class, String.class));
 
-        ReactiveSScanCursor<String> cursor = reactiveSet.sscan(key, new ScanArgs().count(5));
+        ReactiveSetCommands<String, String> set = reactiveDs.set(String.class, String.class);
+        ReactiveSScanCursor<String> cursor = set.sscan(key, new ScanArgs().count(5));
         assertThat(cursor.cursorId()).isEqualTo(0);
         assertThat(cursor.hasNext()).isTrue();
 
         List<String> found = cursor.toMulti().collect().asList().await().atMost(TIMEOUT);
 
-        assertThat(found).containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(found).containsExactlyInAnyOrderElementsOf(expect);
         assertThat(cursor.hasNext()).isFalse();
         assertThat(cursor.cursorId()).isEqualTo(0);
     }
 
     @Test
     void sort() {
-        blockingSet.sadd(key, "9", "5", "1", "3", "8", "7", "6", "2", "4");
-        assertThat(blockingSet.sort(key)).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
-        assertThat(blockingSet.sort(key, new SortArgs().descending()))
-                .containsExactly("9", "8", "7", "6", "5", "4", "3", "2", "1");
+        SetCommands<String, String> commands = blockingDs.set(String.class, String.class);
+        commands.sadd(key, "9", "5", "1", "3", "5", "8", "7", "6", "2", "4");
 
-        String alphaKey = key + "-alpha";
-        blockingSet.sadd(alphaKey, "a", "e", "f", "b");
-        assertThat(blockingSet.sort(alphaKey, new SortArgs().alpha())).containsExactly("a", "b", "e", "f");
-        assertThat(blockingSet.sort(alphaKey, new SortArgs().alpha().limit(1, 2))).containsExactly("b", "e");
+        assertThat(commands.sort(key)).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+
+        assertThat(commands.sort(key, new SortArgs().descending())).containsExactly("9", "8", "7", "6", "5", "4", "3",
+                "2", "1");
+
+        String k = key + "-alpha";
+        commands.sadd(k, "a", "e", "f", "b");
+
+        assertThat(commands.sort(k, new SortArgs().alpha())).containsExactly("a", "b", "e", "f");
+        assertThat(commands.sort(k, new SortArgs().alpha().limit(1, 2))).containsExactly("b", "e");
+
+        commands.sortAndStore(k, "dest1", new SortArgs().alpha());
+        commands.sortAndStore(key, "dest2");
+
+        ListCommands<String, String> listCommands = blockingDs.list(String.class, String.class);
+        assertThat(listCommands.lrange("dest1", 0, -1)).containsExactly("a", "b", "e", "f");
+        assertThat(listCommands.lpop("dest2", 100)).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
     }
 
     @Test
     void sortOnMissingKey() {
-        assertThat(blockingSet.sort("missing")).isEmpty();
+        assertThat(blockingSets.sort("missing")).isEmpty();
     }
 
     @Test
     void sortAndStore() {
+        SetCommands<String, String> commands = blockingDs.set(String.class, String.class);
         String alphaKey = key + "-alpha";
-        blockingSet.sadd(key, "9", "5", "1", "3", "8", "7", "6", "2", "4");
-        blockingSet.sadd(alphaKey, "a", "e", "f", "b");
+        commands.sadd(key, "9", "5", "1", "3", "8", "7", "6", "2", "4");
+        commands.sadd(alphaKey, "a", "e", "f", "b");
 
-        assertThat(blockingSet.sortAndStore(alphaKey, "dest1", new SortArgs().alpha())).isEqualTo(4);
-        assertThat(blockingSet.sortAndStore(key, "dest2")).isEqualTo(9);
-
-        // SORT ... STORE writes a list, so read the destinations back through the list group.
-        ListCommands<String, String> lists = blockingDs.list(String.class);
-        assertThat(lists.lrange("dest1", 0, -1)).containsExactly("a", "b", "e", "f");
-        assertThat(lists.lrange("dest2", 0, -1))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+        assertThat(commands.sortAndStore(alphaKey, "dest1", new SortArgs().alpha())).isEqualTo(4);
+        assertThat(commands.sortAndStore(key, "dest2")).isEqualTo(9);
     }
 
     @Test
-    void setWithTypeReference() {
+    void testSetWithTypeReference() {
+        var sets = blockingDs.set(new TypeReference<List<Person>>() {
+            // Empty on purpose.
+        });
+        assertThat(sets.sadd(key, List.of(person1, person2))).isEqualTo(1L);
+        assertThat(sets.sadd(key, List.of(person1, person2))).isEqualTo(0);
+        assertThat(sets.smembers(key)).isEqualTo(Set.of(List.of(person1, person2)));
+        assertThat(sets.sadd(key, List.of(person2, person3), List.of(person4))).isEqualTo(2);
+        assertThat(sets.smembers(key)).containsExactlyInAnyOrder(List.of(person1, person2), List.of(person2, person3),
+                List.of(person4));
+    }
+
+    /** Covers the {@code TypeReference} overloads the Vert.x-mirrored test above does not reach. */
+    @Test
+    void setWithKeyAndMemberTypeReferences() {
         SetCommands<String, String> memberOnly = blockingDs.set(new TypeReference<>() {
             // Empty on purpose
         });
@@ -334,35 +395,34 @@ class LettuceSetCommandsTest extends CommandsTestBase {
 
     @Test
     void invalidCountsAreRejected() {
-        assertThatThrownBy(() -> blockingSet.spop(key, 0))
+        assertThatThrownBy(() -> blockingSets.spop(key, 0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("count");
-        assertThatThrownBy(() -> blockingSet.sintercard(0, "key1", "key2"))
+        assertThatThrownBy(() -> blockingSets.sintercard(0, "key1", "key2"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("limit");
-        assertThatThrownBy(() -> blockingSet.sintercard(-1, "key1", "key2"))
+        assertThatThrownBy(() -> blockingSets.sintercard(-1, "key1", "key2"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("limit");
     }
 
     /** Building the {@code Uni} is fine; only subscribing surfaces the single-key failure. */
     @Test
     void singleKeyFailureIsDeferredUntilSubscription() {
-        var uni = reactiveSet.sdiff("key1");
+        var uni = reactiveSets.sdiff("key1");
         assertThatThrownBy(() -> uni.await().atMost(TIMEOUT))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("at least 2 keys");
     }
 
-    private void populate() {
-        blockingSet.sadd(key, "a", "b", "c");
-        blockingSet.sadd("key1", "a", "b", "c", "d");
-        blockingSet.sadd("key2", "c");
-        blockingSet.sadd("key3", "a", "c", "e");
+    void populateMany(Set<String> expect, SetCommands<String, String> sets) {
+        for (int i = 0; i < 100; i++) {
+            sets.sadd(key, "hello" + i);
+            expect.add("hello" + i);
+        }
     }
 
-    private Set<String> populateMany() {
-        Set<String> expected = new HashSet<>();
-        for (int i = 0; i < 100; i++) {
-            blockingSet.sadd(key, "hello" + i);
-            expected.add("hello" + i);
-        }
-        return expected;
+    private void populate() {
+        blockingSets.sadd(key, person1, person2, person3);
+        blockingSets.sadd("key1", person1, person2, person3, person4);
+        blockingSets.sadd("key2", person3);
+        blockingSets.sadd("key3", person1, person3, person5);
     }
+
 }

@@ -4,81 +4,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
-import java.time.Duration;
 import java.util.Map;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
-import io.lettuce.core.RedisClient;
-import io.lettuce.core.RedisURI;
-import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.codec.StringCodec;
-import io.netty.channel.EventLoopGroup;
+import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
-import io.quarkus.redis.runtime.client.lettuce.LettuceClientResources;
-import io.vertx.core.internal.VertxInternal;
-import io.vertx.mutiny.core.Vertx;
+import io.quarkus.redis.runtime.client.lettuce.CommandsTestBase;
 
-@SuppressWarnings("resource")
-class LettuceWithTransactionBlockingIntegrationTest {
+class LettuceWithTransactionBlockingIntegrationTest extends CommandsTestBase {
 
-    static final Duration TIMEOUT = Duration.ofSeconds(5);
-
-    static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withExposedPorts(6379);
-
-    static Vertx vertx;
-    static LettuceClientResources lettuceResources;
-    static RedisClient redisClient;
-    static StatefulRedisConnection<String, String> sharedConnection;
-    static LettuceBlockingRedisDataSourceImpl ds;
-
-    @BeforeAll
-    static void setUp() {
-        REDIS.start();
-        vertx = Vertx.vertx();
-        EventLoopGroup loops = ((VertxInternal) vertx.getDelegate()).eventLoopGroup();
-        lettuceResources = new LettuceClientResources(loops);
-        String uri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
-        redisClient = RedisClient.create(lettuceResources.clientResources(), uri);
-        sharedConnection = redisClient.connect(StringCodec.UTF8);
-        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, sharedConnection,
-                () -> redisClient.connectAsync(StringCodec.UTF8, RedisURI.create(uri)));
-        ds = new LettuceBlockingRedisDataSourceImpl(reactive, TIMEOUT);
-    }
-
-    @AfterAll
-    static void tearDown() {
-        if (sharedConnection != null) {
-            sharedConnection.close();
-        }
-        if (redisClient != null) {
-            redisClient.shutdown();
-        }
-        if (lettuceResources != null) {
-            lettuceResources.shutdown();
-        }
-        if (vertx != null) {
-            vertx.closeAndAwait();
-        }
-        REDIS.stop();
-    }
+    RedisDataSource ds;
 
     @BeforeEach
-    void flush() {
-        sharedConnection.sync().flushall();
-    }
-
-    private static long connectionCount() {
-        String list = sharedConnection.sync().clientList();
-        return list.isEmpty() ? 0 : list.split("\n").length;
+    void initialize() {
+        ds = blockingDataSource();
     }
 
     @Test
@@ -92,12 +35,12 @@ class LettuceWithTransactionBlockingIntegrationTest {
         assertThat(result.hasErrors()).isFalse();
         assertThat(result.size()).isEqualTo(2);
         assertThat((String) result.get(1)).isEqualTo("v1");
-        assertThat(sharedConnection.sync().get("k1")).isEqualTo("v1");
+        assertThat(rawGet("k1")).isEqualTo("v1");
     }
 
     @Test
     void keyCommandsInTransactionYieldTypedResults() {
-        sharedConnection.sync().set("k1", "v1");
+        rawSet("k1", "v1");
         TransactionResult result = ds.withTransaction(tx -> {
             var keys = tx.key(String.class);
             keys.exists("k1");
@@ -126,7 +69,7 @@ class LettuceWithTransactionBlockingIntegrationTest {
 
     @Test
     void additionalMapperShapesYieldTypedResults() {
-        sharedConnection.sync().set("k1", "v1");
+        rawSet("k1", "v1");
         TransactionResult result = ds.withTransaction(tx -> {
             var value = tx.value(String.class, String.class);
             var keys = tx.key(String.class);
@@ -152,7 +95,8 @@ class LettuceWithTransactionBlockingIntegrationTest {
 
     @Test
     void lcsInTransaction() {
-        sharedConnection.sync().mset(Map.of("k1", "ohmytext", "k2", "mynewtext"));
+        rawSet("k1", "ohmytext");
+        rawSet("k2", "mynewtext");
         TransactionResult result = ds.withTransaction(tx -> {
             var value = tx.value(String.class, String.class);
             value.lcs("k1", "k2");
@@ -175,7 +119,7 @@ class LettuceWithTransactionBlockingIntegrationTest {
             throw new RuntimeException("boom");
         })).hasMessageContaining("boom");
         await().atMost(TIMEOUT).until(() -> connectionCount() == before);
-        assertThat(sharedConnection.sync().get("k")).isNull();
+        assertThat(rawGet("k")).isNull();
     }
 
     @Test
@@ -185,30 +129,31 @@ class LettuceWithTransactionBlockingIntegrationTest {
             tx.discard();
         });
         assertThat(result.discarded()).isTrue();
-        assertThat(sharedConnection.sync().get("k")).isNull();
+        assertThat(rawGet("k")).isNull();
     }
 
     @Test
     void watchViolationYieldsAbortedResult() {
-        sharedConnection.sync().set("watched", "initial");
+        rawSet("watched", "initial");
         TransactionResult result = ds.withTransaction(tx -> {
-            sharedConnection.sync().set("watched", "changed");
+            // mutate the watched key from the shared connection before EXEC
+            rawSet("watched", "changed");
             tx.value(String.class, String.class).set("k", "v");
         }, "watched");
         assertThat(result.discarded()).isTrue();
-        assertThat(sharedConnection.sync().get("k")).isNull();
+        assertThat(rawGet("k")).isNull();
     }
 
     @Test
     void optimisticLockingPreTxRunsOnSameConnection() {
-        sharedConnection.sync().set("counter", "10");
+        rawSet("counter", "10");
         OptimisticLockingTransactionResult<String> result = ds.withTransaction(
                 preTx -> preTx.value(String.class, String.class).get("counter"),
                 (current, tx) -> tx.value(String.class, String.class).set("counter", current + "0"),
                 "counter");
         assertThat(result.discarded()).isFalse();
         assertThat(result.getPreTransactionResult()).isEqualTo("10");
-        assertThat(sharedConnection.sync().get("counter")).isEqualTo("100");
+        assertThat(rawGet("counter")).isEqualTo("100");
     }
 
     @Test

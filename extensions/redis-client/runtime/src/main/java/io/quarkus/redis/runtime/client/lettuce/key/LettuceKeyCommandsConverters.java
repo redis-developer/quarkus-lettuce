@@ -30,8 +30,7 @@ public final class LettuceKeyCommandsConverters {
 
     public static io.lettuce.core.CopyArgs toLettuceCopyArgs(CopyArgs quarkus) {
         io.lettuce.core.CopyArgs lettuce = new io.lettuce.core.CopyArgs();
-        Iterable<Object> tokens = quarkus.toArgs();
-        var cursor = new ArgTokenCursor(tokens);
+        var cursor = new ArgTokenCursor(quarkus.toArgs());
         while (cursor.hasNext()) {
             String token = cursor.next();
             switch (token) {
@@ -45,8 +44,7 @@ public final class LettuceKeyCommandsConverters {
 
     public static io.lettuce.core.KeyScanArgs toLettuceKeyScanArgs(KeyScanArgs quarkus) {
         io.lettuce.core.KeyScanArgs lettuce = new io.lettuce.core.KeyScanArgs();
-        Iterable<String> tokens = quarkus.toArgs();
-        var cursor = new ArgTokenCursor(tokens);
+        var cursor = new ArgTokenCursor(quarkus.toArgs());
         while (cursor.hasNext()) {
             String token = cursor.next();
             switch (token) {

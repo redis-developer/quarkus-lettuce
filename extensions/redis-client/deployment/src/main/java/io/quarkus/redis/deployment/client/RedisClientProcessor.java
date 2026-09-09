@@ -305,12 +305,7 @@ public class RedisClientProcessor {
 
     @BuildStep
     RedisBackendBuildItem resolveBackend(RedisBuildTimeConfig buildTimeConfig) {
-        RedisBackendBuildItem.Backend backend = buildTimeConfig.backend()
-                .map(b -> switch (b) {
-                    case VERTX -> RedisBackendBuildItem.Backend.VERTX;
-                    case LETTUCE -> RedisBackendBuildItem.Backend.LETTUCE;
-                })
-                .orElse(RedisBackendBuildItem.Backend.VERTX);
+        RedisBackendBuildItem.Backend backend = buildTimeConfig.backend();
         if (backend == RedisBackendBuildItem.Backend.LETTUCE && !isLettuceOnClasspath()) {
             throw new ConfigurationException(
                     "quarkus.redis.backend=lettuce was selected but 'lettuce-core' is not on the classpath. "
