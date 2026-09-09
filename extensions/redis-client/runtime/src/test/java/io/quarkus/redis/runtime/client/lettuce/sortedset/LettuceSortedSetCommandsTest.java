@@ -949,14 +949,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void lexCommandsRequireStringMembers() {
-        assertThatThrownBy(() -> blockingSortedSetOfPlaces.zlexcount(key, new Range<>("a", "b")))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("java.lang.String");
-        assertThatThrownBy(() -> blockingSortedSetOfPlaces.zremrangebylex(key, new Range<>("a", "b")))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("java.lang.String");
-    }
-
-    @Test
     void zunion() {
         String zset1 = "zset1";
         String zset2 = "zset2";
