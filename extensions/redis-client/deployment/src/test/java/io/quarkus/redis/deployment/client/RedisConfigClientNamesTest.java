@@ -140,11 +140,6 @@ public class RedisConfigClientNamesTest {
             public boolean healthEnabled() {
                 return false;
             }
-
-            @Override
-            public RedisBackendBuildItem.Backend backend() {
-                return RedisBackendBuildItem.Backend.VERTX;
-            }
         };
     }
 
