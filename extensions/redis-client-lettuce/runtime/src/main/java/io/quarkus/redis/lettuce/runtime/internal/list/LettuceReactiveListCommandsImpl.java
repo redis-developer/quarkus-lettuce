@@ -12,9 +12,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.function.Supplier;
 
-import io.lettuce.core.RedisFuture;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.SortArgs;
@@ -23,8 +21,8 @@ import io.quarkus.redis.datasource.list.LPosArgs;
 import io.quarkus.redis.datasource.list.Position;
 import io.quarkus.redis.datasource.list.ReactiveListCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -54,10 +52,10 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     @Override
     public Uni<V> blmove(K source, K destination, Position positionInSource, Position positionInDest, Duration timeout) {
-        return LettuceResult.toUni(_blmove(source, destination, positionInSource, positionInDest, timeout)).map(this::decodeV);
+        return _blmove(source, destination, positionInSource, positionInDest, timeout).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _blmove(K source, K destination, Position positionInSource, Position positionInDest,
+    LettuceCommand<byte[], V> _blmove(K source, K destination, Position positionInSource, Position positionInDest,
             Duration timeout) {
         nonNull(source, "source");
         nonNull(destination, "destination");
@@ -65,409 +63,409 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(positionInDest, "positionInDest");
         validateTimeout(timeout, "timeout");
         io.lettuce.core.LMoveArgs args = LettuceListCommandsConverters.toLettuceLMoveArgs(positionInSource, positionInDest);
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.blmove(marshaller.encode(source), marshaller.encode(destination), args, timeout.getSeconds());
             }
             return async.blmove(marshaller.encode(source), marshaller.encode(destination), args, toFractionalSeconds(timeout));
-        };
+        }, this::decodeV);
     }
 
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, V>> blmpop(Duration timeout, Position position, K... keys) {
-        return LettuceResult.toUni(_blmpop(timeout, position, keys)).map(this::toFirstKeyValue);
+        return _blmpop(timeout, position, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], List<byte[]>>>> _blmpop(Duration timeout, Position position,
-            K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<byte[]>>, KeyValue<K, V>> _blmpop(Duration timeout,
+            Position position, K... keys) {
         nonNull(position, "position");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         io.lettuce.core.LMPopArgs args = LettuceListCommandsConverters.toLettuceLMPopArgs(position);
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.blmpop(timeout.getSeconds(), args, marshaller.encodeAsArray(keys));
             }
             return async.blmpop(toFractionalSeconds(timeout), args, marshaller.encodeAsArray(keys));
-        };
+        }, this::toFirstKeyValue);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<KeyValue<K, V>>> blmpop(Duration timeout, Position position, int count, K... keys) {
-        return LettuceResult.toUni(_blmpop(timeout, position, count, keys)).map(this::toKeyValueList);
+        return _blmpop(timeout, position, count, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], List<byte[]>>>> _blmpop(Duration timeout, Position position,
-            int count, K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<byte[]>>, List<KeyValue<K, V>>> _blmpop(Duration timeout,
+            Position position, int count, K... keys) {
         nonNull(position, "position");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         positive(count, "count");
         io.lettuce.core.LMPopArgs args = LettuceListCommandsConverters.toLettuceLMPopArgs(position, count);
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.blmpop(timeout.getSeconds(), args, marshaller.encodeAsArray(keys));
             }
             return async.blmpop(toFractionalSeconds(timeout), args, marshaller.encodeAsArray(keys));
-        };
+        }, this::toKeyValueList);
     }
 
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, V>> blpop(Duration timeout, K... keys) {
-        return LettuceResult.toUni(_blpop(timeout, keys)).map(this::toKeyValue);
+        return _blpop(timeout, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], byte[]>>> _blpop(Duration timeout, K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], byte[]>, KeyValue<K, V>> _blpop(Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.blpop(timeout.getSeconds(), marshaller.encodeAsArray(keys));
             }
             return async.blpop(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
-        };
+        }, this::toKeyValue);
     }
 
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, V>> brpop(Duration timeout, K... keys) {
-        return LettuceResult.toUni(_brpop(timeout, keys)).map(this::toKeyValue);
+        return _brpop(timeout, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], byte[]>>> _brpop(Duration timeout, K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], byte[]>, KeyValue<K, V>> _brpop(Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.brpop(timeout.getSeconds(), marshaller.encodeAsArray(keys));
             }
             return async.brpop(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
-        };
+        }, this::toKeyValue);
     }
 
     @Deprecated
     @Override
     public Uni<V> brpoplpush(Duration timeout, K source, K destination) {
-        return LettuceResult.toUni(_brpoplpush(timeout, source, destination)).map(this::decodeV);
+        return _brpoplpush(timeout, source, destination).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _brpoplpush(Duration timeout, K source, K destination) {
+    LettuceCommand<byte[], V> _brpoplpush(Duration timeout, K source, K destination) {
         validateTimeout(timeout, "timeout");
         nonNull(source, "source");
         nonNull(destination, "destination");
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.brpoplpush(timeout.getSeconds(), marshaller.encode(source), marshaller.encode(destination));
             }
             return async.brpoplpush(toFractionalSeconds(timeout), marshaller.encode(source), marshaller.encode(destination));
-        };
+        }, this::decodeV);
     }
 
     @Override
     public Uni<V> lindex(K key, long index) {
-        return LettuceResult.toUni(_lindex(key, index)).map(this::decodeV);
+        return _lindex(key, index).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _lindex(K key, long index) {
+    LettuceCommand<byte[], V> _lindex(K key, long index) {
         nonNull(key, "key");
-        return () -> async.lindex(marshaller.encode(key), index);
+        return LettuceCommand.of(() -> async.lindex(marshaller.encode(key), index), this::decodeV);
     }
 
     @Override
     public Uni<Long> linsertBeforePivot(K key, V pivot, V element) {
-        return LettuceResult.toUni(_linsertBeforePivot(key, pivot, element));
+        return _linsertBeforePivot(key, pivot, element).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _linsertBeforePivot(K key, V pivot, V element) {
+    LettuceCommand<Long, Long> _linsertBeforePivot(K key, V pivot, V element) {
         nonNull(key, "key");
         nonNull(pivot, "pivot");
         nonNull(element, "element");
-        return () -> async.linsert(marshaller.encode(key), true, marshaller.encode(pivot), marshaller.encode(element));
+        return LettuceCommand.of(
+                () -> async.linsert(marshaller.encode(key), true, marshaller.encode(pivot), marshaller.encode(element)));
     }
 
     @Override
     public Uni<Long> linsertAfterPivot(K key, V pivot, V element) {
-        return LettuceResult.toUni(_linsertAfterPivot(key, pivot, element));
+        return _linsertAfterPivot(key, pivot, element).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _linsertAfterPivot(K key, V pivot, V element) {
+    LettuceCommand<Long, Long> _linsertAfterPivot(K key, V pivot, V element) {
         nonNull(key, "key");
         nonNull(pivot, "pivot");
         nonNull(element, "element");
-        return () -> async.linsert(marshaller.encode(key), false, marshaller.encode(pivot), marshaller.encode(element));
+        return LettuceCommand.of(
+                () -> async.linsert(marshaller.encode(key), false, marshaller.encode(pivot), marshaller.encode(element)));
     }
 
     @Override
     public Uni<Long> llen(K key) {
-        return LettuceResult.toUni(_llen(key));
+        return _llen(key).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _llen(K key) {
+    LettuceCommand<Long, Long> _llen(K key) {
         nonNull(key, "key");
-        return () -> async.llen(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.llen(marshaller.encode(key)));
     }
 
     @Override
     public Uni<V> lmove(K source, K destination, Position positionInSource, Position positionInDestination) {
-        return LettuceResult.toUni(_lmove(source, destination, positionInSource, positionInDestination))
-                .map(this::decodeV);
+        return _lmove(source, destination, positionInSource, positionInDestination).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _lmove(K source, K destination, Position positionInSource, Position positionInDest) {
+    LettuceCommand<byte[], V> _lmove(K source, K destination, Position positionInSource, Position positionInDest) {
         nonNull(source, "source");
         nonNull(destination, "destination");
         nonNull(positionInSource, "positionInSource");
         nonNull(positionInDest, "positionInDest");
         io.lettuce.core.LMoveArgs args = LettuceListCommandsConverters.toLettuceLMoveArgs(positionInSource, positionInDest);
-        return () -> async.lmove(marshaller.encode(source), marshaller.encode(destination), args);
+        return LettuceCommand.of(() -> async.lmove(marshaller.encode(source), marshaller.encode(destination), args),
+                this::decodeV);
     }
 
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, V>> lmpop(Position position, K... keys) {
-        return LettuceResult.toUni(_lmpop(position, keys)).map(this::toFirstKeyValue);
+        return _lmpop(position, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], List<byte[]>>>> _lmpop(Position position, K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<byte[]>>, KeyValue<K, V>> _lmpop(Position position,
+            K... keys) {
         nonNull(position, "position");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         io.lettuce.core.LMPopArgs args = LettuceListCommandsConverters.toLettuceLMPopArgs(position);
-        return () -> async.lmpop(args, marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.lmpop(args, marshaller.encodeAsArray(keys)), this::toFirstKeyValue);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<KeyValue<K, V>>> lmpop(Position position, int count, K... keys) {
-        return LettuceResult.toUni(_lmpop(position, count, keys)).map(this::toKeyValueList);
+        return _lmpop(position, count, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], List<byte[]>>>> _lmpop(Position position, int count,
-            K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<byte[]>>, List<KeyValue<K, V>>> _lmpop(Position position,
+            int count, K... keys) {
         nonNull(position, "position");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         positive(count, "count");
         io.lettuce.core.LMPopArgs args = LettuceListCommandsConverters.toLettuceLMPopArgs(position, count);
-        return () -> async.lmpop(args, marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.lmpop(args, marshaller.encodeAsArray(keys)), this::toKeyValueList);
     }
 
     @Override
     public Uni<V> lpop(K key) {
-        return LettuceResult.toUni(_lpop(key)).map(this::decodeV);
+        return _lpop(key).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _lpop(K key) {
+    LettuceCommand<byte[], V> _lpop(K key) {
         nonNull(key, "key");
-        return () -> async.lpop(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.lpop(marshaller.encode(key)), this::decodeV);
     }
 
     @Override
     public Uni<List<V>> lpop(K key, int count) {
-        return LettuceResult.toUni(_lpop(key, count))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _lpop(key, count).toUni();
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _lpop(K key, int count) {
+    LettuceCommand<List<byte[]>, List<V>> _lpop(K key, int count) {
         nonNull(key, "key");
         positive(count, "count");
-        return () -> async.lpop(marshaller.encode(key), count);
+        return LettuceCommand.of(() -> async.lpop(marshaller.encode(key), count), this::decodeListOfValueOrEmpty);
     }
 
     @Override
     public Uni<Long> lpos(K key, V element) {
-        return LettuceResult.toUni(_lpos(key, element));
+        return _lpos(key, element).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _lpos(K key, V element) {
+    LettuceCommand<Long, Long> _lpos(K key, V element) {
         nonNull(key, "key");
         nonNull(element, "element");
-        return () -> async.lpos(marshaller.encode(key), marshaller.encode(element));
+        return LettuceCommand.of(() -> async.lpos(marshaller.encode(key), marshaller.encode(element)));
     }
 
     @Override
     public Uni<Long> lpos(K key, V element, LPosArgs args) {
-        return LettuceResult.toUni(_lpos(key, element, args));
+        return _lpos(key, element, args).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _lpos(K key, V element, LPosArgs args) {
+    LettuceCommand<Long, Long> _lpos(K key, V element, LPosArgs args) {
         nonNull(key, "key");
         nonNull(element, "element");
         io.lettuce.core.LPosArgs lettuceArgs = LettuceListCommandsConverters.toLettuceLPosArgs(args);
-        return () -> async.lpos(marshaller.encode(key), marshaller.encode(element), lettuceArgs);
+        return LettuceCommand.of(() -> async.lpos(marshaller.encode(key), marshaller.encode(element), lettuceArgs));
     }
 
     @Override
     public Uni<List<Long>> lpos(K key, V element, int count) {
-        return LettuceResult.toUni(_lpos(key, element, count)).map(AbstractLettuceCommands::orEmpty);
+        return _lpos(key, element, count).toUni();
     }
 
-    Supplier<RedisFuture<List<Long>>> _lpos(K key, V element, int count) {
+    LettuceCommand<List<Long>, List<Long>> _lpos(K key, V element, int count) {
         nonNull(key, "key");
         nonNull(element, "element");
         positiveOrZero(count, "count"); // 0 -> All matches
-        return () -> async.lpos(marshaller.encode(key), marshaller.encode(element), count);
+        return LettuceCommand.of(() -> async.lpos(marshaller.encode(key), marshaller.encode(element), count),
+                AbstractLettuceCommands::orEmpty);
     }
 
     @Override
     public Uni<List<Long>> lpos(K key, V element, int count, LPosArgs args) {
-        return LettuceResult.toUni(_lpos(key, element, count, args)).map(AbstractLettuceCommands::orEmpty);
+        return _lpos(key, element, count, args).toUni();
     }
 
-    Supplier<RedisFuture<List<Long>>> _lpos(K key, V element, int count, LPosArgs args) {
+    LettuceCommand<List<Long>, List<Long>> _lpos(K key, V element, int count, LPosArgs args) {
         nonNull(key, "key");
         nonNull(element, "element");
         positiveOrZero(count, "count"); // 0 -> All matches
         io.lettuce.core.LPosArgs lettuceArgs = LettuceListCommandsConverters.toLettuceLPosArgs(args);
-        return () -> async.lpos(marshaller.encode(key), marshaller.encode(element), count, lettuceArgs);
+        return LettuceCommand.of(() -> async.lpos(marshaller.encode(key), marshaller.encode(element), count, lettuceArgs),
+                AbstractLettuceCommands::orEmpty);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Long> lpush(K key, V... elements) {
-        return LettuceResult.toUni(_lpush(key, elements));
+        return _lpush(key, elements).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _lpush(K key, V... elements) {
+    final LettuceCommand<Long, Long> _lpush(K key, V... elements) {
         nonNull(key, "key");
         notNullOrEmpty(elements, "elements");
         doesNotContainNull(elements, "elements");
-        return () -> async.lpush(marshaller.encode(key), marshaller.encodeAsArray(elements));
+        return LettuceCommand.of(() -> async.lpush(marshaller.encode(key), marshaller.encodeAsArray(elements)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Long> lpushx(K key, V... elements) {
-        return LettuceResult.toUni(_lpushx(key, elements));
+        return _lpushx(key, elements).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _lpushx(K key, V... elements) {
+    final LettuceCommand<Long, Long> _lpushx(K key, V... elements) {
         nonNull(key, "key");
         notNullOrEmpty(elements, "elements");
         doesNotContainNull(elements, "elements");
-        return () -> async.lpushx(marshaller.encode(key), marshaller.encodeAsArray(elements));
+        return LettuceCommand.of(() -> async.lpushx(marshaller.encode(key), marshaller.encodeAsArray(elements)));
     }
 
     @Override
     public Uni<List<V>> lrange(K key, long start, long stop) {
-        return LettuceResult.toUni(_lrange(key, start, stop))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _lrange(key, start, stop).toUni();
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _lrange(K key, long start, long stop) {
+    LettuceCommand<List<byte[]>, List<V>> _lrange(K key, long start, long stop) {
         nonNull(key, "key");
-        return () -> async.lrange(marshaller.encode(key), start, stop);
+        return LettuceCommand.of(() -> async.lrange(marshaller.encode(key), start, stop), this::decodeListOfValueOrEmpty);
     }
 
     @Override
     public Uni<Long> lrem(K key, long count, V element) {
-        return LettuceResult.toUni(_lrem(key, count, element));
+        return _lrem(key, count, element).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _lrem(K key, long count, V element) {
+    LettuceCommand<Long, Long> _lrem(K key, long count, V element) {
         nonNull(key, "key");
         nonNull(element, "element");
-        return () -> async.lrem(marshaller.encode(key), count, marshaller.encode(element));
+        return LettuceCommand.of(() -> async.lrem(marshaller.encode(key), count, marshaller.encode(element)));
     }
 
     @Override
     public Uni<Void> lset(K key, long index, V element) {
-        return LettuceResult.toUni(_lset(key, index, element)).replaceWithVoid();
+        return _lset(key, index, element).toUni();
     }
 
-    Supplier<RedisFuture<String>> _lset(K key, long index, V element) {
+    LettuceCommand<String, Void> _lset(K key, long index, V element) {
         nonNull(key, "key");
         nonNull(element, "element");
-        return () -> async.lset(marshaller.encode(key), index, marshaller.encode(element));
+        return LettuceCommand.discarding(() -> async.lset(marshaller.encode(key), index, marshaller.encode(element)));
     }
 
     @Override
     public Uni<Void> ltrim(K key, long start, long stop) {
-        return LettuceResult.toUni(_ltrim(key, start, stop)).replaceWithVoid();
+        return _ltrim(key, start, stop).toUni();
     }
 
-    Supplier<RedisFuture<String>> _ltrim(K key, long start, long stop) {
+    LettuceCommand<String, Void> _ltrim(K key, long start, long stop) {
         nonNull(key, "key");
-        return () -> async.ltrim(marshaller.encode(key), start, stop);
+        return LettuceCommand.discarding(() -> async.ltrim(marshaller.encode(key), start, stop));
     }
 
     @Override
     public Uni<V> rpop(K key) {
-        return LettuceResult.toUni(_rpop(key)).map(this::decodeV);
+        return _rpop(key).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _rpop(K key) {
+    LettuceCommand<byte[], V> _rpop(K key) {
         nonNull(key, "key");
-        return () -> async.rpop(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.rpop(marshaller.encode(key)), this::decodeV);
     }
 
     @Override
     public Uni<List<V>> rpop(K key, int count) {
-        return LettuceResult.toUni(_rpop(key, count))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _rpop(key, count).toUni();
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _rpop(K key, int count) {
+    LettuceCommand<List<byte[]>, List<V>> _rpop(K key, int count) {
         nonNull(key, "key");
-        return () -> async.rpop(marshaller.encode(key), count);
+        return LettuceCommand.of(() -> async.rpop(marshaller.encode(key), count), this::decodeListOfValueOrEmpty);
     }
 
     @Deprecated
     @Override
     public Uni<V> rpoplpush(K source, K destination) {
-        return LettuceResult.toUni(_rpoplpush(source, destination)).map(this::decodeV);
+        return _rpoplpush(source, destination).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _rpoplpush(K source, K destination) {
+    LettuceCommand<byte[], V> _rpoplpush(K source, K destination) {
         nonNull(source, "source");
         nonNull(destination, "destination");
-        return () -> async.rpoplpush(marshaller.encode(source), marshaller.encode(destination));
+        return LettuceCommand.of(() -> async.rpoplpush(marshaller.encode(source), marshaller.encode(destination)),
+                this::decodeV);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Long> rpush(K key, V... values) {
-        return LettuceResult.toUni(_rpush(key, values));
+        return _rpush(key, values).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _rpush(K key, V... values) {
+    final LettuceCommand<Long, Long> _rpush(K key, V... values) {
         nonNull(key, "key");
         notNullOrEmpty(values, "values");
         doesNotContainNull(values, "values");
-        return () -> async.rpush(marshaller.encode(key), marshaller.encodeAsArray(values));
+        return LettuceCommand.of(() -> async.rpush(marshaller.encode(key), marshaller.encodeAsArray(values)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Long> rpushx(K key, V... values) {
-        return LettuceResult.toUni(_rpushx(key, values));
+        return _rpushx(key, values).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _rpushx(K key, V... values) {
+    final LettuceCommand<Long, Long> _rpushx(K key, V... values) {
         nonNull(key, "key");
         notNullOrEmpty(values, "values");
         doesNotContainNull(values, "values");
-        return () -> async.rpushx(marshaller.encode(key), marshaller.encodeAsArray(values));
+        return LettuceCommand.of(() -> async.rpushx(marshaller.encode(key), marshaller.encodeAsArray(values)));
     }
 
     @Override
@@ -477,29 +475,27 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     @Override
     public Uni<List<V>> sort(K key, SortArgs sortArguments) {
-        return LettuceResult.toUni(_sort(key, sortArguments))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _sort(key, sortArguments).toUni();
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _sort(K key, SortArgs sortArguments) {
+    LettuceCommand<List<byte[]>, List<V>> _sort(K key, SortArgs sortArguments) {
         nonNull(key, "key");
         nonNull(sortArguments, "sortArguments");
         io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(sortArguments);
-        return () -> async.sort(marshaller.encode(key), lettuceArgs);
+        return LettuceCommand.of(() -> async.sort(marshaller.encode(key), lettuceArgs), this::decodeListOfValueOrEmpty);
     }
 
     @Override
     public Uni<Long> sortAndStore(K key, K destination, SortArgs sortArguments) {
-        return LettuceResult.toUni(_sortAndStore(key, destination, sortArguments));
+        return _sortAndStore(key, destination, sortArguments).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _sortAndStore(K key, K destination, SortArgs args) {
+    LettuceCommand<Long, Long> _sortAndStore(K key, K destination, SortArgs args) {
         nonNull(key, "key");
         nonNull(destination, "destination");
         nonNull(args, "args");
         io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(args);
-        return () -> async.sortStore(marshaller.encode(key), lettuceArgs, marshaller.encode(destination));
+        return LettuceCommand.of(() -> async.sortStore(marshaller.encode(key), lettuceArgs, marshaller.encode(destination)));
     }
 
     @Override
@@ -507,14 +503,14 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         return sortAndStore(key, destination, DEFAULT_SORT_ARGS);
     }
 
-    KeyValue<K, V> toKeyValue(io.lettuce.core.KeyValue<byte[], byte[]> kv) {
+    private KeyValue<K, V> toKeyValue(io.lettuce.core.KeyValue<byte[], byte[]> kv) {
         if (kv == null || kv.isEmpty()) {
             return null;
         }
         return KeyValue.of(decodeK(kv.getKey()), decodeV(kv.getValueOrElse(null)));
     }
 
-    KeyValue<K, V> toFirstKeyValue(io.lettuce.core.KeyValue<byte[], List<byte[]>> kv) {
+    private KeyValue<K, V> toFirstKeyValue(io.lettuce.core.KeyValue<byte[], List<byte[]>> kv) {
         if (kv == null || kv.isEmpty()) {
             return null;
         }
@@ -525,7 +521,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         return KeyValue.of(decodeK(kv.getKey()), decodeV(values.get(0)));
     }
 
-    List<KeyValue<K, V>> toKeyValueList(io.lettuce.core.KeyValue<byte[], List<byte[]>> kv) {
+    private List<KeyValue<K, V>> toKeyValueList(io.lettuce.core.KeyValue<byte[], List<byte[]>> kv) {
         if (kv == null || kv.isEmpty()) {
             return Collections.emptyList();
         }

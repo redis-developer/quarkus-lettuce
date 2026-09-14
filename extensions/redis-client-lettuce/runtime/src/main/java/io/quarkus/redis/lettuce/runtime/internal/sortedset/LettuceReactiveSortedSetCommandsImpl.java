@@ -12,9 +12,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 
-import io.lettuce.core.RedisFuture;
 import io.lettuce.core.ZPopArgs;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -30,8 +28,8 @@ import io.quarkus.redis.datasource.sortedset.ZAddArgs;
 import io.quarkus.redis.datasource.sortedset.ZAggregateArgs;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -78,28 +76,30 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Boolean> zadd(K key, ZAddArgs args, double score, V value) {
-        return LettuceResult.toUni(_zadd(key, args, score, value)).map(AbstractLettuceCommands::asBoolean);
+        return _zadd(key, args, score, value).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zadd(K key, ZAddArgs args, double score, V value) {
+    LettuceCommand<Long, Boolean> _zadd(K key, ZAddArgs args, double score, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
         nonNull(args, "args");
         io.lettuce.core.ZAddArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(args);
         double normalized = normalizeScore(score);
-        return () -> async.zadd(marshaller.encode(key), lettuceArgs, normalized, marshaller.encode(value));
+        return LettuceCommand.of(
+                () -> async.zadd(marshaller.encode(key), lettuceArgs, normalized, marshaller.encode(value)),
+                AbstractLettuceCommands::asBoolean);
     }
 
-    Supplier<RedisFuture<Long>> _zadd(K key, double score, V value) {
+    LettuceCommand<Long, Boolean> _zadd(K key, double score, V value) {
         return _zadd(key, new ZAddArgs(), score, value);
     }
 
     @Override
     public Uni<Integer> zadd(K key, ZAddArgs args, Map<V, Double> items) {
-        return LettuceResult.toUni(_zadd(key, args, items)).map(Long::intValue);
+        return _zadd(key, args, items).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zadd(K key, ZAddArgs args, Map<V, Double> items) {
+    LettuceCommand<Long, Integer> _zadd(K key, ZAddArgs args, Map<V, Double> items) {
         nonNull(key, "key");
         nonNull(items, "items");
         nonNull(args, "args");
@@ -114,21 +114,22 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
         @SuppressWarnings("unchecked")
         io.lettuce.core.ScoredValue<byte[]>[] array = entries.toArray(new io.lettuce.core.ScoredValue[0]);
-        return () -> async.zadd(marshaller.encode(key), lettuceArgs, array);
+        return LettuceCommand.of(() -> async.zadd(marshaller.encode(key), lettuceArgs, array),
+                AbstractLettuceCommands::toInteger);
     }
 
-    Supplier<RedisFuture<Long>> _zadd(K key, Map<V, Double> items) {
+    LettuceCommand<Long, Integer> _zadd(K key, Map<V, Double> items) {
         return _zadd(key, new ZAddArgs(), items);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Integer> zadd(K key, ZAddArgs args, ScoredValue<V>... items) {
-        return LettuceResult.toUni(_zadd(key, args, items)).map(Long::intValue);
+        return _zadd(key, args, items).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _zadd(K key, ZAddArgs args, ScoredValue<V>... items) {
+    final LettuceCommand<Long, Integer> _zadd(K key, ZAddArgs args, ScoredValue<V>... items) {
         nonNull(key, "key");
         nonNull(items, "items");
         nonNull(args, "args");
@@ -142,11 +143,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
         @SuppressWarnings("unchecked")
         io.lettuce.core.ScoredValue<byte[]>[] array = entries.toArray(new io.lettuce.core.ScoredValue[0]);
-        return () -> async.zadd(marshaller.encode(key), lettuceArgs, array);
+        return LettuceCommand.of(() -> async.zadd(marshaller.encode(key), lettuceArgs, array),
+                AbstractLettuceCommands::toInteger);
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _zadd(K key, ScoredValue<V>... items) {
+    final LettuceCommand<Long, Integer> _zadd(K key, ScoredValue<V>... items) {
         return _zadd(key, new ZAddArgs(), items);
     }
 
@@ -157,133 +159,123 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Double> zaddincr(K key, ZAddArgs args, double score, V value) {
-        return LettuceResult.toUni(_zaddincr(key, args, score, value));
+        return _zaddincr(key, args, score, value).toUni();
     }
 
-    Supplier<RedisFuture<Double>> _zaddincr(K key, ZAddArgs args, double score, V value) {
+    LettuceCommand<Double, Double> _zaddincr(K key, ZAddArgs args, double score, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
         nonNull(args, "args");
         io.lettuce.core.ZAddArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(args);
         double normalized = normalizeScore(score);
-        return () -> async.zaddincr(marshaller.encode(key), lettuceArgs, normalized, marshaller.encode(value));
+        return LettuceCommand.of(
+                () -> async.zaddincr(marshaller.encode(key), lettuceArgs, normalized, marshaller.encode(value)));
     }
 
-    Supplier<RedisFuture<Double>> _zaddincr(K key, double score, V value) {
+    LettuceCommand<Double, Double> _zaddincr(K key, double score, V value) {
         return _zaddincr(key, new ZAddArgs(), score, value);
     }
 
     @Override
     public Uni<Long> zcard(K key) {
-        return LettuceResult.toUni(_zcard(key)).map(AbstractLettuceCommands::orZero);
+        return _zcard(key).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zcard(K key) {
+    LettuceCommand<Long, Long> _zcard(K key) {
         nonNull(key, "key");
-        return () -> async.zcard(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.zcard(marshaller.encode(key)), AbstractLettuceCommands::orZero);
     }
 
     @Override
     public Uni<Long> zcount(K key, ScoreRange<Double> range) {
-        return LettuceResult.toUni(_zcount(key, range));
+        return _zcount(key, range).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zcount(K key, ScoreRange<Double> range) {
+    LettuceCommand<Long, Long> _zcount(K key, ScoreRange<Double> range) {
         nonNull(key, "key");
         nonNull(range, "range");
         io.lettuce.core.Range<Number> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceScoreRange(range);
-        return () -> async.zcount(marshaller.encode(key), lettuceRange);
+        return LettuceCommand.of(() -> async.zcount(marshaller.encode(key), lettuceRange));
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<V>> zdiff(K... keys) {
-        return LettuceResult.toUni(_zdiff(keys))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _zdiff(keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<byte[]>>> _zdiff(K... keys) {
+    final LettuceCommand<List<byte[]>, List<V>> _zdiff(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return () -> {
-                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
-            };
+            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return () -> async.zdiff(marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zdiff(marshaller.encodeAsArray(keys)), this::decodeListOfValueOrEmpty);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> zdiffWithScores(K... keys) {
-        return LettuceResult.toUni(_zdiffWithScores(keys)).map(this::decodeScoredValues);
+        return _zdiffWithScores(keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zdiffWithScores(K... keys) {
+    final LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zdiffWithScores(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return () -> {
-                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
-            };
+            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return () -> async.zdiffWithScores(marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zdiffWithScores(marshaller.encodeAsArray(keys)), this::decodeScoredValues);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Long> zdiffstore(K destination, K... keys) {
-        return LettuceResult.toUni(_zdiffstore(destination, keys));
+        return _zdiffstore(destination, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _zdiffstore(K destination, K... keys) {
+    final LettuceCommand<Long, Long> _zdiffstore(K destination, K... keys) {
         nonNull(destination, "destination");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return () -> {
-                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
-            };
+            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return () -> async.zdiffstore(marshaller.encode(destination), marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zdiffstore(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
     }
 
     @Override
     public Uni<Double> zincrby(K key, double increment, V value) {
-        return LettuceResult.toUni(_zincrby(key, increment, value));
+        return _zincrby(key, increment, value).toUni();
     }
 
-    Supplier<RedisFuture<Double>> _zincrby(K key, double increment, V value) {
+    LettuceCommand<Double, Double> _zincrby(K key, double increment, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
         double normalized = normalizeScore(increment);
-        return () -> async.zincrby(marshaller.encode(key), normalized, marshaller.encode(value));
+        return LettuceCommand.of(() -> async.zincrby(marshaller.encode(key), normalized, marshaller.encode(value)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<V>> zinter(ZAggregateArgs args, K... keys) {
-        return LettuceResult.toUni(_zinter(args, keys))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _zinter(args, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<byte[]>>> _zinter(ZAggregateArgs args, K... keys) {
+    final LettuceCommand<List<byte[]>, List<V>> _zinter(ZAggregateArgs args, K... keys) {
         nonNull(args, "args");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return () -> {
-                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
-            };
+            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
         io.lettuce.core.ZAggregateArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAggregateArgs(args);
-        return () -> async.zinter(lettuceArgs, marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zinter(lettuceArgs, marshaller.encodeAsArray(keys)),
+                this::decodeListOfValueOrEmpty);
     }
 
     @SafeVarargs
@@ -293,31 +285,29 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<byte[]>>> _zinter(K... keys) {
+    final LettuceCommand<List<byte[]>, List<V>> _zinter(K... keys) {
         return _zinter(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> zinterWithScores(ZAggregateArgs arguments, K... keys) {
-        return LettuceResult.toUni(_zinterWithScores(arguments, keys))
-                .map(this::decodeScoredValues);
+        return _zinterWithScores(arguments, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zinterWithScores(ZAggregateArgs arguments,
-            K... keys) {
+    final LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zinterWithScores(
+            ZAggregateArgs arguments, K... keys) {
         nonNull(arguments, "arguments");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return () -> {
-                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
-            };
+            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
         io.lettuce.core.ZAggregateArgs lettuceArgs = LettuceSortedSetCommandsConverters
                 .toLettuceZAggregateArgs(arguments);
-        return () -> async.zinterWithScores(lettuceArgs, marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zinterWithScores(lettuceArgs, marshaller.encodeAsArray(keys)),
+                this::decodeScoredValues);
     }
 
     @SafeVarargs
@@ -327,66 +317,61 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zinterWithScores(K... keys) {
+    final LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zinterWithScores(K... keys) {
         return _zinterWithScores(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Long> zintercard(K... keys) {
-        return LettuceResult.toUni(_zintercard(keys));
+        return _zintercard(keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _zintercard(K... keys) {
+    final LettuceCommand<Long, Long> _zintercard(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return () -> {
-                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
-            };
+            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return () -> async.zintercard(marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zintercard(marshaller.encodeAsArray(keys)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Long> zintercard(long limit, K... keys) {
-        return LettuceResult.toUni(_zintercard(limit, keys));
+        return _zintercard(limit, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _zintercard(long limit, K... keys) {
+    final LettuceCommand<Long, Long> _zintercard(long limit, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return () -> {
-                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
-            };
+            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
         positive(limit, "limit");
-        return () -> async.zintercard(limit, marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zintercard(limit, marshaller.encodeAsArray(keys)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Long> zinterstore(K destination, ZAggregateArgs arguments, K... keys) {
-        return LettuceResult.toUni(_zinterstore(destination, arguments, keys));
+        return _zinterstore(destination, arguments, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _zinterstore(K destination, ZAggregateArgs arguments, K... keys) {
+    final LettuceCommand<Long, Long> _zinterstore(K destination, ZAggregateArgs arguments, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return () -> {
-                throw new IllegalArgumentException("`keys` must contain at least 2 keys");
-            };
+            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
         nonNull(arguments, "arguments");
         nonNull(destination, "destination");
         io.lettuce.core.ZStoreArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZStoreArgs(arguments);
-        return () -> async.zinterstore(marshaller.encode(destination), lettuceArgs, marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(
+                () -> async.zinterstore(marshaller.encode(destination), lettuceArgs, marshaller.encodeAsArray(keys)));
     }
 
     @SafeVarargs
@@ -396,342 +381,343 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _zinterstore(K destination, K... keys) {
+    final LettuceCommand<Long, Long> _zinterstore(K destination, K... keys) {
         return _zinterstore(destination, DEFAULT_INSTANCE_AGG, keys);
     }
 
     @Override
     public Uni<Long> zlexcount(K key, Range<String> range) {
-        return LettuceResult.toUni(_zlexcount(key, range));
+        return _zlexcount(key, range).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zlexcount(K key, Range<String> range) {
+    LettuceCommand<Long, Long> _zlexcount(K key, Range<String> range) {
         nonNull(key, "key");
         nonNull(range, "range");
         io.lettuce.core.Range<byte[]> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceLexRange(range);
-        return () -> async.zlexcount(marshaller.encode(key), lettuceRange);
+        return LettuceCommand.of(() -> async.zlexcount(marshaller.encode(key), lettuceRange));
     }
 
     @SafeVarargs
     @Override
     public final Uni<ScoredValue<V>> zmpopMin(K... keys) {
-        return LettuceResult.toUni(_zmpopMin(keys)).map(this::decodePopped);
+        return _zmpopMin(keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>>> _zmpopMin(K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, ScoredValue<V>> _zmpopMin(
+            K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return () -> async.zmpop(ZPopArgs.Builder.min(), marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zmpop(ZPopArgs.Builder.min(), marshaller.encodeAsArray(keys)),
+                this::decodePopped);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> zmpopMin(int count, K... keys) {
-        return LettuceResult.toUni(_zmpopMin(count, keys)).map(this::decodePoppedList);
+        return _zmpopMin(count, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>>> _zmpopMin(
-            int count,
-            K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>, List<ScoredValue<V>>> _zmpopMin(
+            int count, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         positive(count, "count");
-        return () -> async.zmpop(count, ZPopArgs.Builder.min(), marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zmpop(count, ZPopArgs.Builder.min(), marshaller.encodeAsArray(keys)),
+                this::decodePoppedList);
     }
 
     @SafeVarargs
     @Override
     public final Uni<ScoredValue<V>> zmpopMax(K... keys) {
-        return LettuceResult.toUni(_zmpopMax(keys)).map(this::decodePopped);
+        return _zmpopMax(keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>>> _zmpopMax(K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, ScoredValue<V>> _zmpopMax(
+            K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return () -> async.zmpop(ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zmpop(ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys)),
+                this::decodePopped);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> zmpopMax(int count, K... keys) {
-        return LettuceResult.toUni(_zmpopMax(count, keys)).map(this::decodePoppedList);
+        return _zmpopMax(count, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>>> _zmpopMax(
-            int count,
-            K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>, List<ScoredValue<V>>> _zmpopMax(
+            int count, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         positive(count, "count");
-        return () -> async.zmpop(count, ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zmpop(count, ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys)),
+                this::decodePoppedList);
     }
 
     @SafeVarargs
     @Override
     public final Uni<ScoredValue<V>> bzmpopMin(Duration timeout, K... keys) {
-        return LettuceResult.toUni(_bzmpopMin(timeout, keys)).map(this::decodePopped);
+        return _bzmpopMin(timeout, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>>> _bzmpopMin(
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, ScoredValue<V>> _bzmpopMin(
             Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.bzmpop(timeout.getSeconds(), ZPopArgs.Builder.min(), marshaller.encodeAsArray(keys));
             }
             return async.bzmpop(toFractionalSeconds(timeout), ZPopArgs.Builder.min(), marshaller.encodeAsArray(keys));
-        };
+        }, this::decodePopped);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> bzmpopMin(Duration timeout, int count, K... keys) {
-        return LettuceResult.toUni(_bzmpopMin(timeout, count, keys))
-                .map(this::decodePoppedList);
+        return _bzmpopMin(timeout, count, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>>> _bzmpopMin(
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>, List<ScoredValue<V>>> _bzmpopMin(
             Duration timeout, int count, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         positive(count, "count");
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.min(),
                         marshaller.encodeAsArray(keys));
             }
             return async.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.min(),
                     marshaller.encodeAsArray(keys));
-        };
+        }, this::decodePoppedList);
     }
 
     @SafeVarargs
     @Override
     public final Uni<ScoredValue<V>> bzmpopMax(Duration timeout, K... keys) {
-        return LettuceResult.toUni(_bzmpopMax(timeout, keys)).map(this::decodePopped);
+        return _bzmpopMax(timeout, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>>> _bzmpopMax(
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, ScoredValue<V>> _bzmpopMax(
             Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.bzmpop(timeout.getSeconds(), ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys));
             }
             return async.bzmpop(toFractionalSeconds(timeout), ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys));
-        };
+        }, this::decodePopped);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> bzmpopMax(Duration timeout, int count, K... keys) {
-        return LettuceResult.toUni(_bzmpopMax(timeout, count, keys))
-                .map(this::decodePoppedList);
+        return _bzmpopMax(timeout, count, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>>> _bzmpopMax(
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>, List<ScoredValue<V>>> _bzmpopMax(
             Duration timeout, int count, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         positive(count, "count");
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys));
+                return async.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.max(),
+                        marshaller.encodeAsArray(keys));
             }
-            return async.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys));
-        };
+            return async.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.max(),
+                    marshaller.encodeAsArray(keys));
+        }, this::decodePoppedList);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<Double>> zmscore(K key, V... values) {
-        return LettuceResult.toUni(_zmscore(key, values)).map(AbstractLettuceCommands::orEmpty);
+        return _zmscore(key, values).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<Double>>> _zmscore(K key, V... values) {
+    final LettuceCommand<List<Double>, List<Double>> _zmscore(K key, V... values) {
         nonNull(key, "key");
         notNullOrEmpty(values, "values");
         doesNotContainNull(values, "values");
-        return () -> async.zmscore(marshaller.encode(key), marshaller.encodeAsArray(values));
+        return LettuceCommand.of(() -> async.zmscore(marshaller.encode(key), marshaller.encodeAsArray(values)),
+                AbstractLettuceCommands::orEmpty);
     }
 
     @Override
     public Uni<ScoredValue<V>> zpopmax(K key) {
-        return LettuceResult.toUni(_zpopmax(key)).map(this::decodeScoredValueOrEmpty);
+        return _zpopmax(key).toUni();
     }
 
-    Supplier<RedisFuture<io.lettuce.core.ScoredValue<byte[]>>> _zpopmax(K key) {
+    LettuceCommand<io.lettuce.core.ScoredValue<byte[]>, ScoredValue<V>> _zpopmax(K key) {
         nonNull(key, "key");
-        return () -> async.zpopmax(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.zpopmax(marshaller.encode(key)), this::decodeScoredValueOrEmpty);
     }
 
     @Override
     public Uni<List<ScoredValue<V>>> zpopmax(K key, int count) {
-        return LettuceResult.toUni(_zpopmax(key, count)).map(this::decodeScoredValues);
+        return _zpopmax(key, count).toUni();
     }
 
-    Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zpopmax(K key, int count) {
+    LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zpopmax(K key, int count) {
         nonNull(key, "key");
         positive(count, "count");
-        return () -> async.zpopmax(marshaller.encode(key), count);
+        return LettuceCommand.of(() -> async.zpopmax(marshaller.encode(key), count), this::decodeScoredValues);
     }
 
     @Override
     public Uni<ScoredValue<V>> zpopmin(K key) {
-        return LettuceResult.toUni(_zpopmin(key)).map(this::decodeScoredValueOrEmpty);
+        return _zpopmin(key).toUni();
     }
 
-    Supplier<RedisFuture<io.lettuce.core.ScoredValue<byte[]>>> _zpopmin(K key) {
+    LettuceCommand<io.lettuce.core.ScoredValue<byte[]>, ScoredValue<V>> _zpopmin(K key) {
         nonNull(key, "key");
-        return () -> async.zpopmin(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.zpopmin(marshaller.encode(key)), this::decodeScoredValueOrEmpty);
     }
 
     @Override
     public Uni<List<ScoredValue<V>>> zpopmin(K key, int count) {
-        return LettuceResult.toUni(_zpopmin(key, count)).map(this::decodeScoredValues);
+        return _zpopmin(key, count).toUni();
     }
 
-    Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zpopmin(K key, int count) {
+    LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zpopmin(K key, int count) {
         nonNull(key, "key");
         positive(count, "count");
-        return () -> async.zpopmin(marshaller.encode(key), count);
+        return LettuceCommand.of(() -> async.zpopmin(marshaller.encode(key), count), this::decodeScoredValues);
     }
 
     @Override
     public Uni<V> zrandmember(K key) {
-        return LettuceResult.toUni(_zrandmember(key)).map(this::decodeV);
+        return _zrandmember(key).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _zrandmember(K key) {
+    LettuceCommand<byte[], V> _zrandmember(K key) {
         nonNull(key, "key");
-        return () -> async.zrandmember(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.zrandmember(marshaller.encode(key)), this::decodeV);
     }
 
     @Override
     public Uni<List<V>> zrandmember(K key, int count) {
-        return LettuceResult.toUni(_zrandmember(key, count))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _zrandmember(key, count).toUni();
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _zrandmember(K key, int count) {
+    LettuceCommand<List<byte[]>, List<V>> _zrandmember(K key, int count) {
         nonNull(key, "key");
         positive(count, "count");
-        return () -> async.zrandmember(marshaller.encode(key), count);
+        return LettuceCommand.of(() -> async.zrandmember(marshaller.encode(key), count), this::decodeListOfValueOrEmpty);
     }
 
     @Override
     public Uni<ScoredValue<V>> zrandmemberWithScores(K key) {
-        return LettuceResult.toUni(_zrandmemberWithScores(key)).map(this::decodeScoredValueOrEmpty);
+        return _zrandmemberWithScores(key).toUni();
     }
 
-    Supplier<RedisFuture<io.lettuce.core.ScoredValue<byte[]>>> _zrandmemberWithScores(K key) {
+    LettuceCommand<io.lettuce.core.ScoredValue<byte[]>, ScoredValue<V>> _zrandmemberWithScores(K key) {
         nonNull(key, "key");
-        return () -> async.zrandmemberWithScores(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.zrandmemberWithScores(marshaller.encode(key)),
+                this::decodeScoredValueOrEmpty);
     }
 
     @Override
     public Uni<List<ScoredValue<V>>> zrandmemberWithScores(K key, int count) {
-        return LettuceResult.toUni(_zrandmemberWithScores(key, count))
-                .map(this::decodeScoredValues);
+        return _zrandmemberWithScores(key, count).toUni();
     }
 
-    Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zrandmemberWithScores(K key, int count) {
+    LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zrandmemberWithScores(K key,
+            int count) {
         nonNull(key, "key");
         positive(count, "count");
-        return () -> async.zrandmemberWithScores(marshaller.encode(key), count);
+        return LettuceCommand.of(() -> async.zrandmemberWithScores(marshaller.encode(key), count),
+                this::decodeScoredValues);
     }
 
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, ScoredValue<V>>> bzpopmin(Duration timeout, K... keys) {
-        return LettuceResult.toUni(_bzpopmin(timeout, keys)).map(this::decodeKeyValue);
+        return _bzpopmin(timeout, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>>> _bzpopmin(
-            Duration timeout,
-            K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, KeyValue<K, ScoredValue<V>>> _bzpopmin(
+            Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.bzpopmin(timeout.getSeconds(), marshaller.encodeAsArray(keys));
             }
             return async.bzpopmin(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
-        };
+        }, this::decodeKeyValue);
     }
 
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, ScoredValue<V>>> bzpopmax(Duration timeout, K... keys) {
-        return LettuceResult.toUni(_bzpopmax(timeout, keys)).map(this::decodeKeyValue);
+        return _bzpopmax(timeout, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>>> _bzpopmax(
-            Duration timeout,
-            K... keys) {
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, KeyValue<K, ScoredValue<V>>> _bzpopmax(
+            Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
-        return () -> {
+        return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
                 return async.bzpopmax(timeout.getSeconds(), marshaller.encodeAsArray(keys));
             }
             return async.bzpopmax(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
-        };
+        }, this::decodeKeyValue);
     }
 
     @Override
     public Uni<List<V>> zrange(K key, long start, long stop, ZRangeArgs args) {
-        return LettuceResult.toUni(_zrange(key, start, stop, args))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _zrange(key, start, stop, args).toUni();
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _zrange(K key, long start, long stop, ZRangeArgs args) {
+    LettuceCommand<List<byte[]>, List<V>> _zrange(K key, long start, long stop, ZRangeArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
         //TODO requires lettuce#3681
         throw new UnsupportedOperationException("Operation not supported");
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _zrange(K key, long start, long stop) {
+    LettuceCommand<List<byte[]>, List<V>> _zrange(K key, long start, long stop) {
         return _zrange(key, start, stop, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<List<ScoredValue<V>>> zrangeWithScores(K key, long start, long stop, ZRangeArgs args) {
-        return LettuceResult.toUni(_zrangeWithScores(key, start, stop, args))
-                .map(this::decodeScoredValues);
+        return _zrangeWithScores(key, start, stop, args).toUni();
     }
 
-    Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zrangeWithScores(K key, long start, long stop,
-            ZRangeArgs args) {
+    LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zrangeWithScores(K key, long start,
+            long stop, ZRangeArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
         //TODO requires lettuce#3681
         throw new UnsupportedOperationException("Operation not supported");
     }
 
-    Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zrangeWithScores(K key, long start, long stop) {
+    LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zrangeWithScores(K key, long start,
+            long stop) {
         return _zrangeWithScores(key, start, stop, DEFAULT_INSTANCE_RANGE);
     }
 
@@ -747,12 +733,10 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<V>> zrangebylex(K key, Range<String> range, ZRangeArgs args) {
-        return LettuceResult.toUni(_zrangebylex(key, range, args))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _zrangebylex(key, range, args).toUni();
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _zrangebylex(K key, Range<String> range, ZRangeArgs args) {
+    LettuceCommand<List<byte[]>, List<V>> _zrangebylex(K key, Range<String> range, ZRangeArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
         nonNull(range, "range");
@@ -760,7 +744,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         throw new UnsupportedOperationException("Operation not supported");
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _zrangebylex(K key, Range<String> range) {
+    LettuceCommand<List<byte[]>, List<V>> _zrangebylex(K key, Range<String> range) {
         return _zrangebylex(key, range, DEFAULT_INSTANCE_RANGE);
     }
 
@@ -771,12 +755,10 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<V>> zrangebyscore(K key, ScoreRange<Double> range, ZRangeArgs args) {
-        return LettuceResult.toUni(_zrangebyscore(key, range, args))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _zrangebyscore(key, range, args).toUni();
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _zrangebyscore(K key, ScoreRange<Double> range, ZRangeArgs args) {
+    LettuceCommand<List<byte[]>, List<V>> _zrangebyscore(K key, ScoreRange<Double> range, ZRangeArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
         nonNull(range, "range");
@@ -784,17 +766,16 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         throw new UnsupportedOperationException("Operation not supported");
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _zrangebyscore(K key, ScoreRange<Double> range) {
+    LettuceCommand<List<byte[]>, List<V>> _zrangebyscore(K key, ScoreRange<Double> range) {
         return _zrangebyscore(key, range, DEFAULT_INSTANCE_RANGE);
     }
 
     @Override
     public Uni<List<ScoredValue<V>>> zrangebyscoreWithScores(K key, ScoreRange<Double> range, ZRangeArgs args) {
-        return LettuceResult.toUni(_zrangebyscoreWithScores(key, range, args))
-                .map(this::decodeScoredValues);
+        return _zrangebyscoreWithScores(key, range, args).toUni();
     }
 
-    Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zrangebyscoreWithScores(K key,
+    LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zrangebyscoreWithScores(K key,
             ScoreRange<Double> range, ZRangeArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
@@ -803,7 +784,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         throw new UnsupportedOperationException("Operation not supported");
     }
 
-    Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zrangebyscoreWithScores(K key,
+    LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zrangebyscoreWithScores(K key,
             ScoreRange<Double> range) {
         return _zrangebyscoreWithScores(key, range, DEFAULT_INSTANCE_RANGE);
     }
@@ -820,10 +801,10 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Long> zrangestore(K dst, K src, long min, long max, ZRangeArgs args) {
-        return LettuceResult.toUni(_zrangestore(dst, src, min, max, args));
+        return _zrangestore(dst, src, min, max, args).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zrangestore(K dst, K src, long min, long max, ZRangeArgs args) {
+    LettuceCommand<Long, Long> _zrangestore(K dst, K src, long min, long max, ZRangeArgs args) {
         nonNull(dst, "dst");
         nonNull(src, "src");
         nonNull(args, "args");
@@ -831,7 +812,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         throw new UnsupportedOperationException("Operation not supported");
     }
 
-    Supplier<RedisFuture<Long>> _zrangestore(K dst, K src, long min, long max) {
+    LettuceCommand<Long, Long> _zrangestore(K dst, K src, long min, long max) {
         return _zrangestore(dst, src, min, max, DEFAULT_INSTANCE_RANGE);
     }
 
@@ -842,10 +823,10 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Long> zrangestorebylex(K dst, K src, Range<String> range, ZRangeArgs args) {
-        return LettuceResult.toUni(_zrangestorebylex(dst, src, range, args));
+        return _zrangestorebylex(dst, src, range, args).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zrangestorebylex(K dst, K src, Range<String> range, ZRangeArgs args) {
+    LettuceCommand<Long, Long> _zrangestorebylex(K dst, K src, Range<String> range, ZRangeArgs args) {
         nonNull(dst, "dst");
         nonNull(src, "src");
         nonNull(range, "range");
@@ -854,7 +835,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         throw new UnsupportedOperationException("Operation not supported");
     }
 
-    Supplier<RedisFuture<Long>> _zrangestorebylex(K dst, K src, Range<String> range) {
+    LettuceCommand<Long, Long> _zrangestorebylex(K dst, K src, Range<String> range) {
         return _zrangestorebylex(dst, src, range, DEFAULT_INSTANCE_RANGE);
     }
 
@@ -865,10 +846,10 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Long> zrangestorebyscore(K dst, K src, ScoreRange<Double> range, ZRangeArgs args) {
-        return LettuceResult.toUni(_zrangestorebyscore(dst, src, range, args));
+        return _zrangestorebyscore(dst, src, range, args).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zrangestorebyscore(K dst, K src, ScoreRange<Double> range, ZRangeArgs args) {
+    LettuceCommand<Long, Long> _zrangestorebyscore(K dst, K src, ScoreRange<Double> range, ZRangeArgs args) {
         nonNull(dst, "dst");
         nonNull(src, "src");
         nonNull(range, "range");
@@ -877,7 +858,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         throw new UnsupportedOperationException("Operation not supported");
     }
 
-    Supplier<RedisFuture<Long>> _zrangestorebyscore(K dst, K src, ScoreRange<Double> range) {
+    LettuceCommand<Long, Long> _zrangestorebyscore(K dst, K src, ScoreRange<Double> range) {
         return _zrangestorebyscore(dst, src, range, DEFAULT_INSTANCE_RANGE);
     }
 
@@ -888,72 +869,73 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Long> zrank(K key, V value) {
-        return LettuceResult.toUni(_zrank(key, value));
+        return _zrank(key, value).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zrank(K key, V value) {
+    LettuceCommand<Long, Long> _zrank(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return () -> async.zrank(marshaller.encode(key), marshaller.encode(value));
+        return LettuceCommand.of(() -> async.zrank(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Integer> zrem(K key, V... values) {
-        return LettuceResult.toUni(_zrem(key, values)).map(Long::intValue);
+        return _zrem(key, values).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _zrem(K key, V... values) {
+    final LettuceCommand<Long, Integer> _zrem(K key, V... values) {
         nonNull(key, "key");
         notNullOrEmpty(values, "values");
         doesNotContainNull(values, "values");
-        return () -> async.zrem(marshaller.encode(key), marshaller.encodeAsArray(values));
+        return LettuceCommand.of(() -> async.zrem(marshaller.encode(key), marshaller.encodeAsArray(values)),
+                AbstractLettuceCommands::toInteger);
     }
 
     @Override
     public Uni<Long> zremrangebylex(K key, Range<String> range) {
-        return LettuceResult.toUni(_zremrangebylex(key, range));
+        return _zremrangebylex(key, range).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zremrangebylex(K key, Range<String> range) {
+    LettuceCommand<Long, Long> _zremrangebylex(K key, Range<String> range) {
         nonNull(key, "key");
         nonNull(range, "range");
         io.lettuce.core.Range<byte[]> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceLexRange(range);
-        return () -> async.zremrangebylex(marshaller.encode(key), lettuceRange);
+        return LettuceCommand.of(() -> async.zremrangebylex(marshaller.encode(key), lettuceRange));
     }
 
     @Override
     public Uni<Long> zremrangebyrank(K key, long start, long stop) {
-        return LettuceResult.toUni(_zremrangebyrank(key, start, stop));
+        return _zremrangebyrank(key, start, stop).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zremrangebyrank(K key, long start, long stop) {
+    LettuceCommand<Long, Long> _zremrangebyrank(K key, long start, long stop) {
         nonNull(key, "key");
-        return () -> async.zremrangebyrank(marshaller.encode(key), start, stop);
+        return LettuceCommand.of(() -> async.zremrangebyrank(marshaller.encode(key), start, stop));
     }
 
     @Override
     public Uni<Long> zremrangebyscore(K key, ScoreRange<Double> range) {
-        return LettuceResult.toUni(_zremrangebyscore(key, range));
+        return _zremrangebyscore(key, range).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zremrangebyscore(K key, ScoreRange<Double> range) {
+    LettuceCommand<Long, Long> _zremrangebyscore(K key, ScoreRange<Double> range) {
         nonNull(key, "key");
         nonNull(range, "range");
         io.lettuce.core.Range<Number> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceScoreRange(range);
-        return () -> async.zremrangebyscore(marshaller.encode(key), lettuceRange);
+        return LettuceCommand.of(() -> async.zremrangebyscore(marshaller.encode(key), lettuceRange));
     }
 
     @Override
     public Uni<Long> zrevrank(K key, V value) {
-        return LettuceResult.toUni(_zrevrank(key, value));
+        return _zrevrank(key, value).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _zrevrank(K key, V value) {
+    LettuceCommand<Long, Long> _zrevrank(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return () -> async.zrevrank(marshaller.encode(key), marshaller.encode(value));
+        return LettuceCommand.of(() -> async.zrevrank(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @Override
@@ -972,30 +954,29 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Double> zscore(K key, V value) {
-        return LettuceResult.toUni(_zscore(key, value));
+        return _zscore(key, value).toUni();
     }
 
-    Supplier<RedisFuture<Double>> _zscore(K key, V value) {
+    LettuceCommand<Double, Double> _zscore(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return () -> async.zscore(marshaller.encode(key), marshaller.encode(value));
+        return LettuceCommand.of(() -> async.zscore(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<V>> zunion(ZAggregateArgs args, K... keys) {
-        return LettuceResult.toUni(_zunion(args, keys))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _zunion(args, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<byte[]>>> _zunion(ZAggregateArgs args, K... keys) {
+    final LettuceCommand<List<byte[]>, List<V>> _zunion(ZAggregateArgs args, K... keys) {
         nonNull(args, "args");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         io.lettuce.core.ZAggregateArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAggregateArgs(args);
-        return () -> async.zunion(lettuceArgs, marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zunion(lettuceArgs, marshaller.encodeAsArray(keys)),
+                this::decodeListOfValueOrEmpty);
     }
 
     @SafeVarargs
@@ -1005,7 +986,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<byte[]>>> _zunion(K... keys) {
+    final LettuceCommand<List<byte[]>, List<V>> _zunion(K... keys) {
         return _zunion(DEFAULT_INSTANCE_AGG, keys);
     }
 
@@ -1016,40 +997,42 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zunionWithScores(K... keys) {
+    final LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zunionWithScores(K... keys) {
         return _zunionWithScores(DEFAULT_INSTANCE_AGG, keys);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> zunionWithScores(ZAggregateArgs args, K... keys) {
-        return LettuceResult.toUni(_zunionWithScores(args, keys))
-                .map(this::decodeScoredValues);
+        return _zunionWithScores(args, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<io.lettuce.core.ScoredValue<byte[]>>>> _zunionWithScores(ZAggregateArgs args, K... keys) {
+    final LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zunionWithScores(
+            ZAggregateArgs args, K... keys) {
         nonNull(args, "args");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         io.lettuce.core.ZAggregateArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAggregateArgs(args);
-        return () -> async.zunionWithScores(lettuceArgs, marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.zunionWithScores(lettuceArgs, marshaller.encodeAsArray(keys)),
+                this::decodeScoredValues);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Long> zunionstore(K destination, ZAggregateArgs args, K... keys) {
-        return LettuceResult.toUni(_zunionstore(destination, args, keys));
+        return _zunionstore(destination, args, keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _zunionstore(K destination, ZAggregateArgs args, K... keys) {
+    final LettuceCommand<Long, Long> _zunionstore(K destination, ZAggregateArgs args, K... keys) {
         nonNull(destination, "destination");
         nonNull(args, "args");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         io.lettuce.core.ZStoreArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZStoreArgs(args);
-        return () -> async.zunionstore(marshaller.encode(destination), lettuceArgs, marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(
+                () -> async.zunionstore(marshaller.encode(destination), lettuceArgs, marshaller.encodeAsArray(keys)));
     }
 
     @SafeVarargs
@@ -1059,7 +1042,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _zunionstore(K destination, K... keys) {
+    final LettuceCommand<Long, Long> _zunionstore(K destination, K... keys) {
         return _zunionstore(destination, DEFAULT_INSTANCE_AGG, keys);
     }
 
@@ -1070,29 +1053,27 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<V>> sort(K key, SortArgs sortArguments) {
-        return LettuceResult.toUni(_sort(key, sortArguments))
-                .map(AbstractLettuceCommands::orEmpty)
-                .map(this::decodeListOfValue);
+        return _sort(key, sortArguments).toUni();
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _sort(K key, SortArgs sortArguments) {
+    LettuceCommand<List<byte[]>, List<V>> _sort(K key, SortArgs sortArguments) {
         nonNull(key, "key");
         nonNull(sortArguments, "sortArguments");
         io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(sortArguments);
-        return () -> async.sort(marshaller.encode(key), lettuceArgs);
+        return LettuceCommand.of(() -> async.sort(marshaller.encode(key), lettuceArgs), this::decodeListOfValueOrEmpty);
     }
 
     @Override
     public Uni<Long> sortAndStore(K key, K destination, SortArgs sortArguments) {
-        return LettuceResult.toUni(_sortAndStore(key, destination, sortArguments));
+        return _sortAndStore(key, destination, sortArguments).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _sortAndStore(K key, K destination, SortArgs args) {
+    LettuceCommand<Long, Long> _sortAndStore(K key, K destination, SortArgs args) {
         nonNull(key, "key");
         nonNull(destination, "destination");
         nonNull(args, "args");
         io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(args);
-        return () -> async.sortStore(marshaller.encode(key), lettuceArgs, marshaller.encode(destination));
+        return LettuceCommand.of(() -> async.sortStore(marshaller.encode(key), lettuceArgs, marshaller.encode(destination)));
     }
 
     @Override
@@ -1100,14 +1081,14 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         return sortAndStore(key, destination, new SortArgs());
     }
 
-    ScoredValue<V> decodeScoredValue(io.lettuce.core.ScoredValue<byte[]> value) {
+    private ScoredValue<V> decodeScoredValue(io.lettuce.core.ScoredValue<byte[]> value) {
         if (value == null || !value.hasValue()) {
             return null;
         }
         return ScoredValue.of(decodeV(value.getValue()), value.getScore());
     }
 
-    ScoredValue<V> decodeScoredValueOrEmpty(io.lettuce.core.ScoredValue<byte[]> value) {
+    private ScoredValue<V> decodeScoredValueOrEmpty(io.lettuce.core.ScoredValue<byte[]> value) {
         ScoredValue<V> converted = decodeScoredValue(value);
         if (converted == null) {
             return ScoredValue.empty();
@@ -1115,7 +1096,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         return converted;
     }
 
-    List<ScoredValue<V>> decodeScoredValues(List<io.lettuce.core.ScoredValue<byte[]>> values) {
+    private List<ScoredValue<V>> decodeScoredValues(List<io.lettuce.core.ScoredValue<byte[]>> values) {
         if (values == null) {
             return List.of();
         }
@@ -1126,14 +1107,14 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         return result;
     }
 
-    ScoredValue<V> decodePopped(io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>> result) {
+    private ScoredValue<V> decodePopped(io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>> result) {
         if (result == null || !result.hasValue()) {
             return null;
         }
         return decodeScoredValue(result.getValue());
     }
 
-    List<ScoredValue<V>> decodePoppedList(
+    private List<ScoredValue<V>> decodePoppedList(
             io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>> result) {
         if (result == null || !result.hasValue()) {
             return Collections.emptyList();
@@ -1141,7 +1122,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         return decodeScoredValues(result.getValue());
     }
 
-    KeyValue<K, ScoredValue<V>> decodeKeyValue(
+    private KeyValue<K, ScoredValue<V>> decodeKeyValue(
             io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>> result) {
         if (result == null || !result.hasValue()) {
             return null;
@@ -1149,7 +1130,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         return KeyValue.of(decodeK(result.getKey()), decodeScoredValue(result.getValue()));
     }
 
-    static double normalizeScore(double score) {
+    private static double normalizeScore(double score) {
         if (score == Double.MIN_VALUE) {
             return Double.NEGATIVE_INFINITY;
         }

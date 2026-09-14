@@ -27,6 +27,7 @@ import io.quarkus.redis.datasource.timeseries.ReactiveTransactionalTimeSeriesCom
 import io.quarkus.redis.datasource.topk.ReactiveTransactionalTopKCommands;
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
 import io.quarkus.redis.datasource.value.ReactiveTransactionalValueCommands;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveTransactionalHashCommandsImpl;
@@ -230,8 +231,8 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
                 }
             }
         }
-        return tx.enqueue(() -> connection.async().dispatch(type, output, commandArgs),
-                ignored -> output.toVertxResponse());
+        return tx.enqueue(LettuceCommand.of(() -> connection.async().dispatch(type, output, commandArgs),
+                ignored -> output.toVertxResponse()));
     }
 
     private static UnsupportedOperationException groupNotImplemented(String group) {

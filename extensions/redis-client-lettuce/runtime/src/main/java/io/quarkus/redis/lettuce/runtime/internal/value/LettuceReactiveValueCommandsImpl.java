@@ -9,7 +9,6 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 import java.lang.reflect.Type;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 
 import io.lettuce.core.KeyValue;
 import io.lettuce.core.RedisFuture;
@@ -27,7 +26,7 @@ import io.quarkus.redis.datasource.value.GetExArgs;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.SetArgs;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -55,58 +54,58 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
 
     @Override
     public Uni<Long> append(K key, V value) {
-        return LettuceResult.toUni(_append(key, value));
+        return _append(key, value).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _append(K key, V value) {
+    LettuceCommand<Long, Long> _append(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return () -> async.append(marshaller.encode(key), marshaller.encode(value));
+        return LettuceCommand.of(() -> async.append(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @Override
     public Uni<Long> decr(K key) {
-        return LettuceResult.toUni(_decr(key));
+        return _decr(key).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _decr(K key) {
+    LettuceCommand<Long, Long> _decr(K key) {
         nonNull(key, "key");
-        return () -> async.decr(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.decr(marshaller.encode(key)));
     }
 
     @Override
     public Uni<Long> decrby(K key, long amount) {
-        return LettuceResult.toUni(_decrby(key, amount));
+        return _decrby(key, amount).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _decrby(K key, long amount) {
+    LettuceCommand<Long, Long> _decrby(K key, long amount) {
         nonNull(key, "key");
-        return () -> async.decrby(marshaller.encode(key), amount);
+        return LettuceCommand.of(() -> async.decrby(marshaller.encode(key), amount));
     }
 
     @Override
     public Uni<V> get(K key) {
-        return LettuceResult.toUni(_get(key)).map(this::decodeV);
+        return _get(key).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _get(K key) {
+    LettuceCommand<byte[], V> _get(K key) {
         nonNull(key, "key");
-        return () -> async.get(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.get(marshaller.encode(key)), this::decodeV);
     }
 
     @Override
     public Uni<V> getdel(K key) {
-        return LettuceResult.toUni(_getdel(key)).map(this::decodeV);
+        return _getdel(key).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _getdel(K key) {
+    LettuceCommand<byte[], V> _getdel(K key) {
         nonNull(key, "key");
-        return () -> async.getdel(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.getdel(marshaller.encode(key)), this::decodeV);
     }
 
     @Override
     public Uni<V> getex(K key, GetExArgs args) {
-        return LettuceResult.toUni(_getex(key, args)).map(this::decodeV);
+        return _getex(key, args).toUni();
     }
 
     @Override
@@ -114,88 +113,86 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return getex(key, (GetExArgs) args);
     }
 
-    Supplier<RedisFuture<byte[]>> _getex(K key, GetExArgs args) {
+    LettuceCommand<byte[], V> _getex(K key, GetExArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
         io.lettuce.core.GetExArgs lettuceArgs = LettuceValueCommandsConverters.toLettuceGetExArgs(args);
-        return () -> async.getex(marshaller.encode(key), lettuceArgs);
+        return LettuceCommand.of(() -> async.getex(marshaller.encode(key), lettuceArgs), this::decodeV);
     }
 
     @Override
     public Uni<String> getrange(K key, long start, long end) {
-        return LettuceResult.toUni(_getrange(key, start, end)).map(this::decodeString);
+        return _getrange(key, start, end).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _getrange(K key, long start, long end) {
+    LettuceCommand<byte[], String> _getrange(K key, long start, long end) {
         nonNull(key, "key");
         positiveOrZero(start, "start");
-        return () -> async.getrange(marshaller.encode(key), start, end);
+        return LettuceCommand.of(() -> async.getrange(marshaller.encode(key), start, end), this::decodeString);
     }
 
     @Deprecated
     @Override
     public Uni<V> getset(K key, V value) {
-        return LettuceResult.toUni(_getset(key, value)).map(this::decodeV);
+        return _getset(key, value).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _getset(K key, V value) {
+    LettuceCommand<byte[], V> _getset(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return () -> async.getset(marshaller.encode(key), marshaller.encode(value));
+        return LettuceCommand.of(() -> async.getset(marshaller.encode(key), marshaller.encode(value)), this::decodeV);
     }
 
     @Override
     public Uni<Long> incr(K key) {
-        return LettuceResult.toUni(_incr(key));
+        return _incr(key).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _incr(K key) {
+    LettuceCommand<Long, Long> _incr(K key) {
         nonNull(key, "key");
-        return () -> async.incr(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.incr(marshaller.encode(key)));
     }
 
     @Override
     public Uni<Long> incrby(K key, long amount) {
-        return LettuceResult.toUni(_incrby(key, amount));
+        return _incrby(key, amount).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _incrby(K key, long amount) {
+    LettuceCommand<Long, Long> _incrby(K key, long amount) {
         nonNull(key, "key");
-        return () -> async.incrby(marshaller.encode(key), amount);
+        return LettuceCommand.of(() -> async.incrby(marshaller.encode(key), amount));
     }
 
     @Override
     public Uni<Double> incrbyfloat(K key, double amount) {
-        return LettuceResult.toUni(_incrbyfloat(key, amount));
+        return _incrbyfloat(key, amount).toUni();
     }
 
-    Supplier<RedisFuture<Double>> _incrbyfloat(K key, double amount) {
+    LettuceCommand<Double, Double> _incrbyfloat(K key, double amount) {
         nonNull(key, "key");
-        return () -> async.incrbyfloat(marshaller.encode(key), amount);
+        return LettuceCommand.of(() -> async.incrbyfloat(marshaller.encode(key), amount));
     }
 
     @Override
     public Uni<String> lcs(K key1, K key2) {
-        return LettuceResult.toUni(_lcs(key1, key2))
-                .map(r -> r == null ? null : r.getMatchString());
+        return _lcs(key1, key2).toUni();
     }
 
-    Supplier<RedisFuture<StringMatchResult>> _lcs(K key1, K key2) {
+    LettuceCommand<StringMatchResult, String> _lcs(K key1, K key2) {
         nonNull(key1, "key1");
         nonNull(key2, "key2");
-        return () -> dispatchLcs(key1, key2, false);
+        return LettuceCommand.of(() -> dispatchLcs(key1, key2, false), r -> r == null ? null : r.getMatchString());
     }
 
     @Override
     public Uni<Long> lcsLength(K key1, K key2) {
-        return LettuceResult.toUni(_lcsLength(key1, key2))
-                .map(r -> r == null ? null : r.getLen());
+        return _lcsLength(key1, key2).toUni();
     }
 
-    Supplier<RedisFuture<StringMatchResult>> _lcsLength(K key1, K key2) {
+    LettuceCommand<StringMatchResult, Long> _lcsLength(K key1, K key2) {
         nonNull(key1, "key1");
         nonNull(key2, "key2");
-        return () -> dispatchLcs(key1, key2, true);
+        return LettuceCommand.of(() -> dispatchLcs(key1, key2, true), r -> r == null ? null : r.getLen());
     }
 
     /**
@@ -221,62 +218,63 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     @SafeVarargs
     @Override
     public final Uni<Map<K, V>> mget(K... keys) {
-        return LettuceResult.toUni(_mget(keys)).map(r -> decodeAsOrderedMap(keys, r));
+        return _mget(keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<List<KeyValue<byte[], byte[]>>>> _mget(K... keys) {
+    final LettuceCommand<List<KeyValue<byte[], byte[]>>, Map<K, V>> _mget(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return () -> async.mget(marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.mget(marshaller.encodeAsArray(keys)), r -> decodeAsOrderedMap(keys, r));
     }
 
     @Override
     public Uni<Void> mset(Map<K, V> map) {
-        return LettuceResult.toUni(_mset(map)).replaceWithVoid();
+        return _mset(map).toUni();
     }
 
-    Supplier<RedisFuture<String>> _mset(Map<K, V> map) {
+    LettuceCommand<String, Void> _mset(Map<K, V> map) {
         notNullOrEmpty(map, "map");
-        return () -> async.mset(encodeMap(map));
+        return LettuceCommand.discarding(() -> async.mset(encodeMap(map)));
     }
 
     @Override
     public Uni<Boolean> msetnx(Map<K, V> map) {
-        return LettuceResult.toUni(_msetnx(map));
+        return _msetnx(map).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _msetnx(Map<K, V> map) {
+    LettuceCommand<Boolean, Boolean> _msetnx(Map<K, V> map) {
         notNullOrEmpty(map, "map");
-        return () -> async.msetnx(encodeMap(map));
+        return LettuceCommand.of(() -> async.msetnx(encodeMap(map)));
     }
 
     @Override
     public Uni<Void> psetex(K key, long milliseconds, V value) {
-        return LettuceResult.toUni(_psetex(key, milliseconds, value)).replaceWithVoid();
+        return _psetex(key, milliseconds, value).toUni();
     }
 
-    Supplier<RedisFuture<String>> _psetex(K key, long milliseconds, V value) {
+    LettuceCommand<String, Void> _psetex(K key, long milliseconds, V value) {
         nonNull(key, "key");
         positive(milliseconds, "milliseconds");
         nonNull(value, "value");
-        return () -> async.psetex(marshaller.encode(key), milliseconds, marshaller.encode(value));
+        return LettuceCommand.discarding(() -> async.psetex(marshaller.encode(key), milliseconds, marshaller.encode(value)));
     }
 
     @Override
     public Uni<Void> set(K key, V value) {
-        return LettuceResult.toUni(_set(key, value)).replaceWithVoid();
+        return _set(key, value).discarding().toUni();
     }
 
-    Supplier<RedisFuture<String>> _set(K key, V value) {
+    LettuceCommand<String, Boolean> _set(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return () -> async.set(marshaller.encode(key), marshaller.encode(value));
+        return LettuceCommand.of(() -> async.set(marshaller.encode(key), marshaller.encode(value)),
+                AbstractLettuceCommands::isOk);
     }
 
     @Override
     public Uni<Void> set(K key, V value, SetArgs setArgs) {
-        return LettuceResult.toUni(_set(key, value, setArgs)).replaceWithVoid();
+        return _set(key, value, setArgs).discarding().toUni();
     }
 
     @Override
@@ -285,39 +283,39 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return set(key, value, (SetArgs) setArgs);
     }
 
-    Supplier<RedisFuture<String>> _set(K key, V value, SetArgs setArgs) {
+    LettuceCommand<String, Boolean> _set(K key, V value, SetArgs setArgs) {
         nonNull(key, "key");
         nonNull(value, "value");
         nonNull(setArgs, "setArgs");
         io.lettuce.core.SetArgs lettuceArgs = LettuceValueCommandsConverters.toLettuceSetArgs(setArgs);
-        return () -> async.set(marshaller.encode(key), marshaller.encode(value), lettuceArgs);
+        return LettuceCommand.of(() -> async.set(marshaller.encode(key), marshaller.encode(value), lettuceArgs),
+                AbstractLettuceCommands::isOk);
     }
 
     @Override
     public Uni<Boolean> setAndChanged(K key, V value) {
-        return LettuceResult.toUni(_set(key, value)).map(AbstractLettuceCommands::isOk);
+        return _set(key, value).toUni();
     }
 
     @Override
     public Uni<Boolean> setAndChanged(K key, V value, SetArgs setArgs) {
-        return LettuceResult.toUni(_set(key, value, setArgs))
-                .map(AbstractLettuceCommands::isOk);
+        return _set(key, value, setArgs).toUni();
     }
 
     @Override
     public Uni<V> setGet(K key, V value) {
-        return LettuceResult.toUni(_setGet(key, value)).map(this::decodeV);
+        return _setGet(key, value).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _setGet(K key, V value) {
+    LettuceCommand<byte[], V> _setGet(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return () -> async.setGet(marshaller.encode(key), marshaller.encode(value));
+        return LettuceCommand.of(() -> async.setGet(marshaller.encode(key), marshaller.encode(value)), this::decodeV);
     }
 
     @Override
     public Uni<V> setGet(K key, V value, SetArgs setArgs) {
-        return LettuceResult.toUni(_setGet(key, value, setArgs)).map(this::decodeV);
+        return _setGet(key, value, setArgs).toUni();
     }
 
     @Override
@@ -326,57 +324,58 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return setGet(key, value, (SetArgs) setArgs);
     }
 
-    Supplier<RedisFuture<byte[]>> _setGet(K key, V value, SetArgs setArgs) {
+    LettuceCommand<byte[], V> _setGet(K key, V value, SetArgs setArgs) {
         nonNull(key, "key");
         nonNull(value, "value");
         nonNull(setArgs, "setArgs");
         io.lettuce.core.SetArgs lettuceArgs = LettuceValueCommandsConverters.toLettuceSetArgs(setArgs);
-        return () -> async.setGet(marshaller.encode(key), marshaller.encode(value), lettuceArgs);
+        return LettuceCommand.of(() -> async.setGet(marshaller.encode(key), marshaller.encode(value), lettuceArgs),
+                this::decodeV);
     }
 
     @Override
     public Uni<Void> setex(K key, long seconds, V value) {
-        return LettuceResult.toUni(_setex(key, seconds, value)).replaceWithVoid();
+        return _setex(key, seconds, value).toUni();
     }
 
-    Supplier<RedisFuture<String>> _setex(K key, long seconds, V value) {
+    LettuceCommand<String, Void> _setex(K key, long seconds, V value) {
         nonNull(key, "key");
         positive(seconds, "seconds");
         nonNull(value, "value");
-        return () -> async.setex(marshaller.encode(key), seconds, marshaller.encode(value));
+        return LettuceCommand.discarding(() -> async.setex(marshaller.encode(key), seconds, marshaller.encode(value)));
     }
 
     @Override
     public Uni<Boolean> setnx(K key, V value) {
-        return LettuceResult.toUni(_setnx(key, value));
+        return _setnx(key, value).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _setnx(K key, V value) {
+    LettuceCommand<Boolean, Boolean> _setnx(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return () -> async.setnx(marshaller.encode(key), marshaller.encode(value));
+        return LettuceCommand.of(() -> async.setnx(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @Override
     public Uni<Long> setrange(K key, long offset, V value) {
-        return LettuceResult.toUni(_setrange(key, offset, value));
+        return _setrange(key, offset, value).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _setrange(K key, long offset, V value) {
+    LettuceCommand<Long, Long> _setrange(K key, long offset, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
         positiveOrZero(offset, "offset");
-        return () -> async.setrange(marshaller.encode(key), offset, marshaller.encode(value));
+        return LettuceCommand.of(() -> async.setrange(marshaller.encode(key), offset, marshaller.encode(value)));
     }
 
     @Override
     public Uni<Long> strlen(K key) {
-        return LettuceResult.toUni(_strlen(key));
+        return _strlen(key).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _strlen(K key) {
+    LettuceCommand<Long, Long> _strlen(K key) {
         nonNull(key, "key");
-        return () -> async.strlen(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.strlen(marshaller.encode(key)));
     }
 
 }

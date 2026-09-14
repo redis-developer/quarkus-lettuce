@@ -6,11 +6,11 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 import io.lettuce.core.RedisFuture;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
 import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
 import io.smallrye.mutiny.Uni;
@@ -25,9 +25,9 @@ import io.smallrye.mutiny.Uni;
  * result mapper, and reconstructs the typed {@link TransactionResult} once {@code EXEC} has
  * completed and all captured futures have settled.
  * <p>
- * The mapper for each command mirrors the {@code .map(...)} of the corresponding
- * non-transactional Lettuce command, so {@code TransactionResult.get(index)} returns the same
- * Java type the Vert.x backend produces.
+ * Each entry is a {@link LettuceCommand} carrying the same mapper the non-transactional
+ * implementation applies via {@link LettuceCommand#toUni()}, so
+ * {@code TransactionResult.get(index)} returns the same Java type the Vert.x backend produces.
  */
 public class LettuceTransactionHolder {
 
@@ -38,27 +38,29 @@ public class LettuceTransactionHolder {
     /**
      * Issues a command into the open {@code MULTI} block and records it for later assembly.
      * <p>
-     * The {@code command} supplier is invoked eagerly so the command is enqueued on the
-     * pinned connection in call order, which matches the order of the {@code EXEC} reply.
-     * A supplier that throws instead of issuing a command — the command implementations defer
-     * some argument validations that way — fails the returned {@link Uni} rather than the call,
-     * as the Vert.x backend and the non-transactional path do, and records no entry.
+     * The command's {@link LettuceCommand#call() call} supplier is invoked eagerly so the command
+     * is enqueued on the pinned connection in call order, which matches the order of the
+     * {@code EXEC} reply. A supplier that throws instead of issuing a command — the command
+     * implementations defer some argument validations that way — fails the returned {@link Uni}
+     * rather than the call, as the Vert.x backend and the non-transactional path do, and records
+     * no entry. The command's {@link LettuceCommand#mapper() mapper} is applied to the raw
+     * {@code EXEC} reply when the {@link TransactionResult} is assembled.
      *
-     * @param command supplier issuing the Lettuce async command, returning its {@link RedisFuture}
-     * @param mapper maps the command's raw result to the Quarkus-typed transaction entry
+     * @param command the command to issue, carrying its call and result mapper
      * @param <T> the raw Lettuce result type
+     * @param <R> the Quarkus result type recorded in the {@link TransactionResult}
      * @return a {@link Uni} completing immediately — the result is only available after {@code EXEC}
      */
     @SuppressWarnings("unchecked")
-    public <T> Uni<Void> enqueue(Supplier<RedisFuture<T>> command, Function<? super T, Object> mapper) {
+    public <T, R> Uni<Void> enqueue(LettuceCommand<T, R> command) {
         RedisFuture<T> future;
         try {
-            future = command.get();
+            future = command.call().get();
         } catch (RuntimeException e) {
             return Uni.createFrom().failure(e);
         }
         futures.add(future);
-        mappers.add((Function<Object, Object>) mapper);
+        mappers.add((Function<Object, Object>) command.mapper());
         return Uni.createFrom().voidItem();
     }
 
@@ -127,4 +129,5 @@ public class LettuceTransactionHolder {
         }
         return results;
     }
+
 }
