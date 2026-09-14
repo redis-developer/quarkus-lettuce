@@ -30,6 +30,7 @@ import io.quarkus.redis.datasource.sortedset.ZAddArgs;
 import io.quarkus.redis.datasource.sortedset.ZAggregateArgs;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
@@ -966,7 +967,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(args, "args");
         return new LettuceReactiveZScanCursorImpl<>(async, marshaller.encode(key),
-                LettuceSortedSetCommandsConverters.toLettuceScanArgs(args), this::decodeScoredValues);
+                LettuceCommonConverters.toLettuceScanArgs(args), this::decodeScoredValues);
     }
 
     @Override
@@ -1077,7 +1078,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     Supplier<RedisFuture<List<byte[]>>> _sort(K key, SortArgs sortArguments) {
         nonNull(key, "key");
         nonNull(sortArguments, "sortArguments");
-        io.lettuce.core.SortArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceSortArgs(sortArguments);
+        io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(sortArguments);
         return () -> async.sort(marshaller.encode(key), lettuceArgs);
     }
 
@@ -1090,7 +1091,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(destination, "destination");
         nonNull(args, "args");
-        io.lettuce.core.SortArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceSortArgs(args);
+        io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(args);
         return () -> async.sortStore(marshaller.encode(key), lettuceArgs, marshaller.encode(destination));
     }
 

@@ -1,13 +1,12 @@
-package io.quarkus.redis.lettuce.runtime.internal.set;
+package io.quarkus.redis.lettuce.runtime.internal;
 
 import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.SortArgs;
-import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 
-public final class LettuceSetCommandsConverters {
+public final class LettuceCommonConverters {
 
-    private LettuceSetCommandsConverters() {
+    private LettuceCommonConverters() {
         // Utility class
     }
 

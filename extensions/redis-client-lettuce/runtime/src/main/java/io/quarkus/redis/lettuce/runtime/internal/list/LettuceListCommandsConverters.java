@@ -1,7 +1,6 @@
 package io.quarkus.redis.lettuce.runtime.internal.list;
 
 import io.lettuce.core.protocol.CommandArgs;
-import io.quarkus.redis.datasource.SortArgs;
 import io.quarkus.redis.datasource.list.LPosArgs;
 import io.quarkus.redis.datasource.list.Position;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
@@ -14,15 +13,6 @@ public final class LettuceListCommandsConverters {
 
     public static io.lettuce.core.LPosArgs toLettuceLPosArgs(LPosArgs quarkus) {
         return new io.lettuce.core.LPosArgs() {
-            @Override
-            public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(quarkus, args);
-            }
-        };
-    }
-
-    public static io.lettuce.core.SortArgs toLettuceSortArgs(SortArgs quarkus) {
-        return new io.lettuce.core.SortArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
                 ArgReplay.replay(quarkus, args);

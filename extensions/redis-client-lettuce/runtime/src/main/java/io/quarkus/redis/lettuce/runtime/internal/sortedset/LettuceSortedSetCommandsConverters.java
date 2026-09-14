@@ -3,8 +3,6 @@ package io.quarkus.redis.lettuce.runtime.internal.sortedset;
 import java.nio.charset.StandardCharsets;
 
 import io.lettuce.core.protocol.CommandArgs;
-import io.quarkus.redis.datasource.ScanArgs;
-import io.quarkus.redis.datasource.SortArgs;
 import io.quarkus.redis.datasource.sortedset.Range;
 import io.quarkus.redis.datasource.sortedset.ScoreRange;
 import io.quarkus.redis.datasource.sortedset.ZAddArgs;
@@ -15,24 +13,6 @@ public final class LettuceSortedSetCommandsConverters {
 
     private LettuceSortedSetCommandsConverters() {
         // Utility class
-    }
-
-    public static io.lettuce.core.ScanArgs toLettuceScanArgs(ScanArgs quarkus) {
-        return new io.lettuce.core.ScanArgs() {
-            @Override
-            public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(quarkus.toArgs(), args);
-            }
-        };
-    }
-
-    public static io.lettuce.core.SortArgs toLettuceSortArgs(SortArgs quarkus) {
-        return new io.lettuce.core.SortArgs() {
-            @Override
-            public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(quarkus, args);
-            }
-        };
     }
 
     public static io.lettuce.core.ZAddArgs toLettuceZAddArgs(ZAddArgs quarkus) {
