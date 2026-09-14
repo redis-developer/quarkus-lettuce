@@ -1081,6 +1081,15 @@ See xref:redis-dev-services.adoc[Redis Dev Service].
 [[lettuce-backend]]
 == Use the Lettuce backend
 
+[CAUTION]
+====
+The Lettuce backend is considered experimental.
+
+In _experimental_ mode, early feedback is requested to mature the idea.
+There is no guarantee of stability nor long term presence in the platform until the solution matures.
+Feedback is welcome on our https://groups.google.com/d/forum/quarkus-dev[mailing list] or as issues in our https://github.com/quarkusio/quarkus/issues[GitHub issue tracker].
+====
+
 By default, `RedisDataSource` and `ReactiveRedisDataSource` are backed by the Vert.x Redis client.
 To route both data sources through https://lettuce.io/[Lettuce] instead, add the `quarkus-redis-client-lettuce`
 extension to your application:
@@ -1100,6 +1109,11 @@ credentials must be encoded in it, for example `rediss://user:password@host:6379
 The remaining client properties (`password`, `tls.*`, the pool, cluster and sentinel settings,
 `hosts-provider-name`, ...) are not applied yet.
 Lettuce and the libraries it needs in native mode (`LatencyUtils`, `HdrHistogram`) are pulled in transitively.
+
+The key, value (string), hash, list, set and sorted set command groups are implemented on the Lettuce backend,
+including their transactional variants. The other groups (geo, hyperloglog, bitmap, stream, pub/sub, JSON, bloom,
+cuckoo, count-min, top-k, graph, search, autosuggest and time series) are not implemented yet and throw an
+`UnsupportedOperationException` when requested from a data source.
 
 The data source methods exposing Vert.x types, such as `ReactiveRedisDataSource.getRedis()`, are not supported
 by the Lettuce backend and throw an `UnsupportedOperationException`; use `execute(...)` instead.
