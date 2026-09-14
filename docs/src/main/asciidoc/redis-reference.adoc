@@ -1093,8 +1093,12 @@ extension to your application:
 </dependency>
 ----
 
-Adding the dependency is the only switch: the extension builds on `quarkus-redis-client`, so the
-`quarkus.redis.*` configuration, the Dev Services and the health check are shared and work unchanged.
+Adding the dependency is the only switch: the extension builds on `quarkus-redis-client`, so clients are
+configured with the same `quarkus.redis.*` properties and the Redis Dev Services work unchanged.
+In this initial version the Lettuce data sources use only `quarkus.redis[.<name>].hosts` (the first URI; TLS and
+credentials must be encoded in it, for example `rediss://user:password@host:6379`), `timeout` and `active`.
+The remaining client properties (`password`, `tls.*`, the pool, cluster and sentinel settings,
+`hosts-provider-name`, ...) are not applied yet.
 Lettuce and the libraries it needs in native mode (`LatencyUtils`, `HdrHistogram`) are pulled in transitively.
 
 The data source methods exposing Vert.x types, such as `ReactiveRedisDataSource.getRedis()`, are not supported
