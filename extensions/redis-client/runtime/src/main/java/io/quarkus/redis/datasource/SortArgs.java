@@ -215,9 +215,7 @@ public class SortArgs implements RedisCommandExtraArguments {
             } else {
                 List<String> args = new ArrayList<>();
                 args.add("LIMIT");
-                if (offset != -1) {
-                    args.add(Long.toString(offset));
-                }
+                args.add(Long.toString(Math.max(offset, 0L)));
                 args.add(Long.toString(count));
                 return args;
             }

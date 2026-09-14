@@ -1,12 +1,10 @@
 package io.quarkus.redis.lettuce.runtime.internal.set;
 
+import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.SortArgs;
-import io.quarkus.redis.lettuce.runtime.internal.ArgTokenCursor;
+import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 
-/**
- * Converters bridging Quarkus Set Command argument types to their Lettuce equivalents.
- */
 public final class LettuceSetCommandsConverters {
 
     private LettuceSetCommandsConverters() {
@@ -14,42 +12,21 @@ public final class LettuceSetCommandsConverters {
     }
 
     public static io.lettuce.core.ScanArgs toLettuceScanArgs(ScanArgs quarkus) {
-        io.lettuce.core.ScanArgs lettuce = new io.lettuce.core.ScanArgs();
-        var cursor = new ArgTokenCursor(quarkus.toArgs());
-        while (cursor.hasNext()) {
-            String token = cursor.next();
-            switch (token) {
-                case "MATCH" -> lettuce.match(cursor.nextValue(token));
-                case "COUNT" -> lettuce.limit(cursor.nextLong(token));
-                default -> throw new IllegalStateException("Unexpected ScanArgs token: " + token);
+        return new io.lettuce.core.ScanArgs() {
+            @Override
+            public <K, V> void build(CommandArgs<K, V> args) {
+                ArgReplay.replay(quarkus.toArgs(), args);
             }
-        }
-        return lettuce;
+        };
     }
 
     public static io.lettuce.core.SortArgs toLettuceSortArgs(SortArgs quarkus) {
-        io.lettuce.core.SortArgs lettuce = new io.lettuce.core.SortArgs();
-        var cursor = new ArgTokenCursor(quarkus.toArgs());
-        while (cursor.hasNext()) {
-            String token = cursor.next();
-            switch (token) {
-                case "BY" -> lettuce.by(cursor.nextValue(token));
-                case "GET" -> lettuce.get(cursor.nextValue(token));
-                case "ASC" -> lettuce.asc();
-                case "DESC" -> lettuce.desc();
-                case "ALPHA" -> lettuce.alpha();
-                case "LIMIT" -> {
-                    long first = cursor.nextLong(token);
-                    if (cursor.nextIsNumeric()) {
-                        lettuce.limit(first, cursor.nextLong(token));
-                    } else {
-                        lettuce.limit(0, first);
-                    }
-                }
-                default -> throw new IllegalStateException("Unexpected SortArgs token: " + token);
+        return new io.lettuce.core.SortArgs() {
+            @Override
+            public <K, V> void build(CommandArgs<K, V> args) {
+                ArgReplay.replay(quarkus, args);
             }
-        }
-        return lettuce;
+        };
     }
 
 }
