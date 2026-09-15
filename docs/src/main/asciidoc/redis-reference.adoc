@@ -1117,7 +1117,11 @@ cuckoo, count-min, top-k, graph, search, autosuggest and time series) are not im
 
 The data source methods exposing Vert.x types, such as `ReactiveRedisDataSource.getRedis()`, are not supported
 by the Lettuce backend and throw an `UnsupportedOperationException`; use `execute(...)` instead.
-The Vert.x Redis client beans remain available and keep backing the health check and `quarkus-redis-cache`.
+
+Adding the extension routes every `RedisDataSource` and `ReactiveRedisDataSource` of the application through
+Lettuce, including the ones injected by other extensions. In this initial version the Vert.x Redis client is still
+created for the same clients: the health check pings it, and `quarkus-redis-cache` and the Micrometer Redis
+metrics keep using it. This is transitional; a Lettuce-based health check and metrics are planned.
 
 The extension also exposes the Lettuce client itself as CDI beans for every client that is injected through a
 Lettuce type (using `@RedisClientName` for named clients): `io.lettuce.core.RedisClient`,
