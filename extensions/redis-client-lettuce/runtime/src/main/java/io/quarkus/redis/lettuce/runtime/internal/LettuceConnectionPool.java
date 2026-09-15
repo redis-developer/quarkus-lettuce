@@ -2,11 +2,14 @@ package io.quarkus.redis.lettuce.runtime.internal;
 
 import java.util.NoSuchElementException;
 import java.util.Queue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Supplier;
+
+import org.jboss.logging.Logger;
 
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.support.AsyncConnectionPoolSupport;
@@ -25,6 +28,8 @@ import io.smallrye.mutiny.subscription.UniEmitter;
  * one, bounded by {@code maxWaiting}, mirroring the Vert.x backend's {@code max-pool-waiting}.
  */
 public final class LettuceConnectionPool {
+
+    private static final Logger LOGGER = Logger.getLogger(LettuceConnectionPool.class);
 
     private final BoundedAsyncPool<StatefulRedisConnection<byte[], byte[]>> pool;
     private final int maxWaiting;
@@ -90,13 +95,36 @@ public final class LettuceConnectionPool {
     }
 
     /**
-     * Runs {@code body} on a pooled connection, releasing it on every termination path (success,
-     * failure, cancellation).
+     * Runs {@code body} on a pooled connection, releasing it only once {@code body} truly
+     * completes (item or failure) — never merely because the caller stopped waiting.
      */
     public <T> Uni<T> withPooled(Function<StatefulRedisConnection<byte[], byte[]>, Uni<T>> body) {
         return acquire()
-                .onItem().transformToUni(conn -> Uni.createFrom().deferred(() -> body.apply(conn))
-                        .onTermination().call(() -> release(conn)));
+                .onItem().transformToUni(conn -> {
+                    CompletableFuture<T> result = new CompletableFuture<>();
+                    body.apply(conn).subscribe().with(
+                            item -> releaseThenComplete(conn, result, item, null),
+                            failure -> releaseThenComplete(conn, result, null, failure));
+                    return Uni.createFrom().completionStage(result);
+                });
+    }
+
+    private <T> void releaseThenComplete(StatefulRedisConnection<byte[], byte[]> conn, CompletableFuture<T> result,
+            T item, Throwable failure) {
+        release(conn).subscribe().with(
+                ignored -> complete(result, item, failure),
+                releaseFailure -> {
+                    LOGGER.warnf(releaseFailure, "Failed to release pooled Redis connection back to the pool");
+                    complete(result, item, failure);
+                });
+    }
+
+    private static <T> void complete(CompletableFuture<T> result, T item, Throwable failure) {
+        if (failure != null) {
+            result.completeExceptionally(failure);
+        } else {
+            result.complete(item);
+        }
     }
 
     public Uni<Void> close() {

@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
+import java.nio.charset.StandardCharsets;
 import java.util.NoSuchElementException;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
@@ -70,7 +72,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         });
         firstWaiter.cancel();
 
-        // The cancelled waiter must have freed its slot: this one queues instead of being rejected,
+        // The canceled waiter must have freed its slot: this one queues instead of being rejected,
         // proving the waiting counter was decremented on cancellation rather than leaked.
         AtomicReference<StatefulRedisConnection<byte[], byte[]>> secondWaiterResult = new AtomicReference<>();
         AtomicReference<Throwable> secondWaiterFailure = new AtomicReference<>();
@@ -88,6 +90,36 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         pool.close().await().atMost(TIMEOUT);
         assertThatThrownBy(() -> pool.acquire().await().atMost(TIMEOUT))
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void cancellingWithPooledDoesNotFreeConnectionUntilTheRealCommandCompletes() {
+        LettuceConnectionPool pool = pool(1, 1);
+        String missingKey = UUID.randomUUID().toString();
+
+        Cancellable subscription = pool
+                .withPooled(conn -> LettuceResult
+                        .toUni(() -> conn.async().blpop(30L, missingKey.getBytes(StandardCharsets.UTF_8))))
+                .subscribe().with(item -> {
+                }, failure -> {
+                });
+        // Wait for the connection to actually be borrowed (and the BLPOP dispatched) before
+        // cancelling, so this exercises "cancel while a real command is in flight" rather than
+        // racing the still-in-progress connect.
+        await().atMost(TIMEOUT).until(() -> pool.getObjectCount() == 1);
+        subscription.cancel();
+
+        // The caller gave up, but the BLPOP is still pending on the wire: the connection must stay
+        // checked out, not be returned to the pool as idle.
+        assertThat(pool.getIdle()).isZero();
+
+        // Only the real Redis reply frees the connection.
+        rawPush(missingKey, "unblocked");
+        await().atMost(TIMEOUT).until(() -> pool.getIdle() == 1);
+    }
+
+    private static void rawPush(String key, String value) {
+        connection.sync().rpush(key.getBytes(StandardCharsets.UTF_8), value.getBytes(StandardCharsets.UTF_8));
     }
 
 }

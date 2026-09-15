@@ -4,7 +4,6 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.TimeUnit;
 
 import org.jboss.logging.Logger;
 
@@ -128,7 +127,7 @@ public class LettuceConnectionFactory {
 
         @Override
         public long getTimeout(RedisCommand<?, ?, ?> command) {
-            return BLOCKING_COMMANDS.contains(command.getType()) ? -1 : timeoutMillis;
+            return command.getType() instanceof CommandType type && BLOCKING_COMMANDS.contains(type) ? -1 : timeoutMillis;
         }
 
     }
