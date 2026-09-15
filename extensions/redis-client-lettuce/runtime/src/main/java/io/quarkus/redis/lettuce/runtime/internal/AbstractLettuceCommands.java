@@ -9,16 +9,20 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import io.lettuce.core.KeyValue;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.quarkus.redis.runtime.datasource.Marshaller;
+import io.smallrye.mutiny.Uni;
 
 /**
  * Base class for Lettuce-backed reactive command group implementations.
  * <p>
- * Holds the async command handle and helper methods.
+ * Holds the async command handle and helper methods. Subclasses whose command group has blocking
+ * commands pass a {@code pool}, used by {@link #blocking(Function)} to route
+ * those commands off the shared connection; other groups pass {@code null}.
  *
  * @param <K> the key type
  * @param <V> the value type
@@ -29,9 +33,15 @@ public abstract class AbstractLettuceCommands<K, V> {
     protected final Type keyType;
     protected final Type valueType;
     protected final Marshaller marshaller;
+    protected final LettuceConnectionPool pool;
 
     protected AbstractLettuceCommands(StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type valueType,
             Marshaller marshaller) {
+        this(connection, keyType, valueType, marshaller, null);
+    }
+
+    protected AbstractLettuceCommands(StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type valueType,
+            Marshaller marshaller, LettuceConnectionPool pool) {
         nonNull(connection, "connection");
         nonNull(keyType, "keyType");
         nonNull(valueType, "valueType");
@@ -40,6 +50,14 @@ public abstract class AbstractLettuceCommands<K, V> {
         this.keyType = keyType;
         this.valueType = valueType;
         this.marshaller = marshaller;
+        this.pool = pool;
+    }
+
+    protected <T, R> Uni<R> blocking(Function<RedisAsyncCommands<byte[], byte[]>, LettuceCommand<T, R>> builder) {
+        if (pool == null) {
+            return builder.apply(async).toUni();
+        }
+        return pool.withPooled(conn -> builder.apply(conn.async()).toUni());
     }
 
     public static boolean isOk(String response) {

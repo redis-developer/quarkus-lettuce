@@ -1101,6 +1101,24 @@ The data source methods exposing Vert.x types, such as `ReactiveRedisDataSource.
 by the Lettuce backend and throw an `UnsupportedOperationException`; use `execute(...)` instead.
 The Vert.x Redis client beans remain available and keep backing the health check and `quarkus-redis-cache`.
 
+=== Connection pooling and blocking commands
+
+Ordinary commands share one multiplexed, pipelined connection per client, Lettuce's intended design.
+Blocking commands instead borrow a connection, for their duration, from a bounded pool
+sized by `quarkus.redis.max-pool-size` (default `6`), with up to `quarkus.redis.max-pool-waiting` (default
+`24`) additional callers allowed to queue before a further caller fails immediately. This keeps a blocked
+consumer from starving every other command on the same data source. `withConnection(...)` and
+`withTransaction(...)` borrow from the same pool for the duration of the block or
+transaction, instead of opening a fresh TCP connection per call.
+
+Because `max-pool-size` bounds only blocking commands and scoped connections on this backend — rather than
+every command, as on the Vert.x backend — the same configured value gives noticeably higher effective
+capacity here. `quarkus.redis.max-waiting-handlers` has no Lettuce equivalent and is ignored.
+
+A blocking command issued from inside `withConnection(...)` runs on that pinned connection directly: it
+does not borrow a second connection from the pool, and it blocks that connection for its own duration, as
+it would without pooling.
+
 The extension also exposes the Lettuce client itself as CDI beans for every client that is injected through a
 Lettuce type (using `@RedisClientName` for named clients): `io.lettuce.core.RedisClient`,
 `io.lettuce.core.api.StatefulRedisConnection<String, String>` and the shared

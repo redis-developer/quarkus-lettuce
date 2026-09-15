@@ -114,13 +114,16 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
             consumer.accept(this);
             return;
         }
-        // Await the connection and run the user block on the calling (worker) thread. Running it
+        // Acquire the connection and run the user block on the calling (worker) thread. Running it
         // inside the reactive withConnection pipeline would execute it on the event loop thread
         // that completed the connection, where the block's blocking calls would deadlock.
-        try (StatefulRedisConnection<byte[], byte[]> conn = reactive.openConnection().await().atMost(timeout)) {
+        StatefulRedisConnection<byte[], byte[]> conn = reactive.acquireConnection().await().atMost(timeout);
+        try {
             LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl
                     .pinnedTo(reactive.getVertx(), conn);
             consumer.accept(pinnedTo(pinnedReactive, timeout));
+        } finally {
+            reactive.releaseConnection(conn).await().atMost(timeout);
         }
     }
 
@@ -206,16 +209,16 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
      * inside {@code withConnection}, otherwise open a fresh one via the connector.
      */
     private StatefulRedisConnection<byte[], byte[]> acquire() {
-        return pinned ? reactive.getConnection() : reactive.openConnection().await().atMost(timeout);
+        return pinned ? reactive.getConnection() : reactive.acquireConnection().await().atMost(timeout);
     }
 
     /**
      * Releases a transaction connection. A pinned (reused) connection is left open for the outer
-     * scope to release; a freshly opened one is closed here.
+     * scope to release; a borrowed one is returned to the pool here.
      */
     private void release(StatefulRedisConnection<byte[], byte[]> conn) {
         if (!pinned) {
-            LettuceResult.toBlocking(conn.closeAsync(), timeout);
+            reactive.releaseConnection(conn).await().atMost(timeout);
         }
     }
 
