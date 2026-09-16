@@ -16,6 +16,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.autosuggest.AutoSuggestCommands;
 import io.quarkus.redis.datasource.bitmap.BitMapCommands;
+import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
 import io.quarkus.redis.datasource.bloom.BloomCommands;
 import io.quarkus.redis.datasource.countmin.CountMinCommands;
 import io.quarkus.redis.datasource.cuckoo.CuckooCommands;
@@ -44,6 +45,7 @@ import io.quarkus.redis.datasource.transactions.TransactionalRedisDataSource;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
+import io.quarkus.redis.runtime.datasource.BlockingBitmapCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHashCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingKeyCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingListCommandsImpl;
@@ -362,12 +364,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K> BitMapCommands<K> bitmap(Class<K> redisKeyType) {
-        throw groupNotImplemented("bitmap");
+        ReactiveBitMapCommands<K> r = reactive.bitmap(redisKeyType);
+        return new BlockingBitmapCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K> BitMapCommands<K> bitmap(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("bitmap");
+        ReactiveBitMapCommands<K> r = reactive.bitmap(redisKeyType);
+        return new BlockingBitmapCommandsImpl<>(this, r, timeout);
     }
 
     @Override

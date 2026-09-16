@@ -43,6 +43,7 @@ import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
+import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.list.LettuceReactiveListCommandsImpl;
@@ -432,12 +433,14 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K> ReactiveBitMapCommands<K> bitmap(Class<K> redisKeyType) {
-        throw groupNotImplemented("bitmap");
+        nonNull(redisKeyType, "redisKeyType");
+        return new LettuceReactiveBitMapCommandsImpl<>(this, connection, redisKeyType);
     }
 
     @Override
     public <K> ReactiveBitMapCommands<K> bitmap(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("bitmap");
+        nonNull(redisKeyType, "redisKeyType");
+        return new LettuceReactiveBitMapCommandsImpl<>(this, connection, redisKeyType.getType());
     }
 
     @Override
