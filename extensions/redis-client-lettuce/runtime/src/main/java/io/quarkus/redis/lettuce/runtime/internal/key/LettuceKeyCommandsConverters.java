@@ -1,0 +1,42 @@
+package io.quarkus.redis.lettuce.runtime.internal.key;
+
+import io.lettuce.core.protocol.CommandArgs;
+import io.quarkus.redis.datasource.keys.CopyArgs;
+import io.quarkus.redis.datasource.keys.ExpireArgs;
+import io.quarkus.redis.datasource.keys.KeyScanArgs;
+import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
+
+public final class LettuceKeyCommandsConverters {
+
+    private LettuceKeyCommandsConverters() {
+        // Utility class
+    }
+
+    public static io.lettuce.core.ExpireArgs toLettuceExpireArgs(ExpireArgs quarkus) {
+        return new io.lettuce.core.ExpireArgs() {
+            @Override
+            public <K, V> void build(CommandArgs<K, V> args) {
+                ArgReplay.replay(quarkus, args);
+            }
+        };
+    }
+
+    public static io.lettuce.core.CopyArgs toLettuceCopyArgs(CopyArgs quarkus) {
+        return new io.lettuce.core.CopyArgs() {
+            @Override
+            public <K, V> void build(CommandArgs<K, V> args) {
+                ArgReplay.replay(quarkus, args);
+            }
+        };
+    }
+
+    public static io.lettuce.core.KeyScanArgs toLettuceKeyScanArgs(KeyScanArgs quarkus) {
+        return new io.lettuce.core.KeyScanArgs() {
+            @Override
+            public <K, V> void build(CommandArgs<K, V> args) {
+                ArgReplay.replay(quarkus.toArgs(), args);
+            }
+        };
+    }
+
+}

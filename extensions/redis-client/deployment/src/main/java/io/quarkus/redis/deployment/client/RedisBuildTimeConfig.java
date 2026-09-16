@@ -92,15 +92,4 @@ public interface RedisBuildTimeConfig {
     @WithName("health.enabled")
     @WithDefault("true")
     boolean healthEnabled();
-
-    /**
-     * Selects the Redis client backend used to produce the {@link io.quarkus.redis.datasource.RedisDataSource}
-     * and {@link io.quarkus.redis.datasource.ReactiveRedisDataSource} beans.
-     * <p>
-     * Defaults to {@code vertx}. Set to {@code lettuce} to opt in to the Lettuce-backed implementation;
-     * {@code lettuce-core} must then be on the classpath.
-     */
-    @WithDefault("vertx")
-    RedisBackendBuildItem.Backend backend();
-
 }
