@@ -9,21 +9,20 @@ import org.junit.jupiter.api.Test;
 
 import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.protocol.CommandArgs;
-import io.quarkus.redis.datasource.RedisCommandExtraArguments;
 
 class ArgReplayTest {
 
     @Test
     void replayPreservesTokenOrderAndTypes() {
         CommandArgs<String, String> args = newArgs();
-        ArgReplay.replay(extraArgs("LIMIT", 0L, 3L, "ALPHA"), args);
+        ArgReplay.replay(List.of("LIMIT", 0L, 3L, "ALPHA"), args);
         assertThat(tokens(args)).containsExactly("LIMIT", "0", "3", "ALPHA");
     }
 
     @Test
     void replayOfEmptyArgumentsAddsNothing() {
         CommandArgs<String, String> args = newArgs();
-        ArgReplay.replay(extraArgs(), args);
+        ArgReplay.replay(List.of(), args);
         assertThat(tokens(args)).isEmpty();
     }
 
@@ -37,14 +36,14 @@ class ArgReplayTest {
     @Test
     void replayExceptSkipsEveryOccurrenceOfTheListedKeywords() {
         CommandArgs<String, String> args = newArgs();
-        ArgReplay.replayExcept(extraArgs("GET", "EX", 10L, "GET", "NX"), args, Set.of("GET"));
+        ArgReplay.replayExcept(List.of("GET", "EX", 10L, "GET", "NX"), args, Set.of("GET"));
         assertThat(tokens(args)).containsExactly("EX", "10", "NX");
     }
 
     @Test
     void replayExceptOnlySkipsExactStringMatches() {
         CommandArgs<String, String> args = newArgs();
-        ArgReplay.replayExcept(extraArgs("get", "COUNT", 10L), args, Set.of("GET", "10"));
+        ArgReplay.replayExcept(List.of("get", "COUNT", 10L), args, Set.of("GET", "10"));
         assertThat(tokens(args)).containsExactly("get", "COUNT", "10");
     }
 
@@ -52,16 +51,6 @@ class ArgReplayTest {
 
     private static CommandArgs<String, String> newArgs() {
         return new CommandArgs<>(StringCodec.UTF8);
-    }
-
-    /** Extra arguments emitting exactly {@code tokens}. */
-    private static RedisCommandExtraArguments extraArgs(Object... tokens) {
-        return new RedisCommandExtraArguments() {
-            @Override
-            public List<Object> toArgs() {
-                return List.of(tokens);
-            }
-        };
     }
 
     private static String[] tokens(CommandArgs<String, String> args) {
