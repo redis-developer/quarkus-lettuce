@@ -91,6 +91,20 @@ public class LettuceBackendResource {
         return response.toString();
     }
 
+    /**
+     * Tells which backend serves the data sources: only the Lettuce implementation rejects {@code getRedis()}.
+     */
+    @GET
+    @Path("/backend")
+    public String backend() {
+        try {
+            reactive.getRedis();
+            return "vertx";
+        } catch (UnsupportedOperationException e) {
+            return "lettuce";
+        }
+    }
+
     @POST
     @Path("/value/{key}")
     public void setValue(@PathParam("key") String key, String value) {

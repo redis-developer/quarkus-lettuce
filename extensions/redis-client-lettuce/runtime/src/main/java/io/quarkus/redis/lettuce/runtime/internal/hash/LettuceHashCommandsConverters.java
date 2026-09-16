@@ -1,0 +1,29 @@
+package io.quarkus.redis.lettuce.runtime.internal.hash;
+
+import io.quarkus.redis.datasource.ScanArgs;
+import io.quarkus.redis.lettuce.runtime.internal.ArgTokenCursor;
+
+/**
+ * Converters bridging Quarkus Hash Command argument types to their Lettuce equivalents.
+ */
+public final class LettuceHashCommandsConverters {
+
+    private LettuceHashCommandsConverters() {
+        // Utility class
+    }
+
+    public static io.lettuce.core.ScanArgs toLettuceScanArgs(ScanArgs quarkus) {
+        io.lettuce.core.ScanArgs lettuce = new io.lettuce.core.ScanArgs();
+        var cursor = new ArgTokenCursor(quarkus.toArgs());
+        while (cursor.hasNext()) {
+            String token = cursor.next();
+            switch (token) {
+                case "MATCH" -> lettuce.match(cursor.nextValue(token));
+                case "COUNT" -> lettuce.limit(cursor.nextLong(token));
+                default -> throw new IllegalStateException("Unexpected ScanArgs token: " + token);
+            }
+        }
+        return lettuce;
+    }
+
+}

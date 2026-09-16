@@ -22,24 +22,7 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-redis-client</artifactId>
-        </dependency>
-        <!-- lettuce-core is marked optional by the extension; consumers selecting
-             the Lettuce backend must declare it explicitly. -->
-        <dependency>
-            <groupId>io.lettuce</groupId>
-            <artifactId>lettuce-core</artifactId>
-        </dependency>
-        <!-- Lettuce declares LatencyUtils and HdrHistogram as optional. They are required
-             on the runtime classpath when building a native image; LettuceProcessor fails the
-             build with an actionable message if either is missing. -->
-        <dependency>
-            <groupId>org.latencyutils</groupId>
-            <artifactId>LatencyUtils</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.hdrhistogram</groupId>
-            <artifactId>HdrHistogram</artifactId>
+            <artifactId>quarkus-redis-client-lettuce</artifactId>
         </dependency>
 
         <!-- test dependencies -->
@@ -57,7 +40,7 @@
         <!-- Minimal test dependencies to *-deployment artifacts for consistent build order -->
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-redis-client-deployment</artifactId>
+            <artifactId>quarkus-redis-client-lettuce-deployment</artifactId>
             <version>${project.version}</version>
             <type>pom</type>
             <scope>test</scope>

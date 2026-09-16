@@ -40,6 +40,16 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void dataSourcesAreServedByLettuce() {
+        RestAssured.given()
+                .when()
+                .get("/lettuce/backend")
+                .then()
+                .statusCode(200)
+                .body(CoreMatchers.is("lettuce"));
+    }
+
+    @Test
     public void valueSetGet() {
         String key = getKey("value-sync");
         String value = "lettuce-value";
