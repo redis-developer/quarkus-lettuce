@@ -26,7 +26,7 @@ public class LettuceMissingHostsTest {
                     .satisfies(t -> assertThat(t.getClass().getName()).isEqualTo(InactiveBeanException.class.getName()))
                     .hasMessageContainingAll(
                             "Lettuce Redis Client 'no-hosts' was deactivated automatically",
-                            "neither the hosts nor the hostsProviderName is set"));
+                            "the hosts are not set"));
 
     @Inject
     @RedisClientName("no-hosts")

@@ -6,8 +6,9 @@ import static io.quarkus.redis.runtime.client.config.RedisConfig.getPropertyName
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
@@ -29,6 +30,7 @@ import io.quarkus.runtime.ShutdownContext;
 import io.quarkus.runtime.annotations.Recorder;
 import io.vertx.core.Vertx;
 import io.vertx.core.internal.VertxInternal;
+import io.vertx.redis.client.RedisClientType;
 
 /**
  * Quarkus recorder that manages the lifecycle of Lettuce Redis clients.
@@ -69,14 +71,43 @@ public class LettuceRecorder {
         for (String name : names) {
             if (checkActive(name).get().value()) {
                 RedisClientConfig clientConfig = runtimeConfig.getValue().clients().get(name);
-                Optional<Set<URI>> hosts = clientConfig.hosts();
-                if (hosts.isEmpty() || hosts.get().isEmpty()) {
-                    LOGGER.warnf("No hosts configured for Lettuce Redis client '%s' — skipping", name);
-                    continue;
-                }
-                URI redisUri = hosts.get().iterator().next();
+                // checkActive() guarantees at least one host for an active client
+                Set<URI> hosts = clientConfig.hosts().orElseThrow();
+                warnAboutUnsupportedConfiguration(name, clientConfig, hosts);
+                URI redisUri = hosts.iterator().next();
                 factories.putIfAbsent(name, new LettuceConnectionFactory(name, sharedResources.clientResources(), redisUri));
             }
+        }
+    }
+
+    private static boolean hasHosts(RedisClientConfig config) {
+        return config.hosts().isPresent() && !config.hosts().get().isEmpty();
+    }
+
+    /**
+     * The Lettuce backend applies only the hosts, timeout and active properties for now. Tell users at startup
+     * which configured properties are not applied, instead of silently connecting differently than configured.
+     */
+    private static void warnAboutUnsupportedConfiguration(String name, RedisClientConfig config, Set<URI> hosts) {
+        List<String> ignored = new ArrayList<>();
+        if (hosts.size() > 1) {
+            ignored.add(getPropertyName(name, HOSTS) + " (only the first URI is used)");
+        }
+        if (config.password().isPresent()) {
+            ignored.add(getPropertyName(name, "password") + " (encode the credentials in the URI)");
+        }
+        if (config.tls().enabled()) {
+            ignored.add(getPropertyName(name, "tls.enabled") + " (use a rediss:// URI)");
+        }
+        if (config.tlsConfigurationName().isPresent()) {
+            ignored.add(getPropertyName(name, "tls-configuration-name"));
+        }
+        if (config.clientType() != RedisClientType.STANDALONE) {
+            ignored.add(getPropertyName(name, "client-type") + " (only standalone is supported)");
+        }
+        if (!ignored.isEmpty()) {
+            LOGGER.warnf("Lettuce Redis client '%s': the following configuration is not applied by the Lettuce backend yet: %s",
+                    name, String.join(", ", ignored));
         }
     }
 
@@ -130,14 +161,23 @@ public class LettuceRecorder {
                                 """,
                         name, getPropertyName(name, "active"), name));
             }
-            if (redisClientConfig.hosts().isEmpty() && redisClientConfig.hostsProviderName().isEmpty()) {
+            if (!hasHosts(redisClientConfig)) {
+                if (redisClientConfig.hostsProviderName().isPresent()) {
+                    return ActiveResult.inactive(String.format(
+                            """
+                                    Lettuce Redis Client '%s' was deactivated automatically because it is configured through '%s', \
+                                    which the Lettuce backend does not support yet. Set the configuration property '%s' instead. \
+                                    Refer to https://quarkus.io/guides/redis-reference for guidance.
+                                    """,
+                            name, getPropertyName(name, HOSTS_PROVIDER_NAME), getPropertyName(name, HOSTS)));
+                }
                 return ActiveResult.inactive(String.format(
                         """
-                                Lettuce Redis Client '%s' was deactivated automatically because neither the hosts nor the hostsProviderName is set. \
-                                To activate the Redis Client, set the configuration property '%s' or '%s'. \
+                                Lettuce Redis Client '%s' was deactivated automatically because the hosts are not set. \
+                                To activate the Redis Client, set the configuration property '%s'. \
                                 Refer to https://quarkus.io/guides/redis-reference for guidance.
                                 """,
-                        name, getPropertyName(name, HOSTS), getPropertyName(name, HOSTS_PROVIDER_NAME)));
+                        name, getPropertyName(name, HOSTS)));
             }
             return ActiveResult.active();
         };

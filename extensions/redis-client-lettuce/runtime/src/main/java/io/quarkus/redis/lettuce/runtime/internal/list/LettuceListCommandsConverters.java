@@ -1,5 +1,7 @@
 package io.quarkus.redis.lettuce.runtime.internal.list;
 
+import java.util.List;
+
 import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.list.LPosArgs;
 import io.quarkus.redis.datasource.list.Position;
@@ -12,10 +14,11 @@ public final class LettuceListCommandsConverters {
     }
 
     public static io.lettuce.core.LPosArgs toLettuceLPosArgs(LPosArgs quarkus) {
+        List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.LPosArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(quarkus, args);
+                ArgReplay.replay(tokens, args);
             }
         };
     }

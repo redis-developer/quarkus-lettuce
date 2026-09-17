@@ -182,17 +182,19 @@ public class LettuceProcessor {
                     checkActive, recorder.getReactiveDataSource(name)));
         }
 
-        // Shared ClientResources bean (singleton, default qualifier)
+        // Shared ClientResources bean (singleton, default qualifier). The resources are created as soon as any
+        // client exists, so the bean is always active rather than tied to the activation state of the default client.
         syntheticBeans.produce(createLettuceBean(DEFAULT_CLIENT_NAME, LETTUCE_CLIENT_RESOURCES,
                 ClassType.create(LETTUCE_CLIENT_RESOURCES),
-                recorder.checkActive(DEFAULT_CLIENT_NAME), recorder.getClientResources()));
+                null, recorder.getClientResources()));
 
         // Register shutdown in correct order: connections → clients → resources
         recorder.cleanup(shutdown);
     }
 
     /**
-     * Creates a Lettuce synthetic bean with the given type, checkActive guard, and supplier.
+     * Creates a Lettuce synthetic bean with the given type, checkActive guard (a recorder proxy, or {@code null}
+     * for an always-active bean), and supplier.
      */
     static SyntheticBeanBuildItem createLettuceBean(String name, DotName implClass, Type beanType,
             Supplier<ActiveResult> checkActive, Supplier<?> supplier) {
@@ -200,12 +202,14 @@ public class LettuceProcessor {
         SyntheticBeanBuildItem.ExtendedBeanConfigurator configurator = SyntheticBeanBuildItem
                 .configure(implClass)
                 .addType(beanType)
-                .checkActive(checkActive)
                 .startup()
                 .setRuntimeInit()
                 .unremovable()
                 .supplier(supplier)
                 .scope(ApplicationScoped.class);
+        if (checkActive != null) {
+            configurator.checkActive(checkActive);
+        }
 
         return qualify(configurator, name).done();
     }
