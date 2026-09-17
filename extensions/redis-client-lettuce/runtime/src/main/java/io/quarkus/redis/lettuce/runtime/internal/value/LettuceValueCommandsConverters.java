@@ -1,12 +1,13 @@
 package io.quarkus.redis.lettuce.runtime.internal.value;
 
+import java.util.List;
+import java.util.Set;
+
+import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.value.GetExArgs;
 import io.quarkus.redis.datasource.value.SetArgs;
-import io.quarkus.redis.lettuce.runtime.internal.ArgTokenCursor;
+import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 
-/**
- * Converters bridging Quarkus Value Command argument types to their Lettuce equivalents.
- */
 public final class LettuceValueCommandsConverters {
 
     private LettuceValueCommandsConverters() {
@@ -14,42 +15,23 @@ public final class LettuceValueCommandsConverters {
     }
 
     public static io.lettuce.core.SetArgs toLettuceSetArgs(SetArgs quarkus) {
-        io.lettuce.core.SetArgs lettuce = new io.lettuce.core.SetArgs();
-        var cursor = new ArgTokenCursor(quarkus.toArgs());
-        while (cursor.hasNext()) {
-            String token = cursor.next();
-            switch (token) {
-                case "EX" -> lettuce.ex(cursor.nextLong(token));
-                case "EXAT" -> lettuce.exAt(cursor.nextLong(token));
-                case "PX" -> lettuce.px(cursor.nextLong(token));
-                case "PXAT" -> lettuce.pxAt(cursor.nextLong(token));
-                case "NX" -> lettuce.nx();
-                case "XX" -> lettuce.xx();
-                case "KEEPTTL" -> lettuce.keepttl();
-                // GET is handled via the dedicated setGet() method on the Lettuce API.
-                case "GET" -> {
-                }
-                default -> throw new IllegalStateException("Unexpected SetArgs token: " + token);
+        List<Object> tokens = quarkus.toArgs();
+        return new io.lettuce.core.SetArgs() {
+            @Override
+            public <K, V> void build(CommandArgs<K, V> args) {
+                ArgReplay.replayExcept(tokens, args, Set.of("GET"));
             }
-        }
-        return lettuce;
+        };
     }
 
     public static io.lettuce.core.GetExArgs toLettuceGetExArgs(GetExArgs quarkus) {
-        io.lettuce.core.GetExArgs lettuce = new io.lettuce.core.GetExArgs();
-        var cursor = new ArgTokenCursor(quarkus.toArgs());
-        while (cursor.hasNext()) {
-            String token = cursor.next();
-            switch (token) {
-                case "EX" -> lettuce.ex(cursor.nextLong(token));
-                case "EXAT" -> lettuce.exAt(cursor.nextLong(token));
-                case "PX" -> lettuce.px(cursor.nextLong(token));
-                case "PXAT" -> lettuce.pxAt(cursor.nextLong(token));
-                case "PERSIST" -> lettuce.persist();
-                default -> throw new IllegalStateException("Unexpected GetExArgs token: " + token);
+        List<Object> tokens = quarkus.toArgs();
+        return new io.lettuce.core.GetExArgs() {
+            @Override
+            public <K, V> void build(CommandArgs<K, V> args) {
+                ArgReplay.replay(tokens, args);
             }
-        }
-        return lettuce;
+        };
     }
 
 }

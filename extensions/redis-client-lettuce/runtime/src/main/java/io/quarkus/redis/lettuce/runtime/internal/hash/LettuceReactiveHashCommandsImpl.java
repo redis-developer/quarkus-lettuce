@@ -19,6 +19,7 @@ import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.hash.ReactiveHashScanCursor;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
@@ -214,7 +215,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(scanArgs, "scanArgs");
         return new LettuceReactiveHashScanCursorImpl<>(async, marshaller.encode(key),
-                LettuceHashCommandsConverters.toLettuceScanArgs(scanArgs), this::decodeMap);
+                LettuceCommonConverters.toLettuceScanArgs(scanArgs), this::decodeMap);
     }
 
     @Override

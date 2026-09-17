@@ -23,6 +23,7 @@ import io.quarkus.redis.datasource.list.LPosArgs;
 import io.quarkus.redis.datasource.list.Position;
 import io.quarkus.redis.datasource.list.ReactiveListCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
@@ -484,7 +485,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
     Supplier<RedisFuture<List<byte[]>>> _sort(K key, SortArgs sortArguments) {
         nonNull(key, "key");
         nonNull(sortArguments, "sortArguments");
-        io.lettuce.core.SortArgs lettuceArgs = LettuceListCommandsConverters.toLettuceSortArgs(sortArguments);
+        io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(sortArguments);
         return () -> async.sort(marshaller.encode(key), lettuceArgs);
     }
 
@@ -497,7 +498,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(key, "key");
         nonNull(destination, "destination");
         nonNull(args, "args");
-        io.lettuce.core.SortArgs lettuceArgs = LettuceListCommandsConverters.toLettuceSortArgs(args);
+        io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(args);
         return () -> async.sortStore(marshaller.encode(key), lettuceArgs, marshaller.encode(destination));
     }
 
