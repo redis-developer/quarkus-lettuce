@@ -15,6 +15,26 @@
         <redis.url>localhost:6379</redis.url>
     </properties>
 
+    <!-- CI-only: consume the reactor-optional Lettuce fork from JitPack (see .mvn/rrf/groupId-jitpack.txt) -->
+    <repositories>
+        <repository>
+            <id>central</id>
+            <name>Maven Central</name>
+            <url>https://repo.maven.apache.org/maven2</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>jitpack</id>
+            <name>JitPack</name>
+            <url>https://jitpack.io</url>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+
     <dependencies>
         <dependency>
             <groupId>io.quarkus</groupId>

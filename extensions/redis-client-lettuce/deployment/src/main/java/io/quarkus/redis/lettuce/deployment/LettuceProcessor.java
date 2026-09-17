@@ -97,7 +97,9 @@ public class LettuceProcessor {
         // pause detector when both libraries are present) applies. Do NOT pin these classes to runtime
         // initialization: that compiles the <clinit> into the image and makes --link-at-build-time reject
         // the DefaultPauseDetectorWrapper reference.
-        excludeConfig.produce(new ExcludeConfigBuildItem("io\\.lettuce\\.lettuce-core",
+        // The jar-name pattern also matches the reactor-optional fork consumed from JitPack
+        // (native lib jars are named groupId.artifactId-version.jar).
+        excludeConfig.produce(new ExcludeConfigBuildItem("(io\\.lettuce\\.lettuce-core|com\\.github\\.a-TODO-rov\\.lettuce)",
                 "/META-INF/native-image/io\\.lettuce/lettuce-core/native-image\\.properties"));
         // RedisClient.create() is folded at build time, which transitively materializes a
         // DefaultClientResources.Builder holding DefaultClientResources.DEFAULT_ADDRESS_RESOLVER_GROUP, a
