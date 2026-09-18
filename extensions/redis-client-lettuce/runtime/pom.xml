@@ -19,9 +19,10 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-redis-client</artifactId>
         </dependency>
+        <!-- CI-only: reactor-optional Lettuce fork (reactor-core is optional in it, so Reactor stays off the classpath) -->
         <dependency>
-            <groupId>io.lettuce</groupId>
-            <artifactId>lettuce-core</artifactId>
+            <groupId>com.github.a-TODO-rov</groupId>
+            <artifactId>lettuce</artifactId>
         </dependency>
         <!-- Declared optional by Lettuce, but referenced from DefaultCommandLatencyCollector
              signatures that native-image link-at-build-time analysis must be able to resolve. -->

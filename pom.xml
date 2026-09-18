@@ -151,6 +151,18 @@
                 <enabled>false</enabled>
             </snapshots>
         </repository>
+        <!-- CI-only: reactor-optional Lettuce fork built by JitPack from branch feature/reactor-optional-1b.
+             Declared at the root so every module that resolves the BOM-managed artifact (extension, ITs,
+             docs, platform descriptor) can see it. Only the fork groupId is allowed from this repository,
+             see .mvn/rrf/groupId-jitpack.txt. -->
+        <repository>
+            <id>jitpack</id>
+            <name>JitPack</name>
+            <url>https://jitpack.io</url>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
     </repositories>
 
     <build>

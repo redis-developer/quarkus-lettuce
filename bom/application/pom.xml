@@ -91,7 +91,7 @@
         <gizmo.version>1.10.1</gizmo.version>
         <gizmo2.version>2.1.1</gizmo2.version>
         <jackson-bom.version>2.22.0</jackson-bom.version>
-        <lettuce.version>7.6.0.RELEASE</lettuce.version>
+        <lettuce.version>feature~reactor-optional-1b-SNAPSHOT</lettuce.version>
         <commons-logging-jboss-logging.version>2.0.0.Final</commons-logging-jboss-logging.version>
         <commons-lang3.version>3.20.0</commons-lang3.version>
         <commons-codec.version>1.22.0</commons-codec.version>
@@ -6430,10 +6430,20 @@
                 <artifactId>quarkus-redis-cache-deployment</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <!-- CI-only: reactor-optional Lettuce fork built by JitPack from branch feature/reactor-optional-1b -->
             <dependency>
-                <groupId>io.lettuce</groupId>
-                <artifactId>lettuce-core</artifactId>
+                <groupId>com.github.a-TODO-rov</groupId>
+                <artifactId>lettuce</artifactId>
                 <version>${lettuce.version}</version>
+                <!-- Lettuce is designed to work without Reactor at runtime; Quarkus excludes
+                     reactor-core explicitly so applications don't drag in a second reactive
+                     framework alongside Mutiny, regardless of how Lettuce declares the dependency. -->
+                <exclusions>
+                    <exclusion>
+                        <groupId>io.projectreactor</groupId>
+                        <artifactId>reactor-core</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
 
             <!--  Qute  -->
