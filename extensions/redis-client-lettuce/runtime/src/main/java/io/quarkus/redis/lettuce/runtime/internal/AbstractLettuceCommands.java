@@ -64,6 +64,10 @@ public abstract class AbstractLettuceCommands<K, V> {
         return value;
     }
 
+    public static Integer toInteger(Long value) {
+        return value == null ? null : value.intValue();
+    }
+
     public static boolean isWholeSeconds(Duration duration) {
         return duration.getNano() == 0;
     }
@@ -105,6 +109,10 @@ public abstract class AbstractLettuceCommands<K, V> {
 
     public List<V> decodeListOfValue(List<byte[]> list) {
         return list.stream().map(this::decodeV).toList();
+    }
+
+    public List<V> decodeListOfValueOrEmpty(List<byte[]> list) {
+        return decodeListOfValue(orEmpty(list));
     }
 
     public <T> Map<T, V> decodeAsOrderedMap(T[] keys, List<KeyValue<byte[], byte[]>> results) {

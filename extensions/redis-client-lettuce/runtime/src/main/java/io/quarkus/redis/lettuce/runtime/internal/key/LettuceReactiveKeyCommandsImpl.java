@@ -11,9 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.function.Supplier;
 
-import io.lettuce.core.RedisFuture;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.keys.CopyArgs;
@@ -24,7 +22,7 @@ import io.quarkus.redis.datasource.keys.ReactiveKeyScanCursor;
 import io.quarkus.redis.datasource.keys.RedisKeyNotFoundException;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -51,349 +49,346 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     @Override
     public Uni<Boolean> copy(K source, K destination) {
-        return LettuceResult.toUni(_copy(source, destination));
+        return _copy(source, destination).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _copy(K source, K destination) {
+    LettuceCommand<Boolean, Boolean> _copy(K source, K destination) {
         nonNull(source, "source");
         nonNull(destination, "destination");
-        return () -> async.copy(marshaller.encode(source), marshaller.encode(destination));
+        return LettuceCommand.of(() -> async.copy(marshaller.encode(source), marshaller.encode(destination)));
     }
 
     @Override
     public Uni<Boolean> copy(K source, K destination, CopyArgs copyArgs) {
-        return LettuceResult.toUni(_copy(source, destination, copyArgs));
+        return _copy(source, destination, copyArgs).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _copy(K source, K destination, CopyArgs copyArgs) {
+    LettuceCommand<Boolean, Boolean> _copy(K source, K destination, CopyArgs copyArgs) {
         nonNull(source, "source");
         nonNull(destination, "destination");
         nonNull(copyArgs, "copyArgs");
         io.lettuce.core.CopyArgs lettuceArgs = LettuceKeyCommandsConverters.toLettuceCopyArgs(copyArgs);
-        return () -> async.copy(marshaller.encode(source), marshaller.encode(destination), lettuceArgs);
+        return LettuceCommand.of(() -> async.copy(marshaller.encode(source), marshaller.encode(destination), lettuceArgs));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Integer> del(K... keys) {
-        return LettuceResult.toUni(_del(keys)).map(Long::intValue);
+        return _del(keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _del(K... keys) {
+    final LettuceCommand<Long, Integer> _del(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return () -> async.del(marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.del(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
     }
 
     @Override
     public Uni<String> dump(K key) {
-        return LettuceResult.toUni(_dump(key)).map(this::decodeString);
+        return _dump(key).toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _dump(K key) {
+    LettuceCommand<byte[], String> _dump(K key) {
         nonNull(key, "key");
-        return () -> async.dump(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.dump(marshaller.encode(key)), this::decodeString);
     }
 
     @Override
     public Uni<Boolean> exists(K key) {
-        return LettuceResult.toUni(_exists(key)).map(c -> c != null && c > 0);
+        return _exists(key).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _exists(K key) {
+    LettuceCommand<Long, Boolean> _exists(K key) {
         nonNull(key, "key");
-        return () -> async.exists(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.exists(marshaller.encode(key)), c -> c != null && c > 0);
     }
 
     @SafeVarargs
     @Override
     public final Uni<Integer> exists(K... keys) {
-        return LettuceResult.toUni(_exists(keys)).map(Long::intValue);
+        return _exists(keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _exists(K... keys) {
+    final LettuceCommand<Long, Integer> _exists(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return () -> async.exists(marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.exists(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
     }
 
     @Override
     public Uni<Boolean> expire(K key, long seconds, ExpireArgs expireArgs) {
-        return LettuceResult.toUni(_expire(key, seconds, expireArgs));
+        return _expire(key, seconds, expireArgs).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _expire(K key, long seconds, ExpireArgs expireArgs) {
+    LettuceCommand<Boolean, Boolean> _expire(K key, long seconds, ExpireArgs expireArgs) {
         nonNull(key, "key");
         positive(seconds, "seconds");
         nonNull(expireArgs, "expireArgs");
         io.lettuce.core.ExpireArgs lettuceArgs = LettuceKeyCommandsConverters.toLettuceExpireArgs(expireArgs);
-        return () -> async.expire(marshaller.encode(key), seconds, lettuceArgs);
+        return LettuceCommand.of(() -> async.expire(marshaller.encode(key), seconds, lettuceArgs));
     }
 
     @Override
     public Uni<Boolean> expire(K key, Duration duration, ExpireArgs expireArgs) {
-        return LettuceResult.toUni(_expire(key, duration, expireArgs));
+        return _expire(key, duration, expireArgs).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _expire(K key, Duration duration, ExpireArgs expireArgs) {
+    LettuceCommand<Boolean, Boolean> _expire(K key, Duration duration, ExpireArgs expireArgs) {
         nonNull(duration, "duration");
         return _expire(key, duration.toSeconds(), expireArgs);
     }
 
     @Override
     public Uni<Boolean> expire(K key, long seconds) {
-        return LettuceResult.toUni(_expire(key, seconds));
+        return _expire(key, seconds).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _expire(K key, long seconds) {
+    LettuceCommand<Boolean, Boolean> _expire(K key, long seconds) {
         return _expire(key, seconds, new ExpireArgs());
     }
 
     @Override
     public Uni<Boolean> expire(K key, Duration duration) {
-        return LettuceResult.toUni(_expire(key, duration));
+        return _expire(key, duration).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _expire(K key, Duration duration) {
+    LettuceCommand<Boolean, Boolean> _expire(K key, Duration duration) {
         nonNull(duration, "duration");
         return _expire(key, duration.toSeconds());
     }
 
     @Override
     public Uni<Boolean> expireat(K key, long timestamp) {
-        return LettuceResult.toUni(_expireat(key, timestamp));
+        return _expireat(key, timestamp).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _expireat(K key, long timestamp) {
+    LettuceCommand<Boolean, Boolean> _expireat(K key, long timestamp) {
         nonNull(key, "key");
         positive(timestamp, "timestamp");
-        return () -> async.expireat(marshaller.encode(key), timestamp);
+        return LettuceCommand.of(() -> async.expireat(marshaller.encode(key), timestamp));
     }
 
     @Override
     public Uni<Boolean> expireat(K key, Instant timestamp) {
-        return LettuceResult.toUni(_expireat(key, timestamp));
+        return _expireat(key, timestamp).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _expireat(K key, Instant timestamp) {
+    LettuceCommand<Boolean, Boolean> _expireat(K key, Instant timestamp) {
         nonNull(timestamp, "timestamp");
         return _expireat(key, timestamp.getEpochSecond());
     }
 
     @Override
     public Uni<Boolean> expireat(K key, long timestamp, ExpireArgs expireArgs) {
-        return LettuceResult.toUni(_expireat(key, timestamp, expireArgs));
+        return _expireat(key, timestamp, expireArgs).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _expireat(K key, long timestamp, ExpireArgs expireArgs) {
+    LettuceCommand<Boolean, Boolean> _expireat(K key, long timestamp, ExpireArgs expireArgs) {
         nonNull(key, "key");
         positive(timestamp, "timestamp");
         nonNull(expireArgs, "expireArgs");
         io.lettuce.core.ExpireArgs lettuceArgs = LettuceKeyCommandsConverters.toLettuceExpireArgs(expireArgs);
-        return () -> async.expireat(marshaller.encode(key), timestamp, lettuceArgs);
+        return LettuceCommand.of(() -> async.expireat(marshaller.encode(key), timestamp, lettuceArgs));
     }
 
     @Override
     public Uni<Boolean> expireat(K key, Instant timestamp, ExpireArgs expireArgs) {
-        return LettuceResult.toUni(_expireat(key, timestamp, expireArgs));
+        return _expireat(key, timestamp, expireArgs).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _expireat(K key, Instant timestamp, ExpireArgs expireArgs) {
+    LettuceCommand<Boolean, Boolean> _expireat(K key, Instant timestamp, ExpireArgs expireArgs) {
         nonNull(timestamp, "timestamp");
         return _expireat(key, timestamp.getEpochSecond(), expireArgs);
     }
 
     @Override
     public Uni<Long> expiretime(K key) {
-        return LettuceResult.toUni(_expiretime(key)).map(r -> decodeExpireResponse(key, r));
+        return _expiretime(key).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _expiretime(K key) {
+    LettuceCommand<Long, Long> _expiretime(K key) {
         nonNull(key, "key");
-        return () -> async.expiretime(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.expiretime(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
     }
 
     @Override
     public Uni<List<K>> keys(String pattern) {
-        nonNull(pattern, "pattern");
-        if (pattern.isBlank()) {
-            throw new IllegalArgumentException("`pattern` must not be blank");
-        }
-        return LettuceResult.toUni(_keys(pattern)).map(this::decodeListOfKeys);
+        return _keys(pattern).toUni();
     }
 
-    Supplier<RedisFuture<List<byte[]>>> _keys(String pattern) {
+    LettuceCommand<List<byte[]>, List<K>> _keys(String pattern) {
         nonNull(pattern, "pattern");
         if (pattern.isBlank()) {
             throw new IllegalArgumentException("`pattern` must not be blank");
         }
-        return () -> async.keys(pattern);
+        return LettuceCommand.of(() -> async.keys(pattern), this::decodeListOfKeys);
     }
 
     @Override
     public Uni<Boolean> move(K key, long db) {
-        return LettuceResult.toUni(_move(key, db));
+        return _move(key, db).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _move(K key, long db) {
+    LettuceCommand<Boolean, Boolean> _move(K key, long db) {
         nonNull(key, "key");
         positiveOrZero(db, "db");
         if (db > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("`db` must fit in a positive int");
         }
-        return () -> async.move(marshaller.encode(key), (int) db);
+        return LettuceCommand.of(() -> async.move(marshaller.encode(key), (int) db));
     }
 
     @Override
     public Uni<Boolean> persist(K key) {
-        return LettuceResult.toUni(_persist(key));
+        return _persist(key).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _persist(K key) {
+    LettuceCommand<Boolean, Boolean> _persist(K key) {
         nonNull(key, "key");
-        return () -> async.persist(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.persist(marshaller.encode(key)));
     }
 
     @Override
     public Uni<Boolean> pexpire(K key, long milliseconds, ExpireArgs expireArgs) {
-        return LettuceResult.toUni(_pexpire(key, milliseconds, expireArgs));
+        return _pexpire(key, milliseconds, expireArgs).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _pexpire(K key, long milliseconds, ExpireArgs expireArgs) {
+    LettuceCommand<Boolean, Boolean> _pexpire(K key, long milliseconds, ExpireArgs expireArgs) {
         nonNull(key, "key");
         positive(milliseconds, "milliseconds");
         nonNull(expireArgs, "expireArgs");
         io.lettuce.core.ExpireArgs lettuceArgs = LettuceKeyCommandsConverters.toLettuceExpireArgs(expireArgs);
-        return () -> async.pexpire(marshaller.encode(key), milliseconds, lettuceArgs);
+        return LettuceCommand.of(() -> async.pexpire(marshaller.encode(key), milliseconds, lettuceArgs));
     }
 
     @Override
     public Uni<Boolean> pexpire(K key, Duration duration, ExpireArgs expireArgs) {
-        return LettuceResult.toUni(_pexpire(key, duration, expireArgs));
+        return _pexpire(key, duration, expireArgs).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _pexpire(K key, Duration duration, ExpireArgs expireArgs) {
+    LettuceCommand<Boolean, Boolean> _pexpire(K key, Duration duration, ExpireArgs expireArgs) {
         nonNull(duration, "duration");
         return _pexpire(key, duration.toMillis(), expireArgs);
     }
 
     @Override
     public Uni<Boolean> pexpire(K key, long ms) {
-        return LettuceResult.toUni(_pexpire(key, ms));
+        return _pexpire(key, ms).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _pexpire(K key, long ms) {
+    LettuceCommand<Boolean, Boolean> _pexpire(K key, long ms) {
         return _pexpire(key, ms, new ExpireArgs());
     }
 
     @Override
     public Uni<Boolean> pexpire(K key, Duration duration) {
-        return LettuceResult.toUni(_pexpire(key, duration));
+        return _pexpire(key, duration).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _pexpire(K key, Duration duration) {
+    LettuceCommand<Boolean, Boolean> _pexpire(K key, Duration duration) {
         nonNull(duration, "duration");
         return _pexpire(key, duration.toMillis());
     }
 
     @Override
     public Uni<Boolean> pexpireat(K key, long timestamp) {
-        return LettuceResult.toUni(_pexpireat(key, timestamp));
+        return _pexpireat(key, timestamp).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _pexpireat(K key, long timestamp) {
+    LettuceCommand<Boolean, Boolean> _pexpireat(K key, long timestamp) {
         nonNull(key, "key");
         positive(timestamp, "timestamp");
-        return () -> async.pexpireat(marshaller.encode(key), timestamp);
+        return LettuceCommand.of(() -> async.pexpireat(marshaller.encode(key), timestamp));
     }
 
     @Override
     public Uni<Boolean> pexpireat(K key, Instant timestamp) {
-        return LettuceResult.toUni(_pexpireat(key, timestamp));
+        return _pexpireat(key, timestamp).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _pexpireat(K key, Instant timestamp) {
+    LettuceCommand<Boolean, Boolean> _pexpireat(K key, Instant timestamp) {
         nonNull(timestamp, "timestamp");
         return _pexpireat(key, timestamp.toEpochMilli());
     }
 
     @Override
     public Uni<Boolean> pexpireat(K key, long timestamp, ExpireArgs expireArgs) {
-        return LettuceResult.toUni(_pexpireat(key, timestamp, expireArgs));
+        return _pexpireat(key, timestamp, expireArgs).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _pexpireat(K key, long timestamp, ExpireArgs expireArgs) {
+    LettuceCommand<Boolean, Boolean> _pexpireat(K key, long timestamp, ExpireArgs expireArgs) {
         nonNull(key, "key");
         positive(timestamp, "timestamp");
         nonNull(expireArgs, "expireArgs");
         io.lettuce.core.ExpireArgs lettuceArgs = LettuceKeyCommandsConverters.toLettuceExpireArgs(expireArgs);
-        return () -> async.pexpireat(marshaller.encode(key), timestamp, lettuceArgs);
+        return LettuceCommand.of(() -> async.pexpireat(marshaller.encode(key), timestamp, lettuceArgs));
     }
 
     @Override
     public Uni<Boolean> pexpireat(K key, Instant timestamp, ExpireArgs expireArgs) {
-        return LettuceResult.toUni(_pexpireat(key, timestamp, expireArgs));
+        return _pexpireat(key, timestamp, expireArgs).toUni();
     }
 
-    Supplier<RedisFuture<Boolean>> _pexpireat(K key, Instant timestamp, ExpireArgs expireArgs) {
+    LettuceCommand<Boolean, Boolean> _pexpireat(K key, Instant timestamp, ExpireArgs expireArgs) {
         nonNull(timestamp, "timestamp");
         return _pexpireat(key, timestamp.toEpochMilli(), expireArgs);
     }
 
     @Override
     public Uni<Long> pexpiretime(K key) {
-        return LettuceResult.toUni(_pexpiretime(key)).map(r -> decodeExpireResponse(key, r));
+        return _pexpiretime(key).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _pexpiretime(K key) {
+    LettuceCommand<Long, Long> _pexpiretime(K key) {
         nonNull(key, "key");
-        return () -> async.pexpiretime(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.pexpiretime(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
     }
 
     @Override
     public Uni<Long> pttl(K key) {
-        return LettuceResult.toUni(_pttl(key)).map(r -> decodeExpireResponse(key, r));
+        return _pttl(key).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _pttl(K key) {
+    LettuceCommand<Long, Long> _pttl(K key) {
         nonNull(key, "key");
-        return () -> async.pttl(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.pttl(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
     }
 
     @Override
     public Uni<K> randomkey() {
-        return LettuceResult.toUni(_randomkey()).map(this::decodeK);
+        return _randomkey().toUni();
     }
 
-    Supplier<RedisFuture<byte[]>> _randomkey() {
-        return async::randomkey;
+    LettuceCommand<byte[], K> _randomkey() {
+        return LettuceCommand.of(async::randomkey, this::decodeK);
     }
 
     @Override
     public Uni<Void> rename(K key, K newkey) {
-        return LettuceResult.toUni(_rename(key, newkey))
-                .onFailure().transform(t -> mapNoSuchKey(key, t))
-                .replaceWithVoid();
+        // Failure mapping is reactive-only: inside a transaction the error surfaces as the entry itself.
+        return _rename(key, newkey).toUni()
+                .onFailure().transform(t -> mapNoSuchKey(key, t));
     }
 
-    Supplier<RedisFuture<String>> _rename(K key, K newkey) {
+    LettuceCommand<String, Void> _rename(K key, K newkey) {
         nonNull(key, "key");
         nonNull(newkey, "newkey");
-        return () -> async.rename(marshaller.encode(key), marshaller.encode(newkey));
+        return LettuceCommand.discarding(() -> async.rename(marshaller.encode(key), marshaller.encode(newkey)));
     }
 
     @Override
     public Uni<Boolean> renamenx(K key, K newkey) {
-        return LettuceResult.toUni(_renamenx(key, newkey))
+        // Failure mapping is reactive-only: inside a transaction the error surfaces as the entry itself.
+        return _renamenx(key, newkey).toUni()
                 .onFailure().transform(t -> mapNoSuchKey(key, t));
     }
 
-    Supplier<RedisFuture<Boolean>> _renamenx(K key, K newkey) {
+    LettuceCommand<Boolean, Boolean> _renamenx(K key, K newkey) {
         nonNull(key, "key");
         nonNull(newkey, "newkey");
-        return () -> async.renamenx(marshaller.encode(key), marshaller.encode(newkey));
+        return LettuceCommand.of(() -> async.renamenx(marshaller.encode(key), marshaller.encode(newkey)));
     }
 
     private Throwable mapNoSuchKey(K key, Throwable t) {
@@ -419,49 +414,49 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     @SafeVarargs
     @Override
     public final Uni<Integer> touch(K... keys) {
-        return LettuceResult.toUni(_touch(keys)).map(Long::intValue);
+        return _touch(keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _touch(K... keys) {
+    final LettuceCommand<Long, Integer> _touch(K... keys) {
         notNullOrEmpty(keys, "keys");
-        return () -> async.touch(marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.touch(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
     }
 
     @Override
     public Uni<Long> ttl(K key) {
-        return LettuceResult.toUni(_ttl(key)).map(r -> decodeExpireResponse(key, r));
+        return _ttl(key).toUni();
     }
 
-    Supplier<RedisFuture<Long>> _ttl(K key) {
+    LettuceCommand<Long, Long> _ttl(K key) {
         nonNull(key, "key");
-        return () -> async.ttl(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.ttl(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
     }
 
     @Override
     public Uni<RedisValueType> type(K key) {
-        return LettuceResult.toUni(_type(key))
-                .map(s -> s == null ? null : RedisValueType.valueOf(s.toUpperCase()));
+        return _type(key).toUni();
     }
 
-    Supplier<RedisFuture<String>> _type(K key) {
+    LettuceCommand<String, RedisValueType> _type(K key) {
         nonNull(key, "key");
-        return () -> async.type(marshaller.encode(key));
+        return LettuceCommand.of(() -> async.type(marshaller.encode(key)),
+                s -> s == null ? null : RedisValueType.valueOf(s.toUpperCase()));
     }
 
     @SafeVarargs
     @Override
     public final Uni<Integer> unlink(K... keys) {
-        return LettuceResult.toUni(_unlink(keys)).map(Long::intValue);
+        return _unlink(keys).toUni();
     }
 
     @SafeVarargs
-    final Supplier<RedisFuture<Long>> _unlink(K... keys) {
+    final LettuceCommand<Long, Integer> _unlink(K... keys) {
         notNullOrEmpty(keys, "keys");
-        return () -> async.unlink(marshaller.encodeAsArray(keys));
+        return LettuceCommand.of(() -> async.unlink(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
     }
 
-    long decodeExpireResponse(K key, Long r) {
+    private long decodeExpireResponse(K key, Long r) {
         if (r == null || r == -2L) {
             throw new RedisKeyNotFoundException(String.valueOf(key));
         }
