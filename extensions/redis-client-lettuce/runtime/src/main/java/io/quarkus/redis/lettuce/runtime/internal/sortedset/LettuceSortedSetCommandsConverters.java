@@ -1,6 +1,7 @@
 package io.quarkus.redis.lettuce.runtime.internal.sortedset;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.sortedset.Range;
@@ -16,10 +17,11 @@ public final class LettuceSortedSetCommandsConverters {
     }
 
     public static io.lettuce.core.ZAddArgs toLettuceZAddArgs(ZAddArgs quarkus) {
+        List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.ZAddArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(quarkus, args);
+                ArgReplay.replay(tokens, args);
             }
         };
     }
@@ -44,19 +46,21 @@ public final class LettuceSortedSetCommandsConverters {
     }
 
     public static io.lettuce.core.ZAggregateArgs toLettuceZAggregateArgs(ZAggregateArgs quarkus) {
+        List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.ZAggregateArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(quarkus, args);
+                ArgReplay.replay(tokens, args);
             }
         };
     }
 
     public static io.lettuce.core.ZStoreArgs toLettuceZStoreArgs(ZAggregateArgs quarkus) {
+        List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.ZStoreArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(quarkus, args);
+                ArgReplay.replay(tokens, args);
             }
         };
     }

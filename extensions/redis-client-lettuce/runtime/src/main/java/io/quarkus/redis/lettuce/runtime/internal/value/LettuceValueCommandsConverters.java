@@ -1,5 +1,6 @@
 package io.quarkus.redis.lettuce.runtime.internal.value;
 
+import java.util.List;
 import java.util.Set;
 
 import io.lettuce.core.protocol.CommandArgs;
@@ -14,19 +15,21 @@ public final class LettuceValueCommandsConverters {
     }
 
     public static io.lettuce.core.SetArgs toLettuceSetArgs(SetArgs quarkus) {
+        List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.SetArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replayExcept(quarkus, args, Set.of("GET"));
+                ArgReplay.replayExcept(tokens, args, Set.of("GET"));
             }
         };
     }
 
     public static io.lettuce.core.GetExArgs toLettuceGetExArgs(GetExArgs quarkus) {
+        List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.GetExArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(quarkus, args);
+                ArgReplay.replay(tokens, args);
             }
         };
     }

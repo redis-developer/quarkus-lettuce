@@ -4,6 +4,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.jboss.logging.Logger;
 
+import io.lettuce.core.metrics.CommandLatencyRecorder;
 import io.lettuce.core.resource.ClientResources;
 import io.netty.channel.EventLoopGroup;
 
@@ -32,6 +33,10 @@ public class LettuceClientResources {
 
         this.clientResources = ClientResources.builder()
                 .eventLoopGroupProvider(eventLoopGroupProvider)
+                // LatencyUtils and HdrHistogram are on the classpath (needed for native images), which would make
+                // Lettuce enable its command latency collector by default: every command gets wrapped and recorded,
+                // a pause detector thread is started and latency events are published with no consumer.
+                .commandLatencyRecorder(CommandLatencyRecorder.disabled())
                 .build();
     }
 
