@@ -118,6 +118,28 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         await().atMost(TIMEOUT).until(() -> pool.getIdle() == 1);
     }
 
+    @Test
+    void withPooledReleasesConnectionWhenBodyThrowsSynchronously() {
+        LettuceConnectionPool pool = pool(1, 1);
+        IllegalArgumentException boom = new IllegalArgumentException("bad args");
+
+        // The body throws from apply() itself (like eager argument validation), before ever
+        // returning a Uni to subscribe to. The failure must reach the caller...
+        assertThatThrownBy(() -> pool.<Void> withPooled(conn -> {
+            throw boom;
+        }).await().atMost(TIMEOUT)).isSameAs(boom);
+
+        // ...and the connection must be back in the pool, not leaked as checked-out forever.
+        assertThat(pool.getObjectCount()).isEqualTo(1);
+        assertThat(pool.getIdle()).isEqualTo(1);
+
+        // With maxTotal=1, this would queue forever (and time out) had the connection leaked.
+        Long pong = pool.withPooled(conn -> LettuceResult.toUni(() -> conn.async().clientId()))
+                .await().atMost(TIMEOUT);
+        assertThat(pong).isNotNull();
+        assertThat(pool.getIdle()).isEqualTo(1);
+    }
+
     private static void rawPush(String key, String value) {
         connection.sync().rpush(key.getBytes(StandardCharsets.UTF_8), value.getBytes(StandardCharsets.UTF_8));
     }

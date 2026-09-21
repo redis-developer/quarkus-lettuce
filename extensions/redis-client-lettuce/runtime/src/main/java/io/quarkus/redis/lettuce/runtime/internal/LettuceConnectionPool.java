@@ -97,12 +97,16 @@ public final class LettuceConnectionPool {
     /**
      * Runs {@code body} on a pooled connection, releasing it only once {@code body} truly
      * completes (item or failure) — never merely because the caller stopped waiting.
+     * <p>
+     * {@code body} is invoked lazily inside a deferred {@link Uni} so that an exception thrown
+     * synchronously by {@code body.apply(conn)} (e.g. eager argument validation) is routed to
+     * the failure path and the connection is released rather than leaked.
      */
     public <T> Uni<T> withPooled(Function<StatefulRedisConnection<byte[], byte[]>, Uni<T>> body) {
         return acquire()
                 .onItem().transformToUni(conn -> {
                     CompletableFuture<T> result = new CompletableFuture<>();
-                    body.apply(conn).subscribe().with(
+                    Uni.createFrom().deferred(() -> body.apply(conn)).subscribe().with(
                             item -> releaseThenComplete(conn, result, item, null),
                             failure -> releaseThenComplete(conn, result, null, failure));
                     return Uni.createFrom().completionStage(result);
