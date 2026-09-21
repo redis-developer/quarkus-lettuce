@@ -117,7 +117,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         // Acquire the connection and run the user block on the calling (worker) thread. Running it
         // inside the reactive withConnection pipeline would execute it on the event loop thread
         // that completed the connection, where the block's blocking calls would deadlock.
-        StatefulRedisConnection<byte[], byte[]> conn = reactive.acquireConnection().await().atMost(timeout);
+        StatefulRedisConnection<byte[], byte[]> conn = reactive.acquireConnection(timeout);
         try {
             LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl
                     .pinnedTo(reactive.getVertx(), conn);
@@ -209,7 +209,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
      * inside {@code withConnection}, otherwise open a fresh one via the connector.
      */
     private StatefulRedisConnection<byte[], byte[]> acquire() {
-        return pinned ? reactive.getConnection() : reactive.acquireConnection().await().atMost(timeout);
+        return pinned ? reactive.getConnection() : reactive.acquireConnection(timeout);
     }
 
     /**
