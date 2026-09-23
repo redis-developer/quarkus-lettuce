@@ -14,7 +14,7 @@ public final class LettuceBitMapCommandsConverters {
         return new io.lettuce.core.BitFieldArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(quarkus, args);
+                ArgReplay.replay(quarkus.toArgs(), args);
             }
         };
     }
