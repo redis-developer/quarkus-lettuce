@@ -16,6 +16,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.autosuggest.AutoSuggestCommands;
 import io.quarkus.redis.datasource.bitmap.BitMapCommands;
+import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
 import io.quarkus.redis.datasource.bloom.BloomCommands;
 import io.quarkus.redis.datasource.countmin.CountMinCommands;
 import io.quarkus.redis.datasource.cuckoo.CuckooCommands;
@@ -24,6 +25,7 @@ import io.quarkus.redis.datasource.graph.GraphCommands;
 import io.quarkus.redis.datasource.hash.HashCommands;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.hyperloglog.HyperLogLogCommands;
+import io.quarkus.redis.datasource.hyperloglog.ReactiveHyperLogLogCommands;
 import io.quarkus.redis.datasource.json.JsonCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.list.ListCommands;
@@ -44,7 +46,9 @@ import io.quarkus.redis.datasource.transactions.TransactionalRedisDataSource;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
+import io.quarkus.redis.runtime.datasource.BlockingBitmapCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHashCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingHyperLogLogCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingKeyCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingListCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingSetCommandsImpl;
@@ -114,13 +118,16 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
             consumer.accept(this);
             return;
         }
-        // Await the connection and run the user block on the calling (worker) thread. Running it
+        // Acquire the connection and run the user block on the calling (worker) thread. Running it
         // inside the reactive withConnection pipeline would execute it on the event loop thread
         // that completed the connection, where the block's blocking calls would deadlock.
-        try (StatefulRedisConnection<byte[], byte[]> conn = reactive.openConnection().await().atMost(timeout)) {
+        StatefulRedisConnection<byte[], byte[]> conn = reactive.acquireConnection(timeout);
+        try {
             LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl
                     .pinnedTo(reactive.getVertx(), conn);
             consumer.accept(pinnedTo(pinnedReactive, timeout));
+        } finally {
+            reactive.releaseConnection(conn).await().atMost(timeout);
         }
     }
 
@@ -206,16 +213,16 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
      * inside {@code withConnection}, otherwise open a fresh one via the connector.
      */
     private StatefulRedisConnection<byte[], byte[]> acquire() {
-        return pinned ? reactive.getConnection() : reactive.openConnection().await().atMost(timeout);
+        return pinned ? reactive.getConnection() : reactive.acquireConnection(timeout);
     }
 
     /**
      * Releases a transaction connection. A pinned (reused) connection is left open for the outer
-     * scope to release; a freshly opened one is closed here.
+     * scope to release; a borrowed one is returned to the pool here.
      */
     private void release(StatefulRedisConnection<byte[], byte[]> conn) {
         if (!pinned) {
-            LettuceResult.toBlocking(conn.closeAsync(), timeout);
+            reactive.releaseConnection(conn).await().atMost(timeout);
         }
     }
 
@@ -349,22 +356,26 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, V> HyperLogLogCommands<K, V> hyperloglog(Class<K> redisKeyType, Class<V> memberType) {
-        throw groupNotImplemented("hyperloglog");
+        ReactiveHyperLogLogCommands<K, V> r = reactive.hyperloglog(redisKeyType, memberType);
+        return new BlockingHyperLogLogCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> HyperLogLogCommands<K, V> hyperloglog(TypeReference<K> redisKeyType, TypeReference<V> memberType) {
-        throw groupNotImplemented("hyperloglog");
+        ReactiveHyperLogLogCommands<K, V> r = reactive.hyperloglog(redisKeyType, memberType);
+        return new BlockingHyperLogLogCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K> BitMapCommands<K> bitmap(Class<K> redisKeyType) {
-        throw groupNotImplemented("bitmap");
+        ReactiveBitMapCommands<K> r = reactive.bitmap(redisKeyType);
+        return new BlockingBitmapCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K> BitMapCommands<K> bitmap(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("bitmap");
+        ReactiveBitMapCommands<K> r = reactive.bitmap(redisKeyType);
+        return new BlockingBitmapCommandsImpl<>(this, r, timeout);
     }
 
     @Override

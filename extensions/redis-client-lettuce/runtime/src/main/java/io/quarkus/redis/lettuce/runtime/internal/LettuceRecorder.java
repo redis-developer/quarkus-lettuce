@@ -37,14 +37,17 @@ import io.vertx.redis.client.RedisClientType;
  * <p>
  * Creates {@link io.lettuce.core.resource.ClientResources} with shared Vert.x event loops,
  * {@link io.lettuce.core.RedisClient} instances configured from {@code quarkus.redis.hosts},
- * and {@link StatefulRedisConnection} instances.
+ * and {@link StatefulRedisConnection} instances. Also creates, per client, a bounded
+ * {@link LettuceConnectionPool} used for blocking commands and scoped connections
+ * ({@code withConnection}/{@code withTransaction}) so they never occupy the shared connection.
  * <p>
- * Shutdown ordering: connections → clients → resources (before Vert.x event loops).
+ * Shutdown ordering: connections → pools → clients → resources (before Vert.x event loops).
  */
 @Recorder
 public class LettuceRecorder {
 
     private static final Logger LOGGER = Logger.getLogger(LettuceRecorder.class);
+    private static final Duration POOL_CLOSE_TIMEOUT = Duration.ofSeconds(10);
 
     private final RuntimeValue<RedisConfig> runtimeConfig;
 
@@ -54,6 +57,7 @@ public class LettuceRecorder {
     private static final Map<String, StatefulRedisConnection<byte[], byte[]>> connections = new ConcurrentHashMap<>();
     private static final Map<String, StatefulRedisConnection<String, String>> stringConnections = new ConcurrentHashMap<>();
     private static final Map<String, LettuceReactiveRedisDataSourceImpl> reactiveDataSources = new ConcurrentHashMap<>();
+    private static final Map<String, LettuceConnectionPool> pools = new ConcurrentHashMap<>();
 
     public LettuceRecorder(RuntimeValue<RedisConfig> runtimeConfig) {
         this.runtimeConfig = runtimeConfig;
@@ -75,7 +79,11 @@ public class LettuceRecorder {
                 Set<URI> hosts = clientConfig.hosts().orElseThrow();
                 warnAboutUnsupportedConfiguration(name, clientConfig, hosts);
                 URI redisUri = hosts.iterator().next();
-                factories.putIfAbsent(name, new LettuceConnectionFactory(name, sharedResources.clientResources(), redisUri));
+                LettuceConnectionFactory factory = factories.computeIfAbsent(name,
+                        k -> new LettuceConnectionFactory(name, sharedResources.clientResources(), redisUri,
+                                clientConfig.timeout()));
+                pools.putIfAbsent(name, new LettuceConnectionPool(factory::connectAsync,
+                        clientConfig.maxPoolSize(), clientConfig.maxPoolWaiting()));
             }
         }
     }
@@ -136,8 +144,7 @@ public class LettuceRecorder {
     public Supplier<ReactiveRedisDataSource> getReactiveDataSource(String name) {
         return () -> reactiveDataSources.computeIfAbsent(name, k -> {
             StatefulRedisConnection<byte[], byte[]> conn = dataSourceConnection(k);
-            LettuceConnectionFactory factory = factories.get(k);
-            return new LettuceReactiveRedisDataSourceImpl(mutinyVertx, conn, factory::connectAsync);
+            return new LettuceReactiveRedisDataSourceImpl(mutinyVertx, conn, pools.get(k));
         });
     }
 
@@ -188,6 +195,15 @@ public class LettuceRecorder {
             closeConnections(connections);
             closeConnections(stringConnections);
             reactiveDataSources.clear();
+
+            for (Map.Entry<String, LettuceConnectionPool> entry : pools.entrySet()) {
+                try {
+                    entry.getValue().close().await().atMost(POOL_CLOSE_TIMEOUT);
+                } catch (Exception e) {
+                    LOGGER.warnf(e, "Error closing Lettuce connection pool for '%s'", entry.getKey());
+                }
+            }
+            pools.clear();
 
             for (Map.Entry<String, LettuceConnectionFactory> entry : factories.entrySet()) {
                 try {

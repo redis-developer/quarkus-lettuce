@@ -29,8 +29,12 @@ import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSo
 import io.quarkus.redis.datasource.value.ReactiveTransactionalValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
+import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveTransactionalBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveTransactionalHashCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveHyperLogLogCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveTransactionalHyperLogLogCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveTransactionalKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.list.LettuceReactiveListCommandsImpl;
@@ -162,12 +166,19 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalHyperLogLogCommands<K, V> hyperloglog(Class<K> redisKeyType, Class<V> memberType) {
-        throw groupNotImplemented("hyperloglog");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(memberType, "memberType");
+        LettuceReactiveHyperLogLogCommandsImpl<K, V> reactiveHyperLogLog = (LettuceReactiveHyperLogLogCommandsImpl<K, V>) reactive
+                .hyperloglog(redisKeyType, memberType);
+        return new LettuceReactiveTransactionalHyperLogLogCommandsImpl<>(this, reactiveHyperLogLog, tx);
     }
 
     @Override
     public <K> ReactiveTransactionalBitMapCommands<K> bitmap(Class<K> redisKeyType) {
-        throw groupNotImplemented("bitmap");
+        nonNull(redisKeyType, "redisKeyType");
+        LettuceReactiveBitMapCommandsImpl<K> reactiveBitMap = (LettuceReactiveBitMapCommandsImpl<K>) reactive
+                .bitmap(redisKeyType);
+        return new LettuceReactiveTransactionalBitMapCommandsImpl<>(this, reactiveBitMap, tx);
     }
 
     @Override
