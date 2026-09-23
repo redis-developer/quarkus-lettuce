@@ -25,6 +25,7 @@ import io.quarkus.redis.datasource.graph.GraphCommands;
 import io.quarkus.redis.datasource.hash.HashCommands;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.hyperloglog.HyperLogLogCommands;
+import io.quarkus.redis.datasource.hyperloglog.ReactiveHyperLogLogCommands;
 import io.quarkus.redis.datasource.json.JsonCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.list.ListCommands;
@@ -47,6 +48,7 @@ import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.BlockingBitmapCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHashCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingHyperLogLogCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingKeyCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingListCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingSetCommandsImpl;
@@ -354,12 +356,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, V> HyperLogLogCommands<K, V> hyperloglog(Class<K> redisKeyType, Class<V> memberType) {
-        throw groupNotImplemented("hyperloglog");
+        ReactiveHyperLogLogCommands<K, V> r = reactive.hyperloglog(redisKeyType, memberType);
+        return new BlockingHyperLogLogCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> HyperLogLogCommands<K, V> hyperloglog(TypeReference<K> redisKeyType, TypeReference<V> memberType) {
-        throw groupNotImplemented("hyperloglog");
+        ReactiveHyperLogLogCommands<K, V> r = reactive.hyperloglog(redisKeyType, memberType);
+        return new BlockingHyperLogLogCommandsImpl<>(this, r, timeout);
     }
 
     @Override

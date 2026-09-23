@@ -46,6 +46,7 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveHyperLogLogCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.list.LettuceReactiveListCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveSetCommandsImpl;
@@ -417,12 +418,16 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K, V> ReactiveHyperLogLogCommands<K, V> hyperloglog(Class<K> redisKeyType, Class<V> memberType) {
-        throw groupNotImplemented("hyperloglog");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(memberType, "memberType");
+        return new LettuceReactiveHyperLogLogCommandsImpl<>(this, connection, redisKeyType, memberType);
     }
 
     @Override
     public <K, V> ReactiveHyperLogLogCommands<K, V> hyperloglog(TypeReference<K> redisKeyType, TypeReference<V> memberType) {
-        throw groupNotImplemented("hyperloglog");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(memberType, "memberType");
+        return new LettuceReactiveHyperLogLogCommandsImpl<>(this, connection, redisKeyType.getType(), memberType.getType());
     }
 
     @Override
