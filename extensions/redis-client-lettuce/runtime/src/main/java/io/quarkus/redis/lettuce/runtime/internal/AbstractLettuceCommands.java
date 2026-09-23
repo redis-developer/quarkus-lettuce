@@ -54,8 +54,9 @@ public abstract class AbstractLettuceCommands<K, V> {
     }
 
     protected <T, R> Uni<R> blocking(Function<RedisAsyncCommands<byte[], byte[]>, LettuceCommand<T, R>> builder) {
+        LettuceCommand<T, R> validated = builder.apply(async);
         if (pool == null) {
-            return builder.apply(async).toUni();
+            return validated.toUni();
         }
         return pool.withPooled(conn -> builder.apply(conn.async()).toUni());
     }

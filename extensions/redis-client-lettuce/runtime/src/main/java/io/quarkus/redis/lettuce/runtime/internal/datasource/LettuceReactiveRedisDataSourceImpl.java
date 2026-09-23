@@ -6,6 +6,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -163,8 +164,8 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                         + "or remove the quarkus-redis-client-lettuce extension to use the Vert.x backend.");
     }
 
-    Uni<StatefulRedisConnection<byte[], byte[]>> acquireConnection() {
-        return pool.acquire();
+    StatefulRedisConnection<byte[], byte[]> acquireConnection(Duration timeout) {
+        return pool.acquireBlocking(timeout);
     }
 
     Uni<Void> releaseConnection(StatefulRedisConnection<byte[], byte[]> conn) {
@@ -176,12 +177,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         if (pinned) {
             return function.apply(this);
         }
-        return acquireConnection()
-                .onItem().transformToUni(conn -> {
-                    LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn);
-                    return Uni.createFrom().deferred(() -> function.apply(pinnedDs))
-                            .onTermination().call(() -> pool.release(conn));
-                });
+        return pool.withScoped(conn -> function.apply(pinnedTo(vertx, conn)));
     }
 
     @Override
@@ -221,9 +217,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         if (pinned) {
             return Uni.createFrom().deferred(() -> body.apply(connection));
         }
-        return acquireConnection()
-                .onItem().transformToUni(conn -> Uni.createFrom().deferred(() -> body.apply(conn))
-                        .onTermination().call(() -> pool.release(conn)));
+        return pool.withScoped(body);
     }
 
     private Uni<TransactionResult> runTx(StatefulRedisConnection<byte[], byte[]> conn,

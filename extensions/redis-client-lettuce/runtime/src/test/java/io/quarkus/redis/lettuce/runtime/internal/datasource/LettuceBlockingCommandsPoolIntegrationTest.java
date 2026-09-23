@@ -91,6 +91,31 @@ class LettuceBlockingCommandsPoolIntegrationTest extends CommandsTestBase {
         assertThat(resultB.get()).isEqualTo(KeyValue.of(keyB, "for-b"));
     }
 
+    @Test
+    void invalidBlockingArgumentsFailAtCallTimeWithoutTouchingThePool() {
+        LettuceConnectionPool pool = pool(1, 1);
+        LettuceReactiveRedisDataSourceImpl ds = new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool);
+
+        // Argument validation runs eagerly, so the call itself throws — no subscription needed —
+        // matching the behaviour of non-blocking commands.
+        assertThatThrownBy(() -> ds.list(String.class, String.class).blpop(Duration.ofSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("keys");
+        assertThatThrownBy(() -> ds.list(String.class, String.class).blpop(Duration.ofSeconds(1), (String) null))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // No connection was acquired for the rejected calls.
+        assertThat(pool.getObjectCount()).isZero();
+
+        // The pool is fully usable afterwards: a valid BLPOP on the same 1-connection pool completes.
+        String k = UUID.randomUUID().toString();
+        rawPush(k, "v");
+        KeyValue<String, String> result = ds.list(String.class, String.class).blpop(Duration.ofSeconds(1), k)
+                .await().atMost(TIMEOUT);
+        assertThat(result).isEqualTo(KeyValue.of(k, "v"));
+        await().atMost(TIMEOUT).until(() -> pool.getIdle() == 1);
+    }
+
     private static void rawPush(String key, String value) {
         connection.sync().rpush(key.getBytes(StandardCharsets.UTF_8), value.getBytes(StandardCharsets.UTF_8));
     }
