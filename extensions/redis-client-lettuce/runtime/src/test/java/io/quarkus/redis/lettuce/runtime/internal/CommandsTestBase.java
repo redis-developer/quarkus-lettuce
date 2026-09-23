@@ -104,7 +104,7 @@ public abstract class CommandsTestBase {
     }
 
     protected static LettuceConnectionPool pool(int maxPoolSize, int maxWaiting) {
-        return new LettuceConnectionPool(connector(), maxPoolSize, maxWaiting);
+        return new LettuceConnectionPool(connector(), maxPoolSize, maxWaiting, redisUri.getDatabase());
     }
 
     protected static LettuceReactiveRedisDataSourceImpl reactiveDataSource() {
@@ -131,6 +131,28 @@ public abstract class CommandsTestBase {
     protected static String rawGet(String key) {
         byte[] bytes = connection.sync().get(key.getBytes(StandardCharsets.UTF_8));
         return bytes == null ? null : new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    protected static String rawGetOnDatabase(int database, String key) {
+        connection.sync().select(database);
+        try {
+            return rawGet(key);
+        } finally {
+            connection.sync().select(0);
+        }
+    }
+
+    protected static String lastCommandOf(long clientId) {
+        for (String line : connection.sync().clientList().split("\n")) {
+            if (line.startsWith("id=" + clientId + " ")) {
+                for (String field : line.split(" ")) {
+                    if (field.startsWith("cmd=")) {
+                        return field.substring("cmd=".length());
+                    }
+                }
+            }
+        }
+        throw new AssertionError("No client with id " + clientId + " in CLIENT LIST");
     }
 
 }

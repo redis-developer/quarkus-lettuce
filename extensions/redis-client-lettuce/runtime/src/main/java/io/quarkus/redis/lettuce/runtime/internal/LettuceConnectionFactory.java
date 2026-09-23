@@ -96,6 +96,14 @@ public class LettuceConnectionFactory {
     }
 
     /**
+     * Returns the database index of the configured URI ({@code 0} unless the URI names one).
+     * Every connection this factory opens starts on it.
+     */
+    public int getDatabase() {
+        return redisUri.getDatabase();
+    }
+
+    /**
      * Returns the underlying {@link RedisClient}.
      */
     public RedisClient getRedisClient() {

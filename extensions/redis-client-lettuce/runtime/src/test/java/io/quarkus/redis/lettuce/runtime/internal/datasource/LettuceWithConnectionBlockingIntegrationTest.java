@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -74,6 +75,59 @@ class LettuceWithConnectionBlockingIntegrationTest extends CommandsTestBase {
         }
         assertThat(ds.value(String.class, Integer.class).get(key)).isEqualTo(1000);
         await().atMost(TIMEOUT).until(() -> connectionCount() <= before + 1);
+    }
+
+    @Test
+    void selectInsideBlockIsResetBeforeTheConnectionIsReused() {
+        ds.withConnection(rds -> {
+            rds.select(1);
+            rds.value(String.class).set(key, "db1");
+        });
+        assertNextBorrowIsOnDefaultDatabase();
+    }
+
+    @Test
+    void selectViaExecuteInsideBlockIsResetBeforeTheConnectionIsReused() {
+        ds.withConnection(rds -> {
+            rds.execute("SELECT", "1");
+            rds.value(String.class).set(key, "db1");
+        });
+        assertNextBorrowIsOnDefaultDatabase();
+    }
+
+    @Test
+    void selectBeforeNestedTransactionIsResetWhenTheOuterBlockReleases() {
+        // The nested transaction pins a second data source to the same connection; the reset must
+        // still happen when the outer block, which owns the connection, releases it.
+        ds.withConnection(outer -> {
+            outer.select(1);
+            outer.withTransaction(tx -> tx.value(String.class).set(key, "db1"));
+        });
+        assertNextBorrowIsOnDefaultDatabase();
+    }
+
+    @Test
+    void selectInOptimisticLockingPreTxIsResetBeforeTheConnectionIsReused() {
+        ds.withTransaction(pre -> {
+            pre.select(1);
+            return "input";
+        }, (input, tx) -> tx.value(String.class).set(key, "db1"), key);
+        assertNextBorrowIsOnDefaultDatabase();
+    }
+
+    /**
+     * The block wrote {@code key} on database 1. Whoever borrows the connection next must be back on
+     * database 0 and not see it, whether through {@code withConnection} or a blocking command on the
+     * shared data source, which borrows from the same pool.
+     */
+    private void assertNextBorrowIsOnDefaultDatabase() {
+        assertThat(rawGetOnDatabase(1, key)).isEqualTo("db1");
+        ds.withConnection(rds -> {
+            assertThat(rds.execute("CLIENT", "INFO").toString()).contains(" db=0 ");
+            assertThat(rds.value(String.class).get(key)).isNull();
+        });
+        // On database 1 this would fail with WRONGTYPE, since key holds a string there.
+        assertThat(ds.list(String.class, String.class).blpop(Duration.ofMillis(100), key)).isNull();
     }
 
     @Test

@@ -120,7 +120,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         StatefulRedisConnection<byte[], byte[]> conn = reactive.acquireConnection(timeout);
         try {
             LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl
-                    .pinnedTo(reactive.getVertx(), conn);
+                    .pinnedTo(reactive.getVertx(), conn, reactive.getPool());
             consumer.accept(pinnedTo(pinnedReactive, timeout));
         } finally {
             reactive.releaseConnection(conn).await().atMost(timeout);
@@ -172,7 +172,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         try {
             LettuceTransactionHolder holder = new LettuceTransactionHolder();
             LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl.pinnedTo(
-                    reactive.getVertx(), conn);
+                    reactive.getVertx(), conn, reactive.getPool());
             BlockingTransactionalRedisDataSourceImpl source = new BlockingTransactionalRedisDataSourceImpl(
                     new LettuceReactiveTransactionalRedisDataSourceImpl(pinnedReactive, holder), timeout);
 
@@ -225,7 +225,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
     private BlockingTransactionalRedisDataSourceImpl transactionalSource(StatefulRedisConnection<byte[], byte[]> conn,
             LettuceTransactionHolder holder) {
         LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl.pinnedTo(
-                reactive.getVertx(), conn);
+                reactive.getVertx(), conn, reactive.getPool());
         return new BlockingTransactionalRedisDataSourceImpl(
                 new LettuceReactiveTransactionalRedisDataSourceImpl(pinnedReactive, holder), timeout);
     }
