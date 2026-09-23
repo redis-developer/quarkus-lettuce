@@ -14,6 +14,7 @@ import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 
 class LettuceWithTransactionBlockingIntegrationTest extends CommandsTestBase {
 
@@ -113,13 +114,25 @@ class LettuceWithTransactionBlockingIntegrationTest extends CommandsTestBase {
 
     @Test
     void userBlockExceptionIssuesDiscardAndPropagates() {
-        long before = connectionCount();
         assertThatThrownBy(() -> ds.withTransaction(tx -> {
             tx.value(String.class, String.class).set("k", "v");
             throw new RuntimeException("boom");
         })).hasMessageContaining("boom");
-        await().atMost(TIMEOUT).until(() -> connectionCount() == before);
+        LettuceConnectionPool pool = ((LettuceReactiveRedisDataSourceImpl) ds.getReactive()).getPool();
+        await().atMost(TIMEOUT).until(() -> pool.getIdle() == pool.getObjectCount());
         assertThat(rawGet("k")).isNull();
+    }
+
+    @Test
+    void connectionReturnedAfterDiscardServesSubsequentWithConnection() {
+        ds.withTransaction(tx -> {
+            tx.value(String.class, String.class).set("k", "v");
+            tx.discard();
+        });
+        // A connection stuck mid-transaction (DISCARD never issued) would hang this call.
+        ds.withConnection(rds -> rds.execute("CLIENT", "ID"));
+        LettuceConnectionPool pool = ((LettuceReactiveRedisDataSourceImpl) ds.getReactive()).getPool();
+        assertThat(pool.getIdle()).isEqualTo(pool.getObjectCount());
     }
 
     @Test

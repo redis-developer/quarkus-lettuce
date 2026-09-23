@@ -29,6 +29,8 @@ public abstract class CommandsTestBase {
     protected static final Duration TIMEOUT = Duration.ofSeconds(5);
     protected static final String REDIS_DEFAULT_IMAGE = "redis:7-alpine";
     protected static final GenericContainer<?> REDIS = createContainer();
+    protected static final int MAX_POOL_SIZE = 6;
+    protected static final int MAX_POOL_WAITING = 24;
 
     protected static Vertx vertx;
     protected static LettuceClientResources lettuceResources;
@@ -97,8 +99,16 @@ public abstract class CommandsTestBase {
         return CommandsTestBase::connectAsync;
     }
 
+    protected static LettuceConnectionPool pool() {
+        return pool(MAX_POOL_SIZE, MAX_POOL_WAITING);
+    }
+
+    protected static LettuceConnectionPool pool(int maxPoolSize, int maxWaiting) {
+        return new LettuceConnectionPool(connector(), maxPoolSize, maxWaiting, redisUri.getDatabase());
+    }
+
     protected static LettuceReactiveRedisDataSourceImpl reactiveDataSource() {
-        return new LettuceReactiveRedisDataSourceImpl(vertx, connection, connector());
+        return new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool());
     }
 
     protected static LettuceBlockingRedisDataSourceImpl blockingDataSource() {
@@ -121,6 +131,28 @@ public abstract class CommandsTestBase {
     protected static String rawGet(String key) {
         byte[] bytes = connection.sync().get(key.getBytes(StandardCharsets.UTF_8));
         return bytes == null ? null : new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    protected static String rawGetOnDatabase(int database, String key) {
+        connection.sync().select(database);
+        try {
+            return rawGet(key);
+        } finally {
+            connection.sync().select(0);
+        }
+    }
+
+    protected static String lastCommandOf(long clientId) {
+        for (String line : connection.sync().clientList().split("\n")) {
+            if (line.startsWith("id=" + clientId + " ")) {
+                for (String field : line.split(" ")) {
+                    if (field.startsWith("cmd=")) {
+                        return field.substring("cmd=".length());
+                    }
+                }
+            }
+        }
+        throw new AssertionError("No client with id " + clientId + " in CLIENT LIST");
     }
 
 }
