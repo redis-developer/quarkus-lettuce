@@ -67,7 +67,34 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         LettuceConnectionPool pool = pool(1, 1);
         pool.close().await().atMost(TIMEOUT);
         assertThatThrownBy(() -> pool.acquireBlocking(TIMEOUT))
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("closed");
+    }
+
+    @Test
+    void closeFailsQueuedWaitersInsteadOfLeavingThemHanging() throws Exception {
+        LettuceConnectionPool pool = pool(1, 1);
+        pool.acquireBlocking(TIMEOUT); // hold the only connection so the next caller queues
+
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread waiter = new Thread(() -> {
+            try {
+                pool.acquireBlocking(TIMEOUT);
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        });
+        waiter.start();
+        await().atMost(TIMEOUT).until(() -> waiter.getState() == Thread.State.TIMED_WAITING);
+
+        pool.close().await().atMost(TIMEOUT);
+
+        // Well within the waiter's own timeout: it was failed by close(), not by giving up.
+        waiter.join(Duration.ofSeconds(1).toMillis());
+        assertThat(waiter.isAlive()).isFalse();
+        assertThat(failure.get())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("closed");
     }
 
     @Test
@@ -154,6 +181,43 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
                 });
                 cancel.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
                 release.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+
+                await().atMost(TIMEOUT).pollInterval(Duration.ofMillis(1)).until(() -> pool.getIdle() == 1);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(pool.getObjectCount()).isEqualTo(1);
+    }
+
+    @Test
+    void releaseRacingAnExhaustedAcquireNeverLosesTheWakeUp() throws Exception {
+        // Lost wake-up: an acquire finds the pool exhausted, and before it is queued a concurrent
+        // release() finds no waiter and returns the connection to Lettuce's idle cache. The queued
+        // caller would then wait for a release that never comes. The pool lock makes the two
+        // decisions mutually exclusive; there is no hook into the window, so race them many times.
+        LettuceConnectionPool pool = pool(1, 1);
+        // Mutiny's context-propagation hook is registered lazily on first use and is not safe to
+        // race from two threads; run through it once here so the race below only races the pool.
+        pool.release(pool.acquireBlocking(TIMEOUT)).await().atMost(TIMEOUT);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            for (int i = 0; i < 300; i++) {
+                StatefulRedisConnection<byte[], byte[]> held = pool.acquireBlocking(TIMEOUT);
+
+                CyclicBarrier barrier = new CyclicBarrier(2);
+                Future<?> release = executor.submit(() -> {
+                    barrier.await();
+                    pool.release(held).await().atMost(TIMEOUT);
+                    return null;
+                });
+                Future<Long> acquire = executor.submit(() -> {
+                    barrier.await();
+                    return pool.withPooled(conn -> LettuceResult.toUni(() -> conn.async().clientId()))
+                            .await().atMost(TIMEOUT);
+                });
+                release.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+                assertThat(acquire.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)).isNotNull();
 
                 await().atMost(TIMEOUT).pollInterval(Duration.ofMillis(1)).until(() -> pool.getIdle() == 1);
             }

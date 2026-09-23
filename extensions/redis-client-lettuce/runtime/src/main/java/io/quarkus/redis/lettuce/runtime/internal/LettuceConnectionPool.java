@@ -1,16 +1,17 @@
 package io.quarkus.redis.lettuce.runtime.internal;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -23,6 +24,7 @@ import io.lettuce.core.support.BoundedAsyncPool;
 import io.lettuce.core.support.BoundedPoolConfig;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.Cancellable;
+import io.vertx.core.Context;
 
 /**
  * Bounded pool of {@code StatefulRedisConnection<byte[], byte[]>}, used for blocking commands
@@ -39,8 +41,20 @@ public final class LettuceConnectionPool {
 
     private final BoundedAsyncPool<StatefulRedisConnection<byte[], byte[]>> pool;
     private final int maxWaiting;
-    private final Queue<Request> waiters = new ConcurrentLinkedQueue<>();
-    private final AtomicInteger waiting = new AtomicInteger();
+
+    /**
+     * Serializes "connection available, else queue me" against "anyone queued, else return the
+     * connection to the idle cache", so a release cannot slip between an acquire seeing the pool
+     * exhausted and that acquire being queued (a lost wake-up). This relies on {@link BoundedAsyncPool}
+     * deciding {@code acquire()} and adding to the idle cache in {@code release()} synchronously, which
+     * holds only while {@code testOnAcquire}/{@code testOnRelease} stay off. Nothing that can run user
+     * code — completing a request, subscribing a body — may happen while it is held.
+     */
+    private final Object lock = new Object();
+    /** Guarded by {@link #lock}. Every queued request is live: not yet completed, failed or abandoned. */
+    private final Deque<Request> waiters = new ArrayDeque<>();
+    /** Guarded by {@link #lock}. */
+    private boolean closed;
 
     public LettuceConnectionPool(Supplier<CompletionStage<StatefulRedisConnection<byte[], byte[]>>> connector,
             int maxPoolSize, int maxWaiting) {
@@ -56,10 +70,11 @@ public final class LettuceConnectionPool {
      * Blocks until a connection is available or {@code timeout} elapses. On timeout (or interrupt)
      * the request is withdrawn from the queue and a connection that arrives just as the caller
      * gives up is returned to the pool rather than leaked.
-     *
-     * @throws io.smallrye.mutiny.TimeoutException if no connection could be obtained in time
      */
     public StatefulRedisConnection<byte[], byte[]> acquireBlocking(Duration timeout) {
+        if (Context.isOnEventLoopThread()) {
+            throw new IllegalStateException("acquireBlocking must not be called from an event loop thread");
+        }
         Request request = new Request();
         request.start();
         try {
@@ -82,17 +97,21 @@ public final class LettuceConnectionPool {
 
     /**
      * Releases a connection back to the pool, handing it straight to the next waiter if any.
-     * Waiters that were abandoned between being dequeued and being completed are skipped.
      */
     public Uni<Void> release(StatefulRedisConnection<byte[], byte[]> connection) {
-        Request waiter;
-        while ((waiter = waiters.poll()) != null) {
-            waiting.decrementAndGet();
+        while (true) {
+            Request waiter;
+            synchronized (lock) {
+                waiter = waiters.poll();
+                if (waiter == null) {
+                    return Uni.createFrom().completionStage(pool.release(connection));
+                }
+            }
             if (waiter.complete(connection)) {
                 return Uni.createFrom().voidItem();
             }
+            // Abandoned between being polled and being completed: pick another.
         }
-        return LettuceResult.toUni(() -> pool.release(connection)).replaceWithVoid();
     }
 
     private Uni<Void> releaseQuietly(StatefulRedisConnection<byte[], byte[]> connection) {
@@ -152,7 +171,20 @@ public final class LettuceConnectionPool {
         });
     }
 
+    /**
+     * Closes the pool. Requests still queued for a connection fail with an
+     * {@link IllegalStateException}, as do any made afterward.
+     */
     public Uni<Void> close() {
+        List<Request> queued;
+        synchronized (lock) {
+            closed = true;
+            queued = new ArrayList<>(waiters);
+            waiters.clear();
+        }
+        for (Request waiter : queued) {
+            waiter.completeExceptionally(new IllegalStateException("Redis connection pool is closed"));
+        }
         return LettuceResult.toUni(pool::closeAsync).replaceWithVoid();
     }
 
@@ -167,13 +199,31 @@ public final class LettuceConnectionPool {
     private final class Request extends CompletableFuture<StatefulRedisConnection<byte[], byte[]>> {
 
         void start() {
-            pool.acquire().whenComplete((conn, failure) -> {
+            CompletableFuture<StatefulRedisConnection<byte[], byte[]>> acquired;
+            synchronized (lock) {
+                if (isDone()) {
+                    return; // abandoned before we got here
+                }
+                if (closed) {
+                    acquired = CompletableFuture.failedFuture(new IllegalStateException("Redis connection pool is closed"));
+                } else {
+                    acquired = pool.acquire();
+                    if (isExhausted(acquired)) {
+                        if (waiters.size() < maxWaiting) {
+                            waiters.add(this);
+                            return;
+                        }
+                        acquired = CompletableFuture.failedFuture(
+                                new NoSuchElementException("Redis connection pool exhausted, too many waiting requests"));
+                    }
+                }
+            }
+            // Attached outside the lock: an already-completed future runs the callback inline.
+            acquired.whenComplete((conn, failure) -> {
                 if (failure == null) {
                     if (!complete(conn)) {
                         returnToPool(conn);
                     }
-                } else if (failure instanceof NoSuchElementException) {
-                    enqueue();
                 } else {
                     completeExceptionally(failure);
                 }
@@ -181,22 +231,21 @@ public final class LettuceConnectionPool {
         }
 
         void abandon() {
-            cancel(false);
-            if (waiters.remove(this)) {
-                waiting.decrementAndGet();
+            synchronized (lock) {
+                waiters.remove(this);
             }
+            cancel(false);
         }
 
-        private void enqueue() {
-            if (waiting.incrementAndGet() > maxWaiting) {
-                waiting.decrementAndGet();
-                completeExceptionally(
-                        new NoSuchElementException("Redis connection pool exhausted, too many waiting requests"));
-                return;
+        private static boolean isExhausted(CompletableFuture<?> acquired) {
+            if (!acquired.isCompletedExceptionally()) {
+                return false;
             }
-            waiters.add(this);
-            if (isDone() && waiters.remove(this)) {
-                waiting.decrementAndGet();
+            try {
+                acquired.join();
+                return false;
+            } catch (CompletionException e) {
+                return e.getCause() instanceof NoSuchElementException;
             }
         }
 
