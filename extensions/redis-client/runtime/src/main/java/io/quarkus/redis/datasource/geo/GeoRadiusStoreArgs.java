@@ -184,12 +184,4 @@ public class GeoRadiusStoreArgs<K> implements RedisCommandExtraArguments {
         return withCoordinates;
     }
 
-    public K getStoreKey() {
-        return storeKey;
-    }
-
-    public K getStoreDistKey() {
-        return storeDistKey;
-    }
-
 }

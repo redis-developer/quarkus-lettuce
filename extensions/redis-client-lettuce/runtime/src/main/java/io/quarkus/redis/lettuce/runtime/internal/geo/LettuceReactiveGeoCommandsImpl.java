@@ -21,6 +21,10 @@ import io.lettuce.core.GeoCoordinates;
 import io.lettuce.core.GeoWithin;
 import io.lettuce.core.Value;
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.codec.ByteArrayCodec;
+import io.lettuce.core.output.IntegerOutput;
+import io.lettuce.core.protocol.CommandArgs;
+import io.lettuce.core.protocol.CommandType;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.codecs.Codec;
 import io.quarkus.redis.datasource.codecs.Codecs;
@@ -245,10 +249,10 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         positive(radius, "radius");
         nonNull(unit, "unit");
         nonNull(geoArgs, "geoArgs");
-        io.lettuce.core.GeoRadiusStoreArgs<byte[]> lettuceArgs = LettuceGeoCommandsConverters.toGeoRadiusStoreArgs(geoArgs,
-                keyCodec, marshaller);
-        return LettuceCommand.of(() -> async.georadius(marshaller.encode(key), longitude, latitude, radius,
-                LettuceGeoCommandsConverters.toUnit(unit), lettuceArgs));
+        CommandArgs<byte[], byte[]> args = LettuceGeoCommandsConverters.toGeoRadiusStoreCommandArgs(marshaller.encode(key),
+                longitude, latitude, radius, unit, geoArgs, keyCodec);
+        return LettuceCommand.of(() -> async.dispatch(CommandType.GEORADIUS, new IntegerOutput<>(ByteArrayCodec.INSTANCE),
+                args));
     }
 
     @Override
@@ -300,10 +304,10 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         positive(distance, "distance");
         nonNull(unit, "unit");
         nonNull(geoArgs, "geoArgs");
-        io.lettuce.core.GeoRadiusStoreArgs<byte[]> lettuceArgs = LettuceGeoCommandsConverters.toGeoRadiusStoreArgs(geoArgs,
-                keyCodec, marshaller);
-        return LettuceCommand.of(() -> async.georadiusbymember(marshaller.encode(key), marshaller.encode(member), distance,
-                LettuceGeoCommandsConverters.toUnit(unit), lettuceArgs));
+        CommandArgs<byte[], byte[]> args = LettuceGeoCommandsConverters.toGeoRadiusByMemberStoreCommandArgs(
+                marshaller.encode(key), marshaller.encode(member), distance, unit, geoArgs, keyCodec);
+        return LettuceCommand.of(() -> async.dispatch(CommandType.GEORADIUSBYMEMBER,
+                new IntegerOutput<>(ByteArrayCodec.INSTANCE), args));
     }
 
     @Override
@@ -314,10 +318,10 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
     LettuceCommand<List<GeoWithin<byte[]>>, List<GeoValue<V>>> _geosearch(K key, GeoSearchArgs<V> geoArgs) {
         nonNull(key, "key");
         nonNull(geoArgs, "geoArgs");
-        LettuceGeoCommandsConverters.GeoSearchParts search = LettuceGeoCommandsConverters.toGeoSearch(geoArgs, valueCodec,
-                marshaller);
+        CommandArgs<byte[], byte[]> args = LettuceGeoCommandsConverters.toGeoSearchCommandArgs(marshaller.encode(key),
+                geoArgs, valueCodec);
         return LettuceCommand.of(
-                () -> async.geosearch(marshaller.encode(key), search.reference(), search.predicate(), search.args()),
+                () -> async.dispatch(CommandType.GEOSEARCH, LettuceGeoCommandsConverters.toGeoWithinOutput(geoArgs), args),
                 this::decodeGeoValues);
     }
 
@@ -330,10 +334,10 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(destination, "destination");
         nonNull(key, "key");
         nonNull(geoArgs, "geoArgs");
-        LettuceGeoCommandsConverters.GeoSearchParts search = LettuceGeoCommandsConverters.toGeoSearch(geoArgs, valueCodec,
-                marshaller);
-        return LettuceCommand.of(() -> async.geosearchstore(marshaller.encode(destination), marshaller.encode(key),
-                search.reference(), search.predicate(), search.args(), storeDist));
+        CommandArgs<byte[], byte[]> args = LettuceGeoCommandsConverters.toGeoSearchStoreCommandArgs(
+                marshaller.encode(destination), marshaller.encode(key), geoArgs, valueCodec, storeDist);
+        return LettuceCommand.of(() -> async.dispatch(CommandType.GEOSEARCHSTORE,
+                new IntegerOutput<>(ByteArrayCodec.INSTANCE), args));
     }
 
     private static List<String> decodeHashes(List<Value<String>> hashes) {

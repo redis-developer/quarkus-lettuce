@@ -4,8 +4,11 @@ import java.util.List;
 
 import io.lettuce.core.GeoArgs;
 import io.lettuce.core.GeoCoordinates;
-import io.lettuce.core.GeoSearch;
 import io.lettuce.core.GeoValue;
+import io.lettuce.core.GeoWithin;
+import io.lettuce.core.codec.ByteArrayCodec;
+import io.lettuce.core.output.CommandOutput;
+import io.lettuce.core.output.GeoWithinListOutput;
 import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.codecs.Codec;
 import io.quarkus.redis.datasource.geo.GeoAddArgs;
@@ -77,98 +80,42 @@ public final class LettuceGeoCommandsConverters {
         return lettuce;
     }
 
-    public static <K> io.lettuce.core.GeoRadiusStoreArgs<byte[]> toGeoRadiusStoreArgs(GeoRadiusStoreArgs<K> quarkus,
-            Codec keyCodec, Marshaller marshaller) {
-        List<Object> tokens = quarkus.toArgs(keyCodec);
-        io.lettuce.core.GeoRadiusStoreArgs<byte[]> lettuce = new io.lettuce.core.GeoRadiusStoreArgs<>() {
-            @Override
-            public <K1, V1> void build(CommandArgs<K1, V1> args) {
-                ArgReplay.replay(tokens, args);
-            }
-        };
-        if (quarkus.getStoreKey() != null) {
-            lettuce.withStore(marshaller.encode(quarkus.getStoreKey()));
-        }
-        if (quarkus.getStoreDistKey() != null) {
-            lettuce.withStoreDist(marshaller.encode(quarkus.getStoreDistKey()));
-        }
-        return lettuce;
+    public static <K> CommandArgs<byte[], byte[]> toGeoRadiusStoreCommandArgs(byte[] key, double longitude,
+            double latitude, double radius, GeoUnit unit, GeoRadiusStoreArgs<K> quarkus, Codec keyCodec) {
+        CommandArgs<byte[], byte[]> args = new CommandArgs<>(ByteArrayCodec.INSTANCE)
+                .addKey(key).add(longitude).add(latitude).add(radius).add(unit.toString());
+        ArgReplay.replay(quarkus.toArgs(keyCodec), args);
+        return args;
     }
 
-    public record GeoSearchParts(GeoSearch.GeoRef<byte[]> reference, GeoSearch.GeoPredicate predicate, GeoArgs args) {
+    public static <K> CommandArgs<byte[], byte[]> toGeoRadiusByMemberStoreCommandArgs(byte[] key, byte[] member,
+            double distance, GeoUnit unit, GeoRadiusStoreArgs<K> quarkus, Codec keyCodec) {
+        CommandArgs<byte[], byte[]> args = new CommandArgs<>(ByteArrayCodec.INSTANCE)
+                .addKey(key).addValue(member).add(distance).add(unit.toString());
+        ArgReplay.replay(quarkus.toArgs(keyCodec), args);
+        return args;
     }
 
-    /**
-     * Converts {@link GeoSearchStoreArgs} into the typed parts Lettuce's {@code GEOSEARCHSTORE} expects.
-     * <p>
-     * Unlike the other converters the tokens are not replayed, because Lettuce builds {@code GEOSEARCH} and
-     * {@code GEOSEARCHSTORE} from typed parts (reference, predicate, options). {@code toArgs(codec)} is still
-     * invoked so the Quarkus validation (ANY/COUNT, BYRADIUS/BYBOX, FROMMEMBER/FROMLONLAT) stays the single
-     * source of truth for both backends.
-     */
-    public static <V> GeoSearchParts toGeoSearch(GeoSearchStoreArgs<V> quarkus, Codec valueCodec, Marshaller marshaller) {
-        requireShape(quarkus.getUnit());
-        quarkus.toArgs(valueCodec);
-        return toGeoSearch(quarkus.getMember(), quarkus.getLongitude(), quarkus.getLatitude(), quarkus.getRadius(),
-                quarkus.getWidth(), quarkus.getHeight(), quarkus.getUnit(), quarkus.getCount(), quarkus.isAny(),
-                quarkus.getDirection(), marshaller);
+    public static <V> CommandArgs<byte[], byte[]> toGeoSearchCommandArgs(byte[] key, GeoSearchArgs<V> quarkus,
+            Codec valueCodec) {
+        CommandArgs<byte[], byte[]> args = new CommandArgs<>(ByteArrayCodec.INSTANCE).addKey(key);
+        ArgReplay.replay(quarkus.toArgs(valueCodec), args);
+        return args;
     }
 
-    /**
-     * Converts {@link GeoSearchArgs} into the typed parts Lettuce's {@code GEOSEARCH} expects.
-     *
-     * @see #toGeoSearch(GeoSearchStoreArgs, Codec, Marshaller)
-     */
-    public static <V> GeoSearchParts toGeoSearch(GeoSearchArgs<V> quarkus, Codec valueCodec, Marshaller marshaller) {
-        requireShape(quarkus.getUnit());
-        quarkus.toArgs(valueCodec);
-        GeoSearchParts parts = toGeoSearch(quarkus.getMember(), quarkus.getLongitude(), quarkus.getLatitude(),
-                quarkus.getRadius(), quarkus.getWidth(), quarkus.getHeight(), quarkus.getUnit(), quarkus.getCount(),
-                quarkus.isAny(), quarkus.getDirection(), marshaller);
-        if (quarkus.hasDistance()) {
-            parts.args().withDistance();
+    public static <V> CommandArgs<byte[], byte[]> toGeoSearchStoreCommandArgs(byte[] destination, byte[] key,
+            GeoSearchStoreArgs<V> quarkus, Codec valueCodec, boolean storeDist) {
+        CommandArgs<byte[], byte[]> args = new CommandArgs<>(ByteArrayCodec.INSTANCE).addKey(destination).addKey(key);
+        ArgReplay.replay(quarkus.toArgs(valueCodec), args);
+        if (storeDist) {
+            args.add("STOREDIST");
         }
-        if (quarkus.hasCoordinates()) {
-            parts.args().withCoordinates();
-        }
-        if (quarkus.hasHash()) {
-            parts.args().withHash();
-        }
-        return parts;
+        return args;
     }
 
-    /**
-     * {@code toArgs(codec)} dereferences the unit without checking it, so guard the "neither byRadius nor byBox"
-     * case here to fail with a clear message instead of a {@link NullPointerException}.
-     */
-    private static void requireShape(GeoUnit unit) {
-        if (unit == null) {
-            throw new IllegalArgumentException("Either `byRadius` or `byBox` must be set");
-        }
-    }
-
-    private static <V> GeoSearchParts toGeoSearch(V member, double longitude, double latitude, double radius, double width,
-            double height, GeoUnit unit, long count, boolean any, String direction, Marshaller marshaller) {
-        // Validation already ran in toArgs(codec); only the shape decisions mirror it here.
-        GeoSearch.GeoRef<byte[]> reference = member != null
-                ? GeoSearch.fromMember(marshaller.encode(member))
-                : GeoSearch.fromCoordinates(longitude, latitude);
-
-        GeoArgs.Unit lettuceUnit = toUnit(unit);
-        GeoSearch.GeoPredicate predicate = radius > 0
-                ? GeoSearch.byRadius(radius, lettuceUnit)
-                : GeoSearch.byBox(width, height, lettuceUnit);
-
-        GeoArgs args = new GeoArgs();
-        if ("ASC".equals(direction)) {
-            args.asc();
-        } else if ("DESC".equals(direction)) {
-            args.desc();
-        }
-        if (count > 0) {
-            args.withCount(count, any);
-        }
-        return new GeoSearchParts(reference, predicate, args);
+    public static <V> CommandOutput<byte[], byte[], List<GeoWithin<byte[]>>> toGeoWithinOutput(GeoSearchArgs<V> quarkus) {
+        return new GeoWithinListOutput<>(ByteArrayCodec.INSTANCE, quarkus.hasDistance(), quarkus.hasHash(),
+                quarkus.hasCoordinates());
     }
 
     public static GeoPosition toGeoPosition(GeoCoordinates coordinates) {
