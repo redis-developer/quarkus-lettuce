@@ -45,6 +45,7 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveGeoCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveHyperLogLogCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveKeyCommandsImpl;
@@ -353,12 +354,16 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K, V> ReactiveGeoCommands<K, V> geo(Class<K> redisKeyType, Class<V> memberType) {
-        throw groupNotImplemented("geo");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(memberType, "memberType");
+        return new LettuceReactiveGeoCommandsImpl<>(this, connection, redisKeyType, memberType);
     }
 
     @Override
     public <K, V> ReactiveGeoCommands<K, V> geo(TypeReference<K> redisKeyType, TypeReference<V> memberType) {
-        throw groupNotImplemented("geo");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(memberType, "memberType");
+        return new LettuceReactiveGeoCommandsImpl<>(this, connection, redisKeyType.getType(), memberType.getType());
     }
 
     @Override

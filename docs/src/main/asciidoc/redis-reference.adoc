@@ -1110,8 +1110,8 @@ The remaining client properties (`password`, `tls.*`, the pool, cluster and sent
 `hosts-provider-name`, ...) are not applied yet.
 Lettuce and the libraries it needs in native mode (`LatencyUtils`, `HdrHistogram`) are pulled in transitively.
 
-The key, value (string), hash, list, set, sorted set, bitmap and hyperloglog command groups are implemented on the
-Lettuce backend, including their transactional variants. The other groups (geo, stream, pub/sub, JSON, bloom,
+The key, value (string), hash, list, set, sorted set, bitmap, hyperloglog and geo command groups are implemented on
+the Lettuce backend, including their transactional variants. The other groups (stream, pub/sub, JSON, bloom,
 cuckoo, count-min, top-k, graph, search, autosuggest and time series) are not implemented yet and throw an
 `UnsupportedOperationException` when requested from a data source.
 

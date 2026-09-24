@@ -197,4 +197,43 @@ public class GeoSearchStoreArgs<V> implements RedisCommandExtraArguments {
         return list;
     }
 
+    public V getMember() {
+        return member;
+    }
+
+    public double getLongitude() {
+        return longitude;
+    }
+
+    public double getLatitude() {
+        return latitude;
+    }
+
+    public double getRadius() {
+        return radius;
+    }
+
+    public double getWidth() {
+        return width;
+    }
+
+    public double getHeight() {
+        return height;
+    }
+
+    public GeoUnit getUnit() {
+        return unit;
+    }
+
+    public long getCount() {
+        return count;
+    }
+
+    public boolean isAny() {
+        return any;
+    }
+
+    public String getDirection() {
+        return direction;
+    }
 }

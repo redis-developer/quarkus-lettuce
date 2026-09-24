@@ -249,6 +249,46 @@ public class GeoSearchArgs<V> implements RedisCommandExtraArguments {
         return withCoordinates;
     }
 
+    public V getMember() {
+        return member;
+    }
+
+    public double getLongitude() {
+        return longitude;
+    }
+
+    public double getLatitude() {
+        return latitude;
+    }
+
+    public double getRadius() {
+        return radius;
+    }
+
+    public double getWidth() {
+        return width;
+    }
+
+    public double getHeight() {
+        return height;
+    }
+
+    public GeoUnit getUnit() {
+        return unit;
+    }
+
+    public long getCount() {
+        return count;
+    }
+
+    public boolean isAny() {
+        return any;
+    }
+
+    public String getDirection() {
+        return direction;
+    }
+
     private void putFlag(List<Object> list, boolean flag, String value) {
         if (flag) {
             list.add(value);
