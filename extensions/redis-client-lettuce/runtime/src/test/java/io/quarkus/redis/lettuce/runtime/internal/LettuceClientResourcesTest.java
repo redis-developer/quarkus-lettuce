@@ -54,7 +54,8 @@ class LettuceClientResourcesTest {
         lettuceResources = new LettuceClientResources(vertxEventLoops);
 
         String redisUri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
-        connectionFactory = new LettuceConnectionFactory("test", lettuceResources.clientResources(), redisUri);
+        connectionFactory = new LettuceConnectionFactory("test", lettuceResources.clientResources(), redisUri,
+                Duration.ofSeconds(10));
     }
 
     @AfterAll

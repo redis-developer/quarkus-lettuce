@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 
 class LettuceWithConnectionBlockingIntegrationTest extends CommandsTestBase {
 
@@ -30,7 +31,9 @@ class LettuceWithConnectionBlockingIntegrationTest extends CommandsTestBase {
     }
 
     @Test
-    void clientIdStableWithinBlock_differsAcrossBlocks() {
+    void clientIdStableWithinBlock_reusedAcrossSequentialBlocks() {
+        // Proves pooling, not connect-per-call: sequential withConnection calls borrow from a pool
+        // of one idle connection, so the second block gets the exact connection the first released.
         AtomicLong first = new AtomicLong();
         AtomicLong second = new AtomicLong();
         ds.withConnection(rds -> {
@@ -40,7 +43,7 @@ class LettuceWithConnectionBlockingIntegrationTest extends CommandsTestBase {
             first.set(a);
         });
         ds.withConnection(rds -> second.set(rds.execute("CLIENT", "ID").toLong()));
-        assertThat(first.get()).isNotEqualTo(second.get());
+        assertThat(second.get()).isEqualTo(first.get());
     }
 
     @Test
@@ -55,12 +58,12 @@ class LettuceWithConnectionBlockingIntegrationTest extends CommandsTestBase {
     }
 
     @Test
-    void releasesConnectionOnFailure() {
-        long before = connectionCount();
+    void releasesConnectionToPoolOnFailure() {
         assertThatThrownBy(() -> ds.withConnection(rds -> {
             throw new RuntimeException("boom");
         })).hasMessageContaining("boom");
-        await().atMost(TIMEOUT).until(() -> connectionCount() == before);
+        LettuceConnectionPool pool = ((LettuceReactiveRedisDataSourceImpl) ds.getReactive()).getPool();
+        await().atMost(TIMEOUT).until(() -> pool.getIdle() == pool.getObjectCount());
     }
 
     @Test

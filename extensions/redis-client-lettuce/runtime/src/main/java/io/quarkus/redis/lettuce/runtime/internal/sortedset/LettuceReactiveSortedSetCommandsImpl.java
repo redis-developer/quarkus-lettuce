@@ -15,6 +15,7 @@ import java.util.Map;
 
 import io.lettuce.core.ZPopArgs;
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.SortArgs;
@@ -30,6 +31,7 @@ import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -48,8 +50,9 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     private final ReactiveRedisDataSource dataSource;
 
     public LettuceReactiveSortedSetCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, valueType));
+            StatefulRedisConnection<byte[], byte[]> connection, LettuceConnectionPool pool, Type keyType,
+            Type valueType) {
+        super(connection, keyType, valueType, new Marshaller(keyType, valueType), pool);
         this.dataSource = dataSource;
     }
 
@@ -462,42 +465,54 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<ScoredValue<V>> bzmpopMin(Duration timeout, K... keys) {
-        return _bzmpopMin(timeout, keys).toUni();
+        return blocking(cmds -> _bzmpopMin(cmds, timeout, keys));
     }
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, ScoredValue<V>> _bzmpopMin(
             Duration timeout, K... keys) {
+        return _bzmpopMin(async, timeout, keys);
+    }
+
+    @SafeVarargs
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, ScoredValue<V>> _bzmpopMin(
+            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.bzmpop(timeout.getSeconds(), ZPopArgs.Builder.min(), marshaller.encodeAsArray(keys));
+                return cmds.bzmpop(timeout.getSeconds(), ZPopArgs.Builder.min(), marshaller.encodeAsArray(keys));
             }
-            return async.bzmpop(toFractionalSeconds(timeout), ZPopArgs.Builder.min(), marshaller.encodeAsArray(keys));
+            return cmds.bzmpop(toFractionalSeconds(timeout), ZPopArgs.Builder.min(), marshaller.encodeAsArray(keys));
         }, this::decodePopped);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> bzmpopMin(Duration timeout, int count, K... keys) {
-        return _bzmpopMin(timeout, count, keys).toUni();
+        return blocking(cmds -> _bzmpopMin(cmds, timeout, count, keys));
     }
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>, List<ScoredValue<V>>> _bzmpopMin(
             Duration timeout, int count, K... keys) {
+        return _bzmpopMin(async, timeout, count, keys);
+    }
+
+    @SafeVarargs
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>, List<ScoredValue<V>>> _bzmpopMin(
+            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, int count, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         positive(count, "count");
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.min(),
+                return cmds.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.min(),
                         marshaller.encodeAsArray(keys));
             }
-            return async.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.min(),
+            return cmds.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.min(),
                     marshaller.encodeAsArray(keys));
         }, this::decodePoppedList);
     }
@@ -505,42 +520,54 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<ScoredValue<V>> bzmpopMax(Duration timeout, K... keys) {
-        return _bzmpopMax(timeout, keys).toUni();
+        return blocking(cmds -> _bzmpopMax(cmds, timeout, keys));
     }
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, ScoredValue<V>> _bzmpopMax(
             Duration timeout, K... keys) {
+        return _bzmpopMax(async, timeout, keys);
+    }
+
+    @SafeVarargs
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, ScoredValue<V>> _bzmpopMax(
+            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.bzmpop(timeout.getSeconds(), ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys));
+                return cmds.bzmpop(timeout.getSeconds(), ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys));
             }
-            return async.bzmpop(toFractionalSeconds(timeout), ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys));
+            return cmds.bzmpop(toFractionalSeconds(timeout), ZPopArgs.Builder.max(), marshaller.encodeAsArray(keys));
         }, this::decodePopped);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<ScoredValue<V>>> bzmpopMax(Duration timeout, int count, K... keys) {
-        return _bzmpopMax(timeout, count, keys).toUni();
+        return blocking(cmds -> _bzmpopMax(cmds, timeout, count, keys));
     }
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>, List<ScoredValue<V>>> _bzmpopMax(
             Duration timeout, int count, K... keys) {
+        return _bzmpopMax(async, timeout, count, keys);
+    }
+
+    @SafeVarargs
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<io.lettuce.core.ScoredValue<byte[]>>>, List<ScoredValue<V>>> _bzmpopMax(
+            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, int count, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         positive(count, "count");
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.max(),
+                return cmds.bzmpop(timeout.getSeconds(), (long) count, ZPopArgs.Builder.max(),
                         marshaller.encodeAsArray(keys));
             }
-            return async.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.max(),
+            return cmds.bzmpop(toFractionalSeconds(timeout), count, ZPopArgs.Builder.max(),
                     marshaller.encodeAsArray(keys));
         }, this::decodePoppedList);
     }
@@ -650,40 +677,52 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, ScoredValue<V>>> bzpopmin(Duration timeout, K... keys) {
-        return _bzpopmin(timeout, keys).toUni();
+        return blocking(cmds -> _bzpopmin(cmds, timeout, keys));
     }
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, KeyValue<K, ScoredValue<V>>> _bzpopmin(
             Duration timeout, K... keys) {
+        return _bzpopmin(async, timeout, keys);
+    }
+
+    @SafeVarargs
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, KeyValue<K, ScoredValue<V>>> _bzpopmin(
+            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.bzpopmin(timeout.getSeconds(), marshaller.encodeAsArray(keys));
+                return cmds.bzpopmin(timeout.getSeconds(), marshaller.encodeAsArray(keys));
             }
-            return async.bzpopmin(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
+            return cmds.bzpopmin(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
         }, this::decodeKeyValue);
     }
 
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, ScoredValue<V>>> bzpopmax(Duration timeout, K... keys) {
-        return _bzpopmax(timeout, keys).toUni();
+        return blocking(cmds -> _bzpopmax(cmds, timeout, keys));
     }
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, KeyValue<K, ScoredValue<V>>> _bzpopmax(
             Duration timeout, K... keys) {
+        return _bzpopmax(async, timeout, keys);
+    }
+
+    @SafeVarargs
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>>, KeyValue<K, ScoredValue<V>>> _bzpopmax(
+            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.bzpopmax(timeout.getSeconds(), marshaller.encodeAsArray(keys));
+                return cmds.bzpopmax(timeout.getSeconds(), marshaller.encodeAsArray(keys));
             }
-            return async.bzpopmax(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
+            return cmds.bzpopmax(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
         }, this::decodeKeyValue);
     }
 

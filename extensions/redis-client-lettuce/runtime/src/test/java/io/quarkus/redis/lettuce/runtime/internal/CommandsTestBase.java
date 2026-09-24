@@ -29,6 +29,8 @@ public abstract class CommandsTestBase {
     protected static final Duration TIMEOUT = Duration.ofSeconds(5);
     protected static final String REDIS_DEFAULT_IMAGE = "redis:7-alpine";
     protected static final GenericContainer<?> REDIS = createContainer();
+    protected static final int MAX_POOL_SIZE = 6;
+    protected static final int MAX_POOL_WAITING = 24;
 
     protected static Vertx vertx;
     protected static LettuceClientResources lettuceResources;
@@ -97,8 +99,16 @@ public abstract class CommandsTestBase {
         return CommandsTestBase::connectAsync;
     }
 
+    protected static LettuceConnectionPool pool() {
+        return pool(MAX_POOL_SIZE, MAX_POOL_WAITING);
+    }
+
+    protected static LettuceConnectionPool pool(int maxPoolSize, int maxWaiting) {
+        return new LettuceConnectionPool(connector(), maxPoolSize, maxWaiting);
+    }
+
     protected static LettuceReactiveRedisDataSourceImpl reactiveDataSource() {
-        return new LettuceReactiveRedisDataSourceImpl(vertx, connection, connector());
+        return new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool());
     }
 
     protected static LettuceBlockingRedisDataSourceImpl blockingDataSource() {
