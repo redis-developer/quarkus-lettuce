@@ -13,7 +13,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import io.lettuce.core.Limit;
 import io.lettuce.core.ZPopArgs;
+import io.lettuce.core.ZRange;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -734,8 +736,8 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     LettuceCommand<List<byte[]>, List<V>> _zrange(K key, long start, long stop, ZRangeArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
-        //TODO requires lettuce#3681
-        throw new UnsupportedOperationException("Operation not supported");
+        ZRange.ByIndex range = LettuceSortedSetCommandsConverters.toLettuceByIndex(start, stop, args);
+        return LettuceCommand.of(() -> async.zrange(marshaller.encode(key), range), this::decodeListOfValueOrEmpty);
     }
 
     LettuceCommand<List<byte[]>, List<V>> _zrange(K key, long start, long stop) {
@@ -751,8 +753,8 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
             long stop, ZRangeArgs args) {
         nonNull(key, "key");
         nonNull(args, "args");
-        //TODO requires lettuce#3681
-        throw new UnsupportedOperationException("Operation not supported");
+        ZRange.ByIndex range = LettuceSortedSetCommandsConverters.toLettuceByIndex(start, stop, args);
+        return LettuceCommand.of(() -> async.zrangeWithScores(marshaller.encode(key), range), this::decodeScoredValues);
     }
 
     LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zrangeWithScores(K key, long start,
@@ -779,8 +781,8 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(args, "args");
         nonNull(range, "range");
-        //TODO requires lettuce#3681
-        throw new UnsupportedOperationException("Operation not supported");
+        ZRange.ByLex<byte[]> byLex = LettuceSortedSetCommandsConverters.toLettuceByLex(range, args);
+        return LettuceCommand.of(() -> async.zrange(marshaller.encode(key), byLex), this::decodeListOfValueOrEmpty);
     }
 
     LettuceCommand<List<byte[]>, List<V>> _zrangebylex(K key, Range<String> range) {
@@ -801,8 +803,8 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(args, "args");
         nonNull(range, "range");
-        //TODO requires lettuce#3681
-        throw new UnsupportedOperationException("Operation not supported");
+        ZRange.ByScore byScore = LettuceSortedSetCommandsConverters.toLettuceByScore(range, args);
+        return LettuceCommand.of(() -> async.zrange(marshaller.encode(key), byScore), this::decodeListOfValueOrEmpty);
     }
 
     LettuceCommand<List<byte[]>, List<V>> _zrangebyscore(K key, ScoreRange<Double> range) {
@@ -819,8 +821,8 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(args, "args");
         nonNull(range, "range");
-        //TODO requires lettuce#3681
-        throw new UnsupportedOperationException("Operation not supported");
+        ZRange.ByScore byScore = LettuceSortedSetCommandsConverters.toLettuceByScore(range, args);
+        return LettuceCommand.of(() -> async.zrangeWithScores(marshaller.encode(key), byScore), this::decodeScoredValues);
     }
 
     LettuceCommand<List<io.lettuce.core.ScoredValue<byte[]>>, List<ScoredValue<V>>> _zrangebyscoreWithScores(K key,
@@ -847,8 +849,11 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(dst, "dst");
         nonNull(src, "src");
         nonNull(args, "args");
-        //TODO requires lettuce#3681
-        throw new UnsupportedOperationException("Operation not supported");
+        io.lettuce.core.Range<Long> range = LettuceSortedSetCommandsConverters.toLettuceIndexRange(min, max, args);
+        if (args.isReverse()) {
+            return LettuceCommand.of(() -> async.zrevrangestore(marshaller.encode(dst), marshaller.encode(src), range));
+        }
+        return LettuceCommand.of(() -> async.zrangestore(marshaller.encode(dst), marshaller.encode(src), range));
     }
 
     LettuceCommand<Long, Long> _zrangestore(K dst, K src, long min, long max) {
@@ -870,8 +875,14 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(src, "src");
         nonNull(range, "range");
         nonNull(args, "args");
-        //TODO requires lettuce#3681
-        throw new UnsupportedOperationException("Operation not supported");
+        io.lettuce.core.Range<byte[]> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceStoreLexRange(range, args);
+        Limit limit = LettuceSortedSetCommandsConverters.toLettuceLimit(args);
+        if (args.isReverse()) {
+            return LettuceCommand.of(
+                    () -> async.zrevrangestorebylex(marshaller.encode(dst), marshaller.encode(src), lettuceRange, limit));
+        }
+        return LettuceCommand.of(
+                () -> async.zrangestorebylex(marshaller.encode(dst), marshaller.encode(src), lettuceRange, limit));
     }
 
     LettuceCommand<Long, Long> _zrangestorebylex(K dst, K src, Range<String> range) {
@@ -893,8 +904,15 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(src, "src");
         nonNull(range, "range");
         nonNull(args, "args");
-        //TODO requires lettuce#3681
-        throw new UnsupportedOperationException("Operation not supported");
+        io.lettuce.core.Range<Number> lettuceRange = LettuceSortedSetCommandsConverters.toLettuceStoreScoreRange(range,
+                args);
+        Limit limit = LettuceSortedSetCommandsConverters.toLettuceLimit(args);
+        if (args.isReverse()) {
+            return LettuceCommand.of(
+                    () -> async.zrevrangestorebyscore(marshaller.encode(dst), marshaller.encode(src), lettuceRange, limit));
+        }
+        return LettuceCommand.of(
+                () -> async.zrangestorebyscore(marshaller.encode(dst), marshaller.encode(src), lettuceRange, limit));
     }
 
     LettuceCommand<Long, Long> _zrangestorebyscore(K dst, K src, ScoreRange<Double> range) {

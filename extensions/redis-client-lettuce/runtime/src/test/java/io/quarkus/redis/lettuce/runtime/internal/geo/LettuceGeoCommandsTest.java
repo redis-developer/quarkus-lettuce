@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.offset;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
@@ -29,9 +28,9 @@ import io.quarkus.redis.datasource.geo.GeoSearchStoreArgs;
 import io.quarkus.redis.datasource.geo.GeoUnit;
 import io.quarkus.redis.datasource.geo.GeoValue;
 import io.quarkus.redis.datasource.geo.ReactiveGeoCommands;
+import io.quarkus.redis.datasource.sortedset.ScoredValue;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
 import io.quarkus.redis.lettuce.runtime.internal.Place;
-import io.quarkus.redis.runtime.datasource.Marshaller;
 
 class LettuceGeoCommandsTest extends CommandsTestBase {
 
@@ -46,8 +45,6 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
 
     private static final double SUZE_LONGITUDE = 44.2899;
     private static final double SUZE_LATITUDE = 4.8383;
-
-    private static final Marshaller MARSHALLER = new Marshaller(Place.class);
 
     ReactiveRedisDataSource reactiveDs;
     RedisDataSource blockingDs;
@@ -295,7 +292,7 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
         long result = blockingGeo.georadius(key, VALENCE_LONGITUDE, VALENCE_LATITUDE, 60.0, GeoUnit.KM,
                 new GeoRadiusStoreArgs<String>().storeKey(resultKey));
         assertThat(result).isEqualTo(2L);
-        List<io.lettuce.core.ScoredValue<byte[]>> results = storedWithScores(resultKey);
+        List<ScoredValue<Place>> results = storedWithScores(resultKey);
         assertThat(results).hasSize(2);
     }
 
@@ -306,7 +303,7 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
         long result = blockingGeo.georadius(key, GeoPosition.of(VALENCE_LONGITUDE, VALENCE_LATITUDE), 60.0, GeoUnit.KM,
                 new GeoRadiusStoreArgs<String>().storeKey(resultKey));
         assertThat(result).isEqualTo(2L);
-        List<io.lettuce.core.ScoredValue<byte[]>> results = storedWithScores(resultKey);
+        List<ScoredValue<Place>> results = storedWithScores(resultKey);
         assertThat(results).hasSize(2);
     }
 
@@ -317,9 +314,9 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
         long result = blockingGeo.georadius(key, VALENCE_LONGITUDE, VALENCE_LATITUDE, 100, GeoUnit.KM,
                 new GeoRadiusStoreArgs<String>().count(2).descending().storeKey(resultKey));
         assertThat(result).isEqualTo(2);
-        List<io.lettuce.core.ScoredValue<byte[]>> results = storedWithScores(resultKey);
+        List<ScoredValue<Place>> results = storedWithScores(resultKey);
         assertThat(results).hasSize(2);
-        assertThat(results.get(0).getScore()).isGreaterThan(99999);
+        assertThat(results.get(0).score()).isGreaterThan(99999);
     }
 
     @Test
@@ -329,7 +326,7 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
         long result = blockingGeo.georadius(key, VALENCE_LONGITUDE, VALENCE_LATITUDE, 60, GeoUnit.KM,
                 new GeoRadiusStoreArgs<String>().storeDistKey(resultKey));
         assertThat(result).isEqualTo(2);
-        List<io.lettuce.core.ScoredValue<byte[]>> dist = storedWithScores(resultKey);
+        List<ScoredValue<Place>> dist = storedWithScores(resultKey);
         assertThat(dist).hasSize(2);
     }
 
@@ -341,9 +338,9 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
                 new GeoRadiusStoreArgs<String>().count(1).descending().storeDistKey(resultKey));
         assertThat(result).isEqualTo(1);
 
-        List<io.lettuce.core.ScoredValue<byte[]>> dist = storedWithScores(resultKey);
+        List<ScoredValue<Place>> dist = storedWithScores(resultKey);
         assertThat(dist).hasSize(1);
-        assertThat(dist.get(0).getScore()).isBetween(3.0, 5.0);
+        assertThat(dist.get(0).score()).isBetween(3.0, 5.0);
     }
 
     @Test
@@ -390,9 +387,9 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
                 new GeoRadiusStoreArgs<String>().count(2).any().descending().storeDistKey(resultKey));
         assertThat(result).isEqualTo(2);
 
-        List<io.lettuce.core.ScoredValue<byte[]>> dist = storedWithScores(resultKey);
+        List<ScoredValue<Place>> dist = storedWithScores(resultKey);
         assertThat(dist).hasSize(2);
-        assertThat(dist.get(0).getScore()).isBetween(55d, 60d);
+        assertThat(dist.get(0).score()).isBetween(55d, 60d);
     }
 
     @Test
@@ -403,7 +400,7 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
                 new GeoRadiusStoreArgs<String>().descending().storeDistKey(resultKey));
         assertThat(result).isEqualTo(3);
 
-        List<io.lettuce.core.ScoredValue<byte[]>> dist = storedWithScores(resultKey);
+        List<ScoredValue<Place>> dist = storedWithScores(resultKey);
         assertThat(dist).hasSize(3);
     }
 
@@ -415,9 +412,9 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
                 new GeoRadiusStoreArgs<String>().storeKey(resultKey));
         assertThat(result).isEqualTo(2);
 
-        List<io.lettuce.core.ScoredValue<byte[]>> stored = storedWithScores(resultKey);
+        List<ScoredValue<Place>> stored = storedWithScores(resultKey);
         assertThat(stored).hasSize(2);
-        assertThat(stored).extracting(sv -> decodePlace(sv.getValue())).containsExactlyInAnyOrder(Place.crussol, Place.grignan);
+        assertThat(stored).extracting(ScoredValue::value).containsExactlyInAnyOrder(Place.crussol, Place.grignan);
     }
 
     @Test
@@ -617,12 +614,8 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
-    private static List<io.lettuce.core.ScoredValue<byte[]>> storedWithScores(String key) {
-        return connection.sync().zrangeWithScores(key.getBytes(StandardCharsets.UTF_8), 0, -1);
-    }
-
-    private static Place decodePlace(byte[] bytes) {
-        return MARSHALLER.decode(Place.class, bytes);
+    private List<ScoredValue<Place>> storedWithScores(String key) {
+        return blockingDs.sortedSet(String.class, Place.class).zrangeWithScores(key, 0, -1);
     }
 
     private static double getLatitudeOrDie(List<GeoValue<Place>> georadius, int index) {

@@ -14,7 +14,6 @@ import java.util.Map;
 import java.util.OptionalDouble;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -41,9 +40,6 @@ import io.quarkus.redis.lettuce.runtime.internal.Place;
 
 @SuppressWarnings("unchecked")
 class LettuceSortedSetCommandsTest extends CommandsTestBase {
-
-    static final String REQUIRES_UNIFIED_ZRANGE = "The zrange command family is not implemented on the Lettuce "
-            + "backend yet: it requires the unified ZRANGE API (https://github.com/redis/lettuce/issues/3681)";
 
     static final String value = "value";
 
@@ -374,14 +370,12 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrange() {
         populate();
         assertThat(blockingSortedSetOfPlaces.zrange(key, 0, -1)).isEqualTo(List.of(Place.crussol, Place.grignan, Place.suze));
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrangeWithScores() {
         populate();
         assertThat(blockingSortedSetOfPlaces.zrangeWithScores(key, 0, -1)).isEqualTo(
@@ -390,7 +384,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrangebyscore() {
         blockingSortedSetOfPlaces.zadd(key,
                 Map.of(Place.crussol, 1.0, Place.grignan, 2.0, Place.suze, 3.0, Place.adhemar, 4.0));
@@ -410,7 +403,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrangebyscoreWithScores() {
         blockingSortedSetOfPlaces.zadd(key,
                 Map.of(Place.crussol, 1.0, Place.grignan, 2.0, Place.suze, 3.0, Place.adhemar, 4.0));
@@ -437,7 +429,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrangebyscoreWithScoresInfinity() {
         blockingSortedSetOfPlaces.zadd(key,
                 Map.of(Place.crussol, Double.POSITIVE_INFINITY, Place.grignan, Double.NEGATIVE_INFINITY));
@@ -446,7 +437,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrangestorebylex() {
         blockingSortedSetOfStrings.zadd(key, Map.of("a", 1.0, "b", 1.0, "c", 1.0, "d", 1.0));
         assertThat(
@@ -459,7 +449,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrangestorebyscore() {
         blockingSortedSetOfPlaces.zadd(key,
                 Map.of(Place.crussol, 1.0, Place.grignan, 2.0, Place.suze, 3.0, Place.adhemar, 4.0));
@@ -472,7 +461,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrangestore() {
         blockingSortedSetOfPlaces.zadd(key,
                 Map.of(Place.crussol, 1.0, Place.grignan, 2.0, Place.suze, 3.0, Place.adhemar, 4.0));
@@ -528,7 +516,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrevrange() {
         populate();
         assertThat(blockingSortedSetOfPlaces.zrange(key, 0, -1, new ZRangeArgs().rev()))
@@ -536,14 +523,12 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrevrangeWithScoreEmpty() {
         assertThat(blockingDs.sortedSet(String.class).zrangeWithScores("top-products", 0, 2, new ZRangeArgs().rev())).isEmpty();
         assertThat(blockingDs.sortedSet(String.class).zrangeWithScores("missing", 0, 2)).isEmpty();
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrevrangeWithScores() {
         populate();
         assertThat(blockingSortedSetOfPlaces.zrangeWithScores(key, 0, -1, new ZRangeArgs().rev()))
@@ -552,7 +537,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrevrangebylex() {
         populateManyStringEntriesForLex();
         assertThat(blockingSortedSetOfStrings.zrangebylex(key, Range.unbounded(), new ZRangeArgs().rev())).hasSize(100);
@@ -569,7 +553,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrevrangebyscore() {
         blockingSortedSetOfPlaces.zadd(key,
                 Map.of(Place.crussol, 1.0, Place.grignan, 2.0, Place.suze, 3.0, Place.adhemar, 4.0));
@@ -589,7 +572,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrevrangebyscoreWithScores() {
         blockingSortedSetOfPlaces.zadd(key,
                 Map.of(Place.crussol, 1.0, Place.grignan, 2.0, Place.suze, 3.0, Place.adhemar, 4.0));
@@ -625,7 +607,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrevrangestorebylex() {
         blockingSortedSetOfStrings.zadd(key, Map.of("a", 1.0, "b", 2.0, "c", 3.0, "d", 4.0));
         assertThat(blockingSortedSetOfStrings.zrangestorebylex("key1", key, new Range<>("c", "-"),
@@ -634,7 +615,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrevrangestorebyscore() {
         blockingSortedSetOfPlaces.zadd(key,
                 Map.of(Place.crussol, 1.0, Place.grignan, 2.0, Place.suze, 3.0, Place.adhemar, 4.0));
@@ -923,7 +903,6 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    @Disabled(REQUIRES_UNIFIED_ZRANGE)
     void zrangebylex() {
         populateManyStringEntriesForLex();
 
