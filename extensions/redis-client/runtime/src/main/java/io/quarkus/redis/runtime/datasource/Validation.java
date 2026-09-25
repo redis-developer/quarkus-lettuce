@@ -98,13 +98,13 @@ public class Validation {
         }
     }
 
-    static void validateLongitude(double longitude) {
+    public static void validateLongitude(double longitude) {
         if (longitude < -180 || longitude > 180) {
             throw new IllegalArgumentException("The longitude must be in [-180, 180]");
         }
     }
 
-    static void validateLatitude(double latitude) {
+    public static void validateLatitude(double latitude) {
         if (latitude < -85.05112878 || latitude > 85.05112878) {
             throw new IllegalArgumentException("The latitude must be in [85.05112878, 85.05112878]");
         }
