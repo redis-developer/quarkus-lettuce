@@ -11,15 +11,9 @@ import java.util.List;
 import java.util.Map;
 
 import io.lettuce.core.KeyValue;
-import io.lettuce.core.RedisFuture;
+import io.lettuce.core.LcsArgs;
 import io.lettuce.core.StringMatchResult;
 import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.codec.ByteArrayCodec;
-import io.lettuce.core.codec.StringCodec;
-import io.lettuce.core.output.CommandOutput;
-import io.lettuce.core.output.StringMatchResultOutput;
-import io.lettuce.core.protocol.CommandArgs;
-import io.lettuce.core.protocol.CommandType;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.string.ReactiveStringCommands;
 import io.quarkus.redis.datasource.value.GetExArgs;
@@ -178,10 +172,10 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         return _lcs(key1, key2).toUni();
     }
 
-    LettuceCommand<StringMatchResult, String> _lcs(K key1, K key2) {
+    LettuceCommand<byte[], String> _lcs(K key1, K key2) {
         nonNull(key1, "key1");
         nonNull(key2, "key2");
-        return LettuceCommand.of(() -> dispatchLcs(key1, key2, false), r -> r == null ? null : r.getMatchString());
+        return LettuceCommand.of(() -> async.lcs(marshaller.encode(key1), marshaller.encode(key2)), this::decodeString);
     }
 
     @Override
@@ -192,27 +186,9 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     LettuceCommand<StringMatchResult, Long> _lcsLength(K key1, K key2) {
         nonNull(key1, "key1");
         nonNull(key2, "key2");
-        return LettuceCommand.of(() -> dispatchLcs(key1, key2, true), r -> r == null ? null : r.getLen());
-    }
-
-    /**
-     * Dispatches {@code LCS} as a raw command. Lettuce's own {@code lcs(...)} decodes the match
-     * string with the connection codec's value codec and blind-casts it to {@code String}, which
-     * fails on the {@code byte[]} codec. Dispatching with a String-codec-backed output decodes
-     * the match string as UTF-8, while the keys still go out marshaller-encoded like every other
-     * command in this group.
-     */
-    @SuppressWarnings({ "unchecked", "rawtypes" })
-    private RedisFuture<StringMatchResult> dispatchLcs(K key1, K key2, boolean justLen) {
-        CommandArgs<byte[], byte[]> args = new CommandArgs<>(ByteArrayCodec.INSTANCE)
-                .addKey(marshaller.encode(key1))
-                .addKey(marshaller.encode(key2));
-        if (justLen) {
-            args.add("LEN");
-        }
-        CommandOutput<byte[], byte[], StringMatchResult> output = (CommandOutput) new StringMatchResultOutput<>(
-                StringCodec.UTF8);
-        return async.dispatch(CommandType.LCS, output, args);
+        LcsArgs args = LcsArgs.Builder.justLen();
+        return LettuceCommand.of(() -> async.lcs(marshaller.encode(key1), marshaller.encode(key2), args),
+                this::decodeStringMatchResultLength);
     }
 
     @SafeVarargs
@@ -376,6 +352,10 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     LettuceCommand<Long, Long> _strlen(K key) {
         nonNull(key, "key");
         return LettuceCommand.of(() -> async.strlen(marshaller.encode(key)));
+    }
+
+    private Long decodeStringMatchResultLength(StringMatchResult matchResult) {
+        return matchResult == null ? null : matchResult.getLen();
     }
 
 }

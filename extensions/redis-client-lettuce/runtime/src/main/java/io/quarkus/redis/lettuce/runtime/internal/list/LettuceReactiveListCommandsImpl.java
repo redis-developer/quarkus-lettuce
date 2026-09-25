@@ -14,6 +14,7 @@ import java.util.Collections;
 import java.util.List;
 
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.SortArgs;
 import io.quarkus.redis.datasource.list.KeyValue;
@@ -23,6 +24,7 @@ import io.quarkus.redis.datasource.list.ReactiveListCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -40,8 +42,9 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
     private final ReactiveRedisDataSource dataSource;
 
     public LettuceReactiveListCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, valueType));
+            StatefulRedisConnection<byte[], byte[]> connection, LettuceConnectionPool pool, Type keyType,
+            Type valueType) {
+        super(connection, keyType, valueType, new Marshaller(keyType, valueType), pool);
         this.dataSource = dataSource;
     }
 
@@ -52,11 +55,16 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     @Override
     public Uni<V> blmove(K source, K destination, Position positionInSource, Position positionInDest, Duration timeout) {
-        return _blmove(source, destination, positionInSource, positionInDest, timeout).toUni();
+        return blocking(cmds -> _blmove(cmds, source, destination, positionInSource, positionInDest, timeout));
     }
 
     LettuceCommand<byte[], V> _blmove(K source, K destination, Position positionInSource, Position positionInDest,
             Duration timeout) {
+        return _blmove(async, source, destination, positionInSource, positionInDest, timeout);
+    }
+
+    LettuceCommand<byte[], V> _blmove(RedisAsyncCommands<byte[], byte[]> cmds, K source, K destination,
+            Position positionInSource, Position positionInDest, Duration timeout) {
         nonNull(source, "source");
         nonNull(destination, "destination");
         nonNull(positionInSource, "positionInSource");
@@ -65,21 +73,27 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         io.lettuce.core.LMoveArgs args = LettuceListCommandsConverters.toLettuceLMoveArgs(positionInSource, positionInDest);
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.blmove(marshaller.encode(source), marshaller.encode(destination), args, timeout.getSeconds());
+                return cmds.blmove(marshaller.encode(source), marshaller.encode(destination), args, timeout.getSeconds());
             }
-            return async.blmove(marshaller.encode(source), marshaller.encode(destination), args, toFractionalSeconds(timeout));
+            return cmds.blmove(marshaller.encode(source), marshaller.encode(destination), args, toFractionalSeconds(timeout));
         }, this::decodeV);
     }
 
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, V>> blmpop(Duration timeout, Position position, K... keys) {
-        return _blmpop(timeout, position, keys).toUni();
+        return blocking(cmds -> _blmpop(cmds, timeout, position, keys));
     }
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<byte[]>>, KeyValue<K, V>> _blmpop(Duration timeout,
             Position position, K... keys) {
+        return _blmpop(async, timeout, position, keys);
+    }
+
+    @SafeVarargs
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<byte[]>>, KeyValue<K, V>> _blmpop(
+            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, Position position, K... keys) {
         nonNull(position, "position");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
@@ -87,21 +101,27 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         io.lettuce.core.LMPopArgs args = LettuceListCommandsConverters.toLettuceLMPopArgs(position);
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.blmpop(timeout.getSeconds(), args, marshaller.encodeAsArray(keys));
+                return cmds.blmpop(timeout.getSeconds(), args, marshaller.encodeAsArray(keys));
             }
-            return async.blmpop(toFractionalSeconds(timeout), args, marshaller.encodeAsArray(keys));
+            return cmds.blmpop(toFractionalSeconds(timeout), args, marshaller.encodeAsArray(keys));
         }, this::toFirstKeyValue);
     }
 
     @SafeVarargs
     @Override
     public final Uni<List<KeyValue<K, V>>> blmpop(Duration timeout, Position position, int count, K... keys) {
-        return _blmpop(timeout, position, count, keys).toUni();
+        return blocking(cmds -> _blmpop(cmds, timeout, position, count, keys));
     }
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<byte[]>>, List<KeyValue<K, V>>> _blmpop(Duration timeout,
             Position position, int count, K... keys) {
+        return _blmpop(async, timeout, position, count, keys);
+    }
+
+    @SafeVarargs
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<byte[]>>, List<KeyValue<K, V>>> _blmpop(
+            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, Position position, int count, K... keys) {
         nonNull(position, "position");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
@@ -110,65 +130,82 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         io.lettuce.core.LMPopArgs args = LettuceListCommandsConverters.toLettuceLMPopArgs(position, count);
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.blmpop(timeout.getSeconds(), args, marshaller.encodeAsArray(keys));
+                return cmds.blmpop(timeout.getSeconds(), args, marshaller.encodeAsArray(keys));
             }
-            return async.blmpop(toFractionalSeconds(timeout), args, marshaller.encodeAsArray(keys));
+            return cmds.blmpop(toFractionalSeconds(timeout), args, marshaller.encodeAsArray(keys));
         }, this::toKeyValueList);
     }
 
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, V>> blpop(Duration timeout, K... keys) {
-        return _blpop(timeout, keys).toUni();
+        return blocking(cmds -> _blpop(cmds, timeout, keys));
     }
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], byte[]>, KeyValue<K, V>> _blpop(Duration timeout, K... keys) {
+        return _blpop(async, timeout, keys);
+    }
+
+    @SafeVarargs
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], byte[]>, KeyValue<K, V>> _blpop(
+            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.blpop(timeout.getSeconds(), marshaller.encodeAsArray(keys));
+                return cmds.blpop(timeout.getSeconds(), marshaller.encodeAsArray(keys));
             }
-            return async.blpop(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
+            return cmds.blpop(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
         }, this::toKeyValue);
     }
 
     @SafeVarargs
     @Override
     public final Uni<KeyValue<K, V>> brpop(Duration timeout, K... keys) {
-        return _brpop(timeout, keys).toUni();
+        return blocking(cmds -> _brpop(cmds, timeout, keys));
     }
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], byte[]>, KeyValue<K, V>> _brpop(Duration timeout, K... keys) {
+        return _brpop(async, timeout, keys);
+    }
+
+    @SafeVarargs
+    final LettuceCommand<io.lettuce.core.KeyValue<byte[], byte[]>, KeyValue<K, V>> _brpop(
+            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.brpop(timeout.getSeconds(), marshaller.encodeAsArray(keys));
+                return cmds.brpop(timeout.getSeconds(), marshaller.encodeAsArray(keys));
             }
-            return async.brpop(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
+            return cmds.brpop(toFractionalSeconds(timeout), marshaller.encodeAsArray(keys));
         }, this::toKeyValue);
     }
 
     @Deprecated
     @Override
     public Uni<V> brpoplpush(Duration timeout, K source, K destination) {
-        return _brpoplpush(timeout, source, destination).toUni();
+        return blocking(cmds -> _brpoplpush(cmds, timeout, source, destination));
     }
 
     LettuceCommand<byte[], V> _brpoplpush(Duration timeout, K source, K destination) {
+        return _brpoplpush(async, timeout, source, destination);
+    }
+
+    LettuceCommand<byte[], V> _brpoplpush(RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, K source,
+            K destination) {
         validateTimeout(timeout, "timeout");
         nonNull(source, "source");
         nonNull(destination, "destination");
         return LettuceCommand.of(() -> {
             if (isWholeSeconds(timeout)) {
-                return async.brpoplpush(timeout.getSeconds(), marshaller.encode(source), marshaller.encode(destination));
+                return cmds.brpoplpush(timeout.getSeconds(), marshaller.encode(source), marshaller.encode(destination));
             }
-            return async.brpoplpush(toFractionalSeconds(timeout), marshaller.encode(source), marshaller.encode(destination));
+            return cmds.brpoplpush(toFractionalSeconds(timeout), marshaller.encode(source), marshaller.encode(destination));
         }, this::decodeV);
     }
 
