@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
+import java.net.ConnectException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -16,6 +18,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 
@@ -385,6 +388,52 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         Long pong = pool.withPooled(conn -> LettuceResult.toUni(() -> conn.async().clientId()))
                 .await().atMost(TIMEOUT);
         assertThat(pong).isNotNull();
+        assertThat(pool.getIdle()).isEqualTo(1);
+    }
+
+    @Test
+    void connectFailureWakesQueuedWaitersInsteadOfLeavingThemHanging() {
+        // Lettuce counts an in-flight connect towards maxTotal, so with maxTotal=1 a second caller
+        // queues behind the first caller's connect. If that connect fails, nothing is ever released,
+        // so unless the queue is re-driven on failure the second caller hangs forever.
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        AtomicReference<Supplier<CompletionStage<StatefulRedisConnection<byte[], byte[]>>>> connector = new AtomicReference<>(
+                () -> gate.thenCompose(v -> connectAsync()));
+        LettuceConnectionPool pool = new LettuceConnectionPool(() -> connector.get().get(), 1, 1, 0);
+
+        AtomicBoolean anyBodyRan = new AtomicBoolean();
+        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+        AtomicReference<Throwable> secondFailure = new AtomicReference<>();
+        pool.withPooled(conn -> {
+            anyBodyRan.set(true);
+            return Uni.createFrom().voidItem();
+        }).subscribe().with(x -> {
+        }, firstFailure::set);
+        pool.withPooled(conn -> {
+            anyBodyRan.set(true);
+            return Uni.createFrom().voidItem();
+        }).subscribe().with(x -> {
+        }, secondFailure::set);
+        // Both are pending: the first on its connect, the second queued behind it.
+        assertThat(firstFailure.get()).isNull();
+        assertThat(secondFailure.get()).isNull();
+
+        ConnectException boom = new ConnectException("Redis is unreachable");
+        gate.completeExceptionally(boom);
+
+        // The second caller retries its acquire, which starts a fresh connect that fails the same
+        // way: it gets the failure rather than staying parked in the queue.
+        await().atMost(TIMEOUT).until(() -> firstFailure.get() != null && secondFailure.get() != null);
+        assertThat(firstFailure.get()).hasRootCause(boom);
+        assertThat(secondFailure.get()).hasRootCause(boom);
+        assertThat(anyBodyRan).isFalse();
+        assertThat(pool.getObjectCount()).isZero();
+
+        // Redis comes back: the pool is unharmed and hands out connections again.
+        connector.set(CommandsTestBase::connectAsync);
+        StatefulRedisConnection<byte[], byte[]> conn = pool.acquireBlocking(TIMEOUT);
+        assertThat(conn.sync().ping()).isEqualTo("PONG");
+        pool.release(conn).await().atMost(TIMEOUT);
         assertThat(pool.getIdle()).isEqualTo(1);
     }
 

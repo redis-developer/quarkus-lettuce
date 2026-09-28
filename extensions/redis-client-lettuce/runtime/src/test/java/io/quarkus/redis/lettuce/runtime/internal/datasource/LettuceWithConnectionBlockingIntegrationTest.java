@@ -5,14 +5,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
+import io.smallrye.mutiny.Uni;
 
 class LettuceWithConnectionBlockingIntegrationTest extends CommandsTestBase {
 
@@ -65,6 +69,51 @@ class LettuceWithConnectionBlockingIntegrationTest extends CommandsTestBase {
         })).hasMessageContaining("boom");
         LettuceConnectionPool pool = ((LettuceReactiveRedisDataSourceImpl) ds.getReactive()).getPool();
         await().atMost(TIMEOUT).until(() -> pool.getIdle() == pool.getObjectCount());
+    }
+
+    @Test
+    void releaseFailureDoesNotHideTheBlocksOwnException() {
+        RedisDataSource failingRelease = withRelease(
+                Uni.createFrom().failure(new IllegalStateException("release failed")), TIMEOUT);
+        assertThatThrownBy(() -> failingRelease.withConnection(rds -> {
+            throw new RuntimeException("boom");
+        }))
+                .hasMessage("boom")
+                .satisfies(t -> {
+                    assertThat(t.getSuppressed()).hasSize(1);
+                    assertThat(t.getSuppressed()[0]).isInstanceOf(IllegalStateException.class).hasMessage("release failed");
+                });
+    }
+
+    @Test
+    void releaseTimeoutDoesNotHideTheBlocksOwnException() {
+        RedisDataSource hangingRelease = withRelease(Uni.createFrom().nothing(), Duration.ofSeconds(1));
+        assertThatThrownBy(() -> hangingRelease.withConnection(rds -> {
+            throw new RuntimeException("boom");
+        }))
+                .hasMessage("boom")
+                .satisfies(t -> assertThat(t.getSuppressed()).singleElement().isInstanceOf(TimeoutException.class));
+    }
+
+    @Test
+    void releaseFailureAfterSuccessfulBlockIsLoggedNotThrown() {
+        RedisDataSource failingRelease = withRelease(
+                Uni.createFrom().failure(new IllegalStateException("release failed")), TIMEOUT);
+        AtomicBoolean ran = new AtomicBoolean();
+        // The block did its work: a failure to give the connection back is not the caller's failure.
+        failingRelease.withConnection(rds -> ran.set(true));
+        assertThat(ran).isTrue();
+    }
+
+    /** A data source whose connection release yields {@code release} instead of returning to the pool. */
+    private static RedisDataSource withRelease(Uni<Void> release, Duration timeout) {
+        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool()) {
+            @Override
+            Uni<Void> releaseConnection(StatefulRedisConnection<byte[], byte[]> conn) {
+                return release;
+            }
+        };
+        return new LettuceBlockingRedisDataSourceImpl(reactive, timeout);
     }
 
     @Test

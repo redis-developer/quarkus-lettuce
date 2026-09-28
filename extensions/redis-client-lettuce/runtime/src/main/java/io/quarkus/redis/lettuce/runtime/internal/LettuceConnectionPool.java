@@ -176,6 +176,16 @@ public final class LettuceConnectionPool {
                 .replaceWithVoid();
     }
 
+    private void redrive() {
+        Request next;
+        synchronized (lock) {
+            next = waiters.poll();
+        }
+        if (next != null) {
+            next.start();
+        }
+    }
+
     private Uni<Void> releaseQuietly(StatefulRedisConnection<byte[], byte[]> connection) {
         return release(connection)
                 .onFailure().invoke(failure -> LOGGER.warnf(failure,
@@ -261,13 +271,14 @@ public final class LettuceConnectionPool {
     private final class Request extends CompletableFuture<StatefulRedisConnection<byte[], byte[]>> {
 
         void start() {
-            CompletableFuture<StatefulRedisConnection<byte[], byte[]>> acquired;
+            CompletableFuture<StatefulRedisConnection<byte[], byte[]>> acquired = null;
+            RuntimeException rejection = null;
             synchronized (lock) {
                 if (isDone()) {
                     return; // abandoned before we got here
                 }
                 if (closed) {
-                    acquired = CompletableFuture.failedFuture(new IllegalStateException("Redis connection pool is closed"));
+                    rejection = new IllegalStateException("Redis connection pool is closed");
                 } else {
                     acquired = pool.acquire();
                     if (isExhausted(acquired)) {
@@ -275,12 +286,14 @@ public final class LettuceConnectionPool {
                             waiters.add(this);
                             return;
                         }
-                        acquired = CompletableFuture.failedFuture(
-                                new NoSuchElementException("Redis connection pool exhausted, too many waiting requests"));
+                        rejection = new NoSuchElementException("Redis connection pool exhausted, too many waiting requests");
                     }
                 }
             }
-            // Attached outside the lock: an already-completed future runs the callback inline.
+            if (rejection != null) {
+                completeExceptionally(rejection);
+                return;
+            }
             acquired.whenComplete((conn, failure) -> {
                 if (failure == null) {
                     if (!deliver(conn)) {
@@ -288,6 +301,7 @@ public final class LettuceConnectionPool {
                     }
                 } else {
                     completeExceptionally(failure);
+                    redrive();
                 }
             });
         }
