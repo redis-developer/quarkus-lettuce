@@ -99,7 +99,7 @@ public final class LettuceClientSettings {
             TlsConfigurationRegistry tlsRegistry) {
         RedisURI redisUri = RedisURI.create(host);
         // Lettuce parsed the credentials of the URI its own way; replace them with the Vert.x interpretation.
-        redisUri.setCredentialsProvider(credentials(UserInfo.parse(host), config.password()));
+        redisUri.setCredentialsProvider(credentials(UserInfo.parse(host), config.password().orElse(null)));
 
         NetClientOptions net = new NetClientOptions();
         configureTls(name, config, tlsRegistry, net, host);
@@ -125,9 +125,12 @@ public final class LettuceClientSettings {
      * Combines the credentials of the URI with the {@code password} property. Like with the Vert.x Redis client, the
      * property is the default password: a password encoded in the URI takes precedence. The user name, if any,
      * always comes from the URI; a user name without password does not authenticate.
+     *
+     * @param userInfo the credentials encoded in the URI
+     * @param passwordProperty the {@code password} property, {@code null} when not set
      */
-    static RedisCredentialsProvider credentials(UserInfo userInfo, Optional<String> passwordProperty) {
-        String password = userInfo.password() != null ? userInfo.password() : passwordProperty.orElse(null);
+    static RedisCredentialsProvider credentials(UserInfo userInfo, String passwordProperty) {
+        String password = userInfo.password() != null ? userInfo.password() : passwordProperty;
         return new StaticCredentialsProvider(userInfo.username(), password == null ? null : password.toCharArray());
     }
 
@@ -252,14 +255,15 @@ public final class LettuceClientSettings {
     }
 
     /**
-     * Maps the Vert.x hostname verification algorithm onto the Lettuce {@link SslVerifyMode}: an empty algorithm
-     * verifies the certificate chain only, any other algorithm additionally verifies the host name (Lettuce only
-     * supports the HTTPS algorithm). Trust-all is not a verify mode but a trust manager (see {@link #TRUST_ALL}), so
-     * that, like with the Vert.x client, it does not switch the hostname verification off.
+     * Maps the Vert.x hostname verification algorithm onto the Lettuce {@link SslVerifyMode}: an empty algorithm, or
+     * {@code NONE} as the TLS registry passes it on verbatim from {@code hostname-verification-algorithm}, verifies
+     * the certificate chain only; any other algorithm additionally verifies the host name (Lettuce only supports the
+     * HTTPS algorithm). Trust-all is not a verify mode but a trust manager (see {@link #TRUST_ALL}), so that, like
+     * with the Vert.x client, it does not switch the hostname verification off.
      */
     static SslVerifyMode verifyMode(NetClientOptions net) {
         String algorithm = net.getHostnameVerificationAlgorithm();
-        if (algorithm == null || algorithm.isEmpty()) {
+        if (algorithm == null || algorithm.isEmpty() || "NONE".equalsIgnoreCase(algorithm)) {
             return SslVerifyMode.CA;
         }
         return SslVerifyMode.FULL;

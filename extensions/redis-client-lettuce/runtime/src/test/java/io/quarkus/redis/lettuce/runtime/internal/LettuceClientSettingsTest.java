@@ -3,7 +3,6 @@ package io.quarkus.redis.lettuce.runtime.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.URI;
-import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
@@ -45,24 +44,24 @@ class LettuceClientSettingsTest {
 
     @Test
     void uriPasswordWinsOverProperty() {
-        RedisCredentials fromUri = resolve(new UserInfo("user", "uri-pass"), Optional.of("property-pass"));
+        RedisCredentials fromUri = resolve(new UserInfo("user", "uri-pass"), "property-pass");
         assertThat(fromUri.getUsername()).isEqualTo("user");
         assertThat(fromUri.getPassword()).containsExactly("uri-pass".toCharArray());
 
-        RedisCredentials fromProperty = resolve(new UserInfo("user", null), Optional.of("property-pass"));
+        RedisCredentials fromProperty = resolve(new UserInfo("user", null), "property-pass");
         assertThat(fromProperty.getUsername()).isEqualTo("user");
         assertThat(fromProperty.getPassword()).containsExactly("property-pass".toCharArray());
 
-        RedisCredentials defaultUser = resolve(UserInfo.NONE, Optional.of("property-pass"));
+        RedisCredentials defaultUser = resolve(UserInfo.NONE, "property-pass");
         assertThat(defaultUser.hasUsername()).isFalse();
         assertThat(defaultUser.getPassword()).containsExactly("property-pass".toCharArray());
 
-        RedisCredentials none = resolve(new UserInfo("user", null), Optional.empty());
+        RedisCredentials none = resolve(new UserInfo("user", null), null);
         assertThat(none.getUsername()).isEqualTo("user");
         assertThat(none.hasPassword()).isFalse();
     }
 
-    private static RedisCredentials resolve(UserInfo userInfo, Optional<String> password) {
+    private static RedisCredentials resolve(UserInfo userInfo, String password) {
         return ((StaticCredentialsProvider) LettuceClientSettings.credentials(userInfo, password)).resolveCredentialsNow();
     }
 
@@ -80,6 +79,13 @@ class LettuceClientSettingsTest {
         assertThat(LettuceClientSettings.verifyMode(net)).isEqualTo(SslVerifyMode.FULL);
 
         net.setHostnameVerificationAlgorithm("");
+        assertThat(LettuceClientSettings.verifyMode(net)).isEqualTo(SslVerifyMode.CA);
+
+        // the TLS registry passes `hostname-verification-algorithm=NONE` on verbatim, without the translation to an
+        // empty algorithm that the quarkus.redis.tls.* path performs
+        net.setHostnameVerificationAlgorithm("NONE");
+        assertThat(LettuceClientSettings.verifyMode(net)).isEqualTo(SslVerifyMode.CA);
+        net.setHostnameVerificationAlgorithm("none");
         assertThat(LettuceClientSettings.verifyMode(net)).isEqualTo(SslVerifyMode.CA);
     }
 }
