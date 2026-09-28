@@ -111,12 +111,27 @@ class LettuceWithTransactionReactiveIntegrationTest extends CommandsTestBase {
 
     @Test
     void userBlockExceptionIssuesDiscardAndPropagates() {
-        long before = connectionCount();
         assertThatThrownBy(() -> ds.withTransaction(tx -> tx.value(String.class, String.class).set("k", "v")
                 .chain(() -> Uni.createFrom().failure(new RuntimeException("boom")))).await().atMost(TIMEOUT))
                 .hasMessageContaining("boom");
-        await().atMost(TIMEOUT).until(() -> connectionCount() == before);
+        await().atMost(TIMEOUT).until(() -> ds.getPool().getIdle() == ds.getPool().getObjectCount());
         assertThat(rawGet("k")).isNull();
+    }
+
+    @Test
+    void connectionReturnedAfterDiscardServesSubsequentWithConnection() {
+        ds.withTransaction(tx -> tx.value(String.class, String.class).set("k", "v").chain(tx::discard))
+                .await().atMost(TIMEOUT);
+        // A connection stuck mid-transaction (DISCARD never issued) would hang this call.
+        ds.withConnection(rds -> rds.execute("CLIENT", "ID").replaceWithVoid()).await().atMost(TIMEOUT);
+        assertThat(ds.getPool().getIdle()).isEqualTo(ds.getPool().getObjectCount());
+    }
+
+    @Test
+    void connectionReturnedAfterExecServesSubsequentWithConnection() {
+        ds.withTransaction(tx -> tx.value(String.class, String.class).set("k", "v")).await().atMost(TIMEOUT);
+        ds.withConnection(rds -> rds.execute("CLIENT", "ID").replaceWithVoid()).await().atMost(TIMEOUT);
+        assertThat(ds.getPool().getIdle()).isEqualTo(ds.getPool().getObjectCount());
     }
 
     @Test

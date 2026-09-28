@@ -9,11 +9,14 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
+import io.smallrye.mutiny.Uni;
 
 class LettuceWithTransactionBlockingIntegrationTest extends CommandsTestBase {
 
@@ -113,13 +116,47 @@ class LettuceWithTransactionBlockingIntegrationTest extends CommandsTestBase {
 
     @Test
     void userBlockExceptionIssuesDiscardAndPropagates() {
-        long before = connectionCount();
         assertThatThrownBy(() -> ds.withTransaction(tx -> {
             tx.value(String.class, String.class).set("k", "v");
             throw new RuntimeException("boom");
         })).hasMessageContaining("boom");
-        await().atMost(TIMEOUT).until(() -> connectionCount() == before);
+        LettuceConnectionPool pool = ((LettuceReactiveRedisDataSourceImpl) ds.getReactive()).getPool();
+        await().atMost(TIMEOUT).until(() -> pool.getIdle() == pool.getObjectCount());
         assertThat(rawGet("k")).isNull();
+    }
+
+    @Test
+    void releaseFailureDoesNotHideTheTransactionBlocksOwnException() {
+        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool()) {
+            @Override
+            Uni<Void> releaseConnection(StatefulRedisConnection<byte[], byte[]> conn) {
+                return Uni.createFrom().failure(new IllegalStateException("release failed"));
+            }
+        };
+        RedisDataSource failingRelease = new LettuceBlockingRedisDataSourceImpl(reactive, TIMEOUT);
+        assertThatThrownBy(() -> failingRelease.withTransaction(tx -> {
+            tx.value(String.class, String.class).set("k", "v");
+            throw new RuntimeException("boom");
+        }))
+                .hasMessage("boom")
+                .satisfies(t -> {
+                    assertThat(t.getSuppressed()).hasSize(1);
+                    assertThat(t.getSuppressed()[0]).isInstanceOf(IllegalStateException.class).hasMessage("release failed");
+                });
+        // DISCARD still ran before the failed release.
+        assertThat(rawGet("k")).isNull();
+    }
+
+    @Test
+    void connectionReturnedAfterDiscardServesSubsequentWithConnection() {
+        ds.withTransaction(tx -> {
+            tx.value(String.class, String.class).set("k", "v");
+            tx.discard();
+        });
+        // A connection stuck mid-transaction (DISCARD never issued) would hang this call.
+        ds.withConnection(rds -> rds.execute("CLIENT", "ID"));
+        LettuceConnectionPool pool = ((LettuceReactiveRedisDataSourceImpl) ds.getReactive()).getPool();
+        assertThat(pool.getIdle()).isEqualTo(pool.getObjectCount());
     }
 
     @Test

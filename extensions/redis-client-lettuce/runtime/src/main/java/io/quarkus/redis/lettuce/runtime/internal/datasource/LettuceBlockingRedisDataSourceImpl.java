@@ -5,9 +5,14 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.time.Duration;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
+
+import org.jboss.logging.Logger;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
@@ -65,6 +70,8 @@ import io.vertx.redis.client.Response;
  */
 public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
+    private static final Logger LOGGER = Logger.getLogger(LettuceBlockingRedisDataSourceImpl.class);
+
     private final LettuceReactiveRedisDataSourceImpl reactive;
     private final Duration timeout;
     private final boolean pinned;
@@ -114,29 +121,29 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
             consumer.accept(this);
             return;
         }
-        // Await the connection and run the user block on the calling (worker) thread. Running it
+        // Acquire the connection and run the user block on the calling (worker) thread. Running it
         // inside the reactive withConnection pipeline would execute it on the event loop thread
         // that completed the connection, where the block's blocking calls would deadlock.
-        try (StatefulRedisConnection<byte[], byte[]> conn = reactive.openConnection().await().atMost(timeout)) {
+        StatefulRedisConnection<byte[], byte[]> conn = reactive.acquireConnection(timeout);
+        releasing(conn, () -> {
             LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl
-                    .pinnedTo(reactive.getVertx(), conn);
+                    .pinnedTo(reactive.getVertx(), conn, reactive.getPool());
             consumer.accept(pinnedTo(pinnedReactive, timeout));
-        }
+            return null;
+        });
     }
 
     @Override
     public TransactionResult withTransaction(Consumer<TransactionalRedisDataSource> tx) {
         nonNull(tx, "tx");
         StatefulRedisConnection<byte[], byte[]> conn = acquire();
-        try {
+        return releasing(conn, () -> {
             LettuceTransactionHolder holder = new LettuceTransactionHolder();
             BlockingTransactionalRedisDataSourceImpl source = transactionalSource(conn, holder);
             LettuceResult.toBlocking(conn.async().multi(), timeout);
             runTxBlock(conn, source, () -> tx.accept(source));
             return assembleResult(conn, holder, source.discarded());
-        } finally {
-            release(conn);
-        }
+        });
     }
 
     @Override
@@ -145,7 +152,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         notNullOrEmpty(watchedKeys, "watchedKeys");
         doesNotContainNull(watchedKeys, "watchedKeys");
         StatefulRedisConnection<byte[], byte[]> conn = acquire();
-        try {
+        return releasing(conn, () -> {
             LettuceTransactionHolder holder = new LettuceTransactionHolder();
             BlockingTransactionalRedisDataSourceImpl source = transactionalSource(conn, holder);
             LettuceResult.toBlocking(conn.async().watch(LettuceReactiveRedisDataSourceImpl.encodeKeys(watchedKeys)),
@@ -153,9 +160,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
             LettuceResult.toBlocking(conn.async().multi(), timeout);
             runTxBlock(conn, source, () -> tx.accept(source));
             return assembleResult(conn, holder, source.discarded());
-        } finally {
-            release(conn);
-        }
+        });
     }
 
     @Override
@@ -166,10 +171,10 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         notNullOrEmpty(watchedKeys, "watchedKeys");
         doesNotContainNull(watchedKeys, "watchedKeys");
         StatefulRedisConnection<byte[], byte[]> conn = acquire();
-        try {
+        return releasing(conn, () -> {
             LettuceTransactionHolder holder = new LettuceTransactionHolder();
             LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl.pinnedTo(
-                    reactive.getVertx(), conn);
+                    reactive.getVertx(), conn, reactive.getPool());
             BlockingTransactionalRedisDataSourceImpl source = new BlockingTransactionalRedisDataSourceImpl(
                     new LettuceReactiveTransactionalRedisDataSourceImpl(pinnedReactive, holder), timeout);
 
@@ -196,9 +201,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
                 return OptimisticLockingTransactionResultImpl.discarded(input);
             }
             return holder.toOptimisticLockingResult(input).await().atMost(timeout);
-        } finally {
-            release(conn);
-        }
+        });
     }
 
     /**
@@ -206,23 +209,56 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
      * inside {@code withConnection}, otherwise open a fresh one via the connector.
      */
     private StatefulRedisConnection<byte[], byte[]> acquire() {
-        return pinned ? reactive.getConnection() : reactive.openConnection().await().atMost(timeout);
+        return pinned ? reactive.getConnection() : reactive.acquireConnection(timeout);
     }
 
     /**
-     * Releases a transaction connection. A pinned (reused) connection is left open for the outer
-     * scope to release; a freshly opened one is closed here.
+     * Runs {@code action} on {@code conn} and releases the connection afterwards, whatever the
+     * outcome. The release never hides what the action did: when both fail, the caller gets the
+     * action's exception with the release failure attached as suppressed, and a release failure
+     * after a successful action is logged rather than thrown.
      */
-    private void release(StatefulRedisConnection<byte[], byte[]> conn) {
-        if (!pinned) {
-            LettuceResult.toBlocking(conn.closeAsync(), timeout);
+    private <T> T releasing(StatefulRedisConnection<byte[], byte[]> conn, Supplier<T> action) {
+        Throwable actionFailure = null;
+        try {
+            return action.get();
+        } catch (Throwable t) {
+            actionFailure = t;
+            throw t;
+        } finally {
+            release(conn, actionFailure);
+        }
+    }
+
+    /**
+     * Releases a connection. A pinned (reused) connection is left open for the outer scope to
+     * release; a borrowed one is returned to the pool here.
+     */
+    private void release(StatefulRedisConnection<byte[], byte[]> conn, Throwable actionFailure) {
+        if (pinned) {
+            return;
+        }
+        try {
+            // Wait without cancelling on timeout: cancelling would only detach this thread from a
+            // hand-over that must still run to completion, or the connection is lost to the pool.
+            reactive.releaseConnection(conn).subscribeAsCompletionStage().get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            Throwable releaseFailure = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
+            if (actionFailure != null) {
+                actionFailure.addSuppressed(releaseFailure);
+            } else {
+                LOGGER.warnf(releaseFailure, "Failed to release pooled Redis connection within %s", timeout);
+            }
         }
     }
 
     private BlockingTransactionalRedisDataSourceImpl transactionalSource(StatefulRedisConnection<byte[], byte[]> conn,
             LettuceTransactionHolder holder) {
         LettuceReactiveRedisDataSourceImpl pinnedReactive = LettuceReactiveRedisDataSourceImpl.pinnedTo(
-                reactive.getVertx(), conn);
+                reactive.getVertx(), conn, reactive.getPool());
         return new BlockingTransactionalRedisDataSourceImpl(
                 new LettuceReactiveTransactionalRedisDataSourceImpl(pinnedReactive, holder), timeout);
     }
