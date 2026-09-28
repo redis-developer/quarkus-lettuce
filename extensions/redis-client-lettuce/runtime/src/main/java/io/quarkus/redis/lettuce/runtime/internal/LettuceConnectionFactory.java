@@ -15,6 +15,7 @@ import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandType;
 import io.lettuce.core.protocol.RedisCommand;
+import io.lettuce.core.protocol.TransactionalCommand;
 import io.lettuce.core.resource.ClientResources;
 
 /**
@@ -121,9 +122,15 @@ public class LettuceConnectionFactory {
 
     /**
      * Applies {@code quarkus.redis.timeout} to ordinary commands so a stuck future eventually fails
-     * and its connection is released, instead of being held forever. Blocking commands are exempted:
-     * their timeout is the explicit {@code Duration} argument already sent to Redis, and a stuck one
-     * only holds a single pooled connection rather than the shared one.
+     * and its connection is released, instead of being held forever. Two kinds are exempted:
+     * <ul>
+     * <li>Blocking commands: their timeout is the explicit {@code Duration} argument already sent to
+     * Redis, and a stuck one only holds a single pooled connection rather than the shared one.</li>
+     * <li>Commands queued between {@code MULTI} and {@code EXEC}: Redis answers {@code QUEUED} at once,
+     * but Lettuce completes their futures only with the {@code EXEC} reply, so a timer started when they
+     * are written would fail commands the transaction then went on to execute. {@code EXEC} itself is
+     * timed and bounds them all.</li>
+     * </ul>
      */
     private static final class NonBlockingCommandTimeoutSource extends TimeoutOptions.TimeoutSource {
 
@@ -135,6 +142,9 @@ public class LettuceConnectionFactory {
 
         @Override
         public long getTimeout(RedisCommand<?, ?, ?> command) {
+            if (command instanceof TransactionalCommand<?, ?, ?>) {
+                return -1; // completes on EXEC, bounded by the EXEC timeout
+            }
             return command.getType() instanceof CommandType type && BLOCKING_COMMANDS.contains(type) ? -1 : timeoutMillis;
         }
 
