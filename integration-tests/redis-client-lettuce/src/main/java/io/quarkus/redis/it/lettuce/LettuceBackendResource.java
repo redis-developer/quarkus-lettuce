@@ -16,6 +16,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.QueryParam;
 
+import io.quarkus.redis.client.RedisClientName;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.hash.HashCommands;
@@ -46,6 +47,7 @@ public class LettuceBackendResource {
 
     private final RedisDataSource blocking;
     private final ReactiveRedisDataSource reactive;
+    private final RedisDataSource secure;
     private final ValueCommands<String, String> values;
     private final ReactiveValueCommands<String, String> reactiveValues;
     private final KeyCommands<String> keys;
@@ -60,9 +62,11 @@ public class LettuceBackendResource {
     private final ReactiveSortedSetCommands<String, String> reactiveSortedSet;
 
     @Inject
-    public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs) {
+    public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs,
+            @RedisClientName("secure") RedisDataSource secureDs) {
         this.blocking = ds;
         this.reactive = reactiveDs;
+        this.secure = secureDs;
         this.values = ds.value(String.class);
         this.reactiveValues = reactiveDs.value(String.class);
         this.keys = ds.key(String.class);
@@ -88,6 +92,17 @@ public class LettuceBackendResource {
     @Path("/ping/command")
     public String pingCommand() {
         Response response = blocking.execute(Command.PING);
+        return response.toString();
+    }
+
+    /**
+     * Pings the {@code secure} client, connected over TLS (a {@code rediss://} URI, a PEM trust certificate and
+     * hostname verification) to the TLS-only Redis server.
+     */
+    @GET
+    @Path("/secure/ping")
+    public String securePing() {
+        Response response = secure.execute("PING");
         return response.toString();
     }
 

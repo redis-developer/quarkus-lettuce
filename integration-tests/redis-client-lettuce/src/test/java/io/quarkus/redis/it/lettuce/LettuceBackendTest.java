@@ -40,6 +40,16 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void securePing() {
+        RestAssured.given()
+                .when()
+                .get("/lettuce/secure/ping")
+                .then()
+                .statusCode(200)
+                .body(CoreMatchers.is("PONG"));
+    }
+
+    @Test
     public void dataSourcesAreServedByLettuce() {
         RestAssured.given()
                 .when()
