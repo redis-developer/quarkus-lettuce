@@ -29,9 +29,13 @@ import io.smallrye.certs.Format;
  * client trusts), {@code redis-client.crt} / {@code redis-client.key} (client) and {@code redis-server-ca.crt}
  * (what the server trusts).
  * <p>
- * Like every {@code QuarkusTestResource} of an extension test module, this resource is global: it is started once
- * for the whole module, before the first test class, so the certificates are generated here rather than with the
- * JUnit {@code @Certificates} extension of a particular test class.
+ * This resource must stay global (no {@code restrictToAnnotatedClass}). {@code QuarkusExtensionTest} creates a single
+ * {@code TestResourceManager} per JVM, in the JUnit root store, from the first test class that runs: global
+ * resources found in the test class index are all started at that point, whereas a restricted resource is only
+ * started when that first class declares it. A restricted TLS resource would therefore never start when, say,
+ * {@code LettuceInjectionTest} runs first, and every TLS test would fail. Being started once for the whole module,
+ * before the first test class, is also why the certificates are generated here rather than with the JUnit
+ * {@code @Certificates} extension of a particular test class.
  */
 public class RedisTlsTestResource implements QuarkusTestResourceLifecycleManager {
 

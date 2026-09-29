@@ -40,7 +40,8 @@ import io.vertx.core.net.TrustOptions;
  * The Lettuce {@link RedisURI} and {@link ClientOptions} derived from a {@code quarkus.redis[.<name>].*} client
  * configuration: the (first) host, the credentials and the TLS settings.
  * <p>
- * The credentials and TLS properties are interpreted exactly as the Vert.x Redis client interprets them:
+ * The credentials and TLS properties are interpreted like the Vert.x Redis client interprets them, except for the
+ * differences documented below:
  * <ul>
  * <li>the credentials encoded in the URI take precedence over the {@code password} property, and are parsed the way
  * the Vert.x client parses them (see {@code UserInfo});</li>
@@ -48,6 +49,15 @@ import io.vertx.core.net.TrustOptions;
  * applied to a throwaway Vert.x {@link NetClientOptions} with the helpers the Vert.x backend uses, and the outcome
  * (trust and key material, trust-all, hostname verification, protocols and cipher suites) is then mapped onto the
  * Lettuce {@link SslOptions} and {@link SslVerifyMode}.</li>
+ * </ul>
+ * The deliberate differences from the Vert.x client are:
+ * <ul>
+ * <li>an empty password encoded in the URI ({@code redis://user:@host}) counts as absent, so the {@code password}
+ * property applies, whereas the Vert.x client authenticates with the empty password;</li>
+ * <li>the {@code user} and {@code password} query parameters are split and then URL-decoded, like the user info
+ * (see {@code UserInfo});</li>
+ * <li>the {@code LDAPS} hostname verification algorithm verifies the host name with the {@code HTTPS} rules, the
+ * only ones Lettuce supports (see {@code verifyMode}).</li>
  * </ul>
  */
 public final class LettuceClientSettings {

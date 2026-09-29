@@ -1115,15 +1115,23 @@ The URI is read as the Vert.x Redis client reads it: a password encoded in the U
 `password`, the username always comes from the URI, and a user info without a colon (`redis://user@host:6379`)
 is a username.
 The `user` and `password` query parameters (`redis://host:6379?password=secret`) are fallbacks, as with the
-Vert.x client, with one difference: their values are split and then URL-decoded, like the user info, so a
-percent-encoded `&` or `=` is part of the value and a `+` is a space, whereas the Vert.x client keeps the `+` and
-cuts the value at a percent-encoded `&`.
+Vert.x client.
 * TLS is enabled by a `rediss://` URI or by `tls.enabled=true`.
 The trust and key material, `tls.trust-all` and `tls.hostname-verification-algorithm` are read from the `tls.*`
-properties, or from the named TLS registry configuration referenced by `tls-configuration-name`, exactly as
-described in <<use-tls>> and <<configure-the-authentication>>.
+properties, or from the named TLS registry configuration referenced by `tls-configuration-name`, as described in
+<<use-tls>> and <<configure-the-authentication>>.
 As with the Vert.x client, `trust-all` skips the certificate chain validation only: the host name is verified
-(using the `HTTPS` algorithm) whenever a hostname verification algorithm other than `NONE` is configured.
+whenever a hostname verification algorithm other than `NONE` is configured.
+
+The Lettuce data sources deliberately differ from the Vert.x client in three details:
+
+* An empty password encoded in the URI (`redis://user:@host:6379`) counts as absent, so the `password` property
+applies. The Vert.x client authenticates with the empty password.
+* The values of the `user` and `password` query parameters are split and then URL-decoded, like the user info, so
+a percent-encoded `&` or `=` is part of the value and a `+` is a space. The Vert.x client keeps the `+` and cuts
+the value at a percent-encoded `&`.
+* The `LDAPS` hostname verification algorithm verifies the host name with the `HTTPS` rules, the only ones Lettuce
+supports.
 
 The other client properties (the remaining pool settings, `max-waiting-handlers`, `max-nested-arrays`, the cluster
 and sentinel settings, `client-name`, the remaining `tcp.*` properties, ...) are not applied yet: the extension logs a
