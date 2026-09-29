@@ -33,6 +33,8 @@ import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCom
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveTransactionalBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveTransactionalHashCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveHyperLogLogCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveTransactionalHyperLogLogCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveTransactionalKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.list.LettuceReactiveListCommandsImpl;
@@ -164,7 +166,11 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalHyperLogLogCommands<K, V> hyperloglog(Class<K> redisKeyType, Class<V> memberType) {
-        throw groupNotImplemented("hyperloglog");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(memberType, "memberType");
+        LettuceReactiveHyperLogLogCommandsImpl<K, V> reactiveHyperLogLog = (LettuceReactiveHyperLogLogCommandsImpl<K, V>) reactive
+                .hyperloglog(redisKeyType, memberType);
+        return new LettuceReactiveTransactionalHyperLogLogCommandsImpl<>(this, reactiveHyperLogLog, tx);
     }
 
     @Override

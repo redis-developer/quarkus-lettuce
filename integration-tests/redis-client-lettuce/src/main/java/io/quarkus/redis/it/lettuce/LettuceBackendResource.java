@@ -24,6 +24,8 @@ import io.quarkus.redis.datasource.bitmap.BitMapCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
 import io.quarkus.redis.datasource.hash.HashCommands;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
+import io.quarkus.redis.datasource.hyperloglog.HyperLogLogCommands;
+import io.quarkus.redis.datasource.hyperloglog.ReactiveHyperLogLogCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.keys.KeyScanArgs;
 import io.quarkus.redis.datasource.keys.KeyScanCursor;
@@ -65,6 +67,8 @@ public class LettuceBackendResource {
     private final ReactiveSortedSetCommands<String, String> reactiveSortedSet;
     private final BitMapCommands<String> bitmap;
     private final ReactiveBitMapCommands<String> reactiveBitmap;
+    private final HyperLogLogCommands<String, String> hyperloglog;
+    private final ReactiveHyperLogLogCommands<String, String> reactiveHyperLogLog;
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs,
@@ -86,6 +90,8 @@ public class LettuceBackendResource {
         this.reactiveSortedSet = reactiveDs.sortedSet(String.class);
         this.bitmap = ds.bitmap(String.class);
         this.reactiveBitmap = reactiveDs.bitmap(String.class);
+        this.hyperloglog = ds.hyperloglog(String.class);
+        this.reactiveHyperLogLog = reactiveDs.hyperloglog(String.class);
     }
 
     @GET
@@ -376,6 +382,43 @@ public class LettuceBackendResource {
         return reactiveBitmap.bitcount(key);
     }
 
+    @POST
+    @Path("/hyperloglog/pfadd/{key}")
+    public boolean hyperloglogPfAdd(@PathParam("key") String key, String value) {
+        return hyperloglog.pfadd(key, value.split(","));
+    }
+
+    @GET
+    @Path("/hyperloglog/pfcount/{key}")
+    public long hyperloglogPfCount(@PathParam("key") String key) {
+        return hyperloglog.pfcount(key);
+    }
+
+    @GET
+    @Path("/hyperloglog/pfcount/{key1}/{key2}")
+    public long hyperloglogPfCountUnion(@PathParam("key1") String key1, @PathParam("key2") String key2) {
+        return hyperloglog.pfcount(key1, key2);
+    }
+
+    @POST
+    @Path("/hyperloglog/pfmerge/{dest}/{src1}/{src2}")
+    public void hyperloglogPfMerge(@PathParam("dest") String dest, @PathParam("src1") String src1,
+            @PathParam("src2") String src2) {
+        hyperloglog.pfmerge(dest, src1, src2);
+    }
+
+    @POST
+    @Path("/hyperloglog/reactive/pfadd/{key}")
+    public Uni<Boolean> hyperloglogPfAddReactive(@PathParam("key") String key, String value) {
+        return reactiveHyperLogLog.pfadd(key, value.split(","));
+    }
+
+    @GET
+    @Path("/hyperloglog/reactive/pfcount/{key}")
+    public Uni<Long> hyperloglogPfCountReactive(@PathParam("key") String key) {
+        return reactiveHyperLogLog.pfcount(key);
+    }
+
     @GET
     @Path("/with-connection/client-ids")
     public String withConnectionClientIds() {
@@ -487,4 +530,27 @@ public class LettuceBackendResource {
         return result.discarded() + "," + result.size() + "," + added + "," + addedCount + "," + card
                 + "," + min.value() + "," + min.score();
     }
+
+    @POST
+    @Path("/with-transaction/hyperloglog/{key}")
+    public String withTransactionHyperLogLog(@PathParam("key") String key) {
+        String other = key + "-other";
+        String merged = key + "-merged";
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var h = tx.hyperloglog(String.class, String.class);
+            h.pfadd(key, "a", "b", "c");
+            h.pfadd(key, "a");
+            h.pfadd(other, "c", "d");
+            h.pfmerge(merged, key, other);
+            h.pfcount(merged);
+        });
+        boolean added = result.get(0);
+        boolean addedAgain = result.get(1);
+        boolean addedOther = result.get(2);
+        Object mergeResult = result.get(3);
+        long count = result.get(4);
+        return result.discarded() + "," + result.size() + "," + added + "," + addedAgain + "," + addedOther + ","
+                + (mergeResult == null) + "," + count;
+    }
+
 }
