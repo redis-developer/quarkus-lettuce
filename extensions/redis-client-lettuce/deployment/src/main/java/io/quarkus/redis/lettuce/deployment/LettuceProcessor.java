@@ -34,6 +34,7 @@ import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.deployment.client.RedisDataSourceProviderBuildItem;
 import io.quarkus.redis.deployment.client.RequestedRedisClientBuildItem;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceRecorder;
+import io.quarkus.tls.deployment.spi.TlsRegistryBuildItem;
 import io.quarkus.vertx.deployment.VertxBuildItem;
 
 /**
@@ -143,7 +144,8 @@ public class LettuceProcessor {
             List<RequestedRedisClientBuildItem> dataSourceClients,
             ShutdownContextBuildItem shutdown,
             BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
-            VertxBuildItem vertxBuildItem) {
+            VertxBuildItem vertxBuildItem,
+            TlsRegistryBuildItem tlsRegistryBuildItem) {
 
         Set<String> lettuceNames = new HashSet<>();
         for (RequestedLettuceClientBuildItem client : lettuceClients) {
@@ -160,7 +162,7 @@ public class LettuceProcessor {
         }
 
         // Initialize shared resources and per-client factories
-        recorder.initialize(vertxBuildItem.getVertx(), names);
+        recorder.initialize(vertxBuildItem.getVertx(), tlsRegistryBuildItem.registry(), names);
 
         for (String name : lettuceNames) {
             Supplier<ActiveResult> checkActive = recorder.checkActive(name);
