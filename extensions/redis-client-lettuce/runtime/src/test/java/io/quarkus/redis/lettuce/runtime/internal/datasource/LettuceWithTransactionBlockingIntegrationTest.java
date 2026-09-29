@@ -170,6 +170,22 @@ class LettuceWithTransactionBlockingIntegrationTest extends CommandsTestBase {
     }
 
     @Test
+    void commandIssuedAfterDiscardIsRejectedAndRecordsNothing() {
+        TransactionResult result = ds.withTransaction(tx -> {
+            tx.discard();
+            // DISCARD already left MULTI: the holder must refuse the command instead of running it for real.
+            assertThatThrownBy(() -> tx.value(String.class, String.class).set("k", "v"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("Unable to add command to the current transaction");
+            assertThat(tx.discarded()).isTrue();
+        });
+        assertThat(result.discarded()).isTrue();
+        assertThat(result.hasErrors()).isFalse();
+        assertThat(result.size()).isZero();
+        assertThat(rawGet("k")).isNull();
+    }
+
+    @Test
     void watchViolationYieldsAbortedResult() {
         rawSet("watched", "initial");
         TransactionResult result = ds.withTransaction(tx -> {

@@ -113,9 +113,14 @@ class LettuceBitMapCommandsTest extends CommandsTestBase {
 
     @Test
     void bitfieldWithOffsetSet() {
-        blockingBitMap.bitfield(key, new BitFieldArgs().set(signed(8), typeWidthBasedOffset(2), 5));
+        // #2 with an 8-bit type is absolute bit 16; reading back there catches a dropped `#` (which would write at bit 2)
+        assertThat(blockingBitMap.bitfield(key,
+                new BitFieldArgs().set(signed(8), typeWidthBasedOffset(2), 5).get(signed(8), 16)))
+                .containsExactly(0L, 5L);
         blockingDs.key(String.class).del(key);
-        blockingBitMap.bitfield(key, new BitFieldArgs().set(signed(8), offset(2), 5));
+        assertThat(blockingBitMap.bitfield(key,
+                new BitFieldArgs().set(signed(8), offset(2), 5).get(signed(8), 2).get(signed(8), typeWidthBasedOffset(2))))
+                .containsExactly(0L, 5L, 0L);
     }
 
     @Test
@@ -127,9 +132,14 @@ class LettuceBitMapCommandsTest extends CommandsTestBase {
 
     @Test
     void bitfieldWithOffsetIncrBy() {
-        blockingBitMap.bitfield(key, new BitFieldArgs().incrBy(signed(8), typeWidthBasedOffset(2), 1));
+        // #2 with an 8-bit type is absolute bit 16; reading back there catches a dropped `#` (which would write at bit 2)
+        assertThat(blockingBitMap.bitfield(key,
+                new BitFieldArgs().incrBy(signed(8), typeWidthBasedOffset(2), 1).get(signed(8), 16)))
+                .containsExactly(1L, 1L);
         blockingDs.key(String.class).del(key);
-        blockingBitMap.bitfield(key, new BitFieldArgs().incrBy(signed(8), offset(2), 1));
+        assertThat(blockingBitMap.bitfield(key,
+                new BitFieldArgs().incrBy(signed(8), offset(2), 1).get(signed(8), 2).get(signed(8), typeWidthBasedOffset(2))))
+                .containsExactly(1L, 1L, 0L);
     }
 
     @Test
