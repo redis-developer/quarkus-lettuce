@@ -341,7 +341,7 @@ As a result, some replicas are likely to be underutilized.
 
 === Connect to Redis Cloud
 
-To connect to redis cloud, you need the following properties:
+To connect to Redis cloud, you need the following properties:
 
 [source,properties]
 ----
@@ -349,6 +349,7 @@ quarkus.redis.hosts=<the redis cloud url such as redis://redis-12436.c14.us-east
 quarkus.redis.password=<the password>
 ----
 
+[#use-tls]
 === Use TLS
 
 To use TLS, you need to:
@@ -1111,8 +1112,12 @@ In this initial version the Lettuce data sources apply `quarkus.redis[.<name>].h
 * The credentials are set with `password` or encoded in the URI, for example `redis://user:password@host:6379` or
 `redis://:password@host:6379`.
 The URI is read as the Vert.x Redis client reads it: a password encoded in the URI takes precedence over
-`password`, the user name always comes from the URI, and a user info without a colon (`redis://user@host:6379`)
-is a user name.
+`password`, the username always comes from the URI, and a user info without a colon (`redis://user@host:6379`)
+is a username.
+The `user` and `password` query parameters (`redis://host:6379?password=secret`) are fallbacks, as with the
+Vert.x client, with one difference: their values are split and then URL-decoded, like the user info, so a
+percent-encoded `&` or `=` is part of the value and a `+` is a space, whereas the Vert.x client keeps the `+` and
+cuts the value at a percent-encoded `&`.
 * TLS is enabled by a `rediss://` URI or by `tls.enabled=true`.
 The trust and key material, `tls.trust-all` and `tls.hostname-verification-algorithm` are read from the `tls.*`
 properties, or from the named TLS registry configuration referenced by `tls-configuration-name`, exactly as
@@ -1139,6 +1144,7 @@ Lettuce, including the ones injected by other extensions. In this initial versio
 created for the same clients: the health check pings it, and `quarkus-redis-cache` and the Micrometer Redis
 metrics keep using it. This is transitional; a Lettuce-based health check and metrics are planned.
 
+[#connection-pooling-and-blocking-commands]
 === Connection pooling and blocking commands
 
 Ordinary commands share one multiplexed, pipelined connection per client, Lettuce's intended design.

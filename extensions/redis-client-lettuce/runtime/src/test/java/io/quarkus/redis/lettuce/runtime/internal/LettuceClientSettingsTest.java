@@ -35,9 +35,13 @@ class LettuceClientSettingsTest {
         // parts are URL-decoded after splitting, so an encoded colon or at-sign is not a separator
         assertThat(UserInfo.parse(URI.create("redis://us%40er:p%3Ass@localhost:6379")))
                 .isEqualTo(new UserInfo("us@er", "p:ss"));
-        // the Vert.x query parameters are fallbacks
+        // the Vert.x query parameters are fallbacks, split first and then decoded like the user info: an encoded
+        // ampersand is not a separator (Vert.x decodes before splitting and reads `p`), and a plus sign is a space
+        // (Vert.x keeps the plus sign in the query, but not in the user info)
         assertThat(UserInfo.parse(URI.create("redis://localhost:6379?user=u&password=p%26q")))
                 .isEqualTo(new UserInfo("u", "p&q"));
+        assertThat(UserInfo.parse(URI.create("redis://localhost:6379?password=p+q")))
+                .isEqualTo(new UserInfo(null, "p q"));
         assertThat(UserInfo.parse(URI.create("redis://a:b@localhost:6379?user=u&password=p")))
                 .isEqualTo(new UserInfo("a", "b"));
     }

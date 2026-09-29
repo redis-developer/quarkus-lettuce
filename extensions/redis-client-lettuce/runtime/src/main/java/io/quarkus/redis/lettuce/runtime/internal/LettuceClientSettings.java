@@ -139,6 +139,11 @@ public final class LettuceClientSettings {
      * {@code :password@} or {@code user@} (a lone user info is the user name, not the password as in Lettuce), each
      * part URL-decoded, with the {@code user} and {@code password} query parameters as fallbacks. Empty parts count
      * as absent.
+     * <p>
+     * The query parameters deliberately differ from the Vert.x client in one respect: they are split on the raw
+     * query and then URL-decoded, the same way as the user info. The Vert.x client splits the already decoded query
+     * and does not decode the values, so a percent-encoded {@code &} or {@code =} in a value truncates the value
+     * there, and a {@code +} stays a plus sign there while it is a space here.
      *
      * @param username the user name, {@code null} when the URI does not carry one
      * @param password the password, {@code null} when the URI does not carry one
@@ -173,14 +178,15 @@ public final class LettuceClientSettings {
         }
 
         private static Map<String, String> queryParameters(URI uri) {
-            Map<String, String> parameters = new HashMap<>();
             String query = uri.getRawQuery();
-            if (query != null) {
-                for (String parameter : query.split("&")) {
-                    int equals = parameter.indexOf('=');
-                    if (equals > 0) {
-                        parameters.put(decode(parameter.substring(0, equals)), decode(parameter.substring(equals + 1)));
-                    }
+            if (query == null) {
+                return Map.of();
+            }
+            Map<String, String> parameters = new HashMap<>();
+            for (String parameter : query.split("&")) {
+                int equals = parameter.indexOf('=');
+                if (equals > 0) {
+                    parameters.put(decode(parameter.substring(0, equals)), decode(parameter.substring(equals + 1)));
                 }
             }
             return parameters;
