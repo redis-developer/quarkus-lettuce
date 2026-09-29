@@ -33,14 +33,18 @@ class LettuceTransactionalHyperLogLogCommandsTest extends CommandsTestBase {
             hll.pfadd(key, "a", "b", "c", "d"); // 0 -> true
             hll.pfcount(key); // 1 -> 4
             hll.pfadd(key, "a", "d", "e"); // 2 -> true
-            hll.pfcount(key); // 4 -> 5
+            hll.pfcount(key); // 3 -> 5
+            hll.pfmerge(key + "-merged", key); // 4 -> null (discarded)
+            hll.pfcount(key + "-merged"); // 5 -> 5
         });
-        assertThat(result.size()).isEqualTo(4);
+        assertThat(result.size()).isEqualTo(6);
         assertThat(result.discarded()).isFalse();
         assertThat((boolean) result.get(0)).isTrue();
         assertThat((long) result.get(1)).isEqualTo(4);
         assertThat((boolean) result.get(2)).isTrue();
         assertThat((long) result.get(3)).isEqualTo(5);
+        assertThat((Object) result.get(4)).isNull();
+        assertThat((long) result.get(5)).isEqualTo(5);
     }
 
     @Test
@@ -50,14 +54,18 @@ class LettuceTransactionalHyperLogLogCommandsTest extends CommandsTestBase {
             return hll.pfadd(key, "a", "b", "c", "d")
                     .chain(() -> hll.pfcount(key))
                     .chain(() -> hll.pfadd(key, "a", "d", "e"))
-                    .chain(() -> hll.pfcount(key));
+                    .chain(() -> hll.pfcount(key))
+                    .chain(() -> hll.pfmerge(key + "-merged", key))
+                    .chain(() -> hll.pfcount(key + "-merged"));
         }).await().atMost(Duration.ofSeconds(5));
-        assertThat(result.size()).isEqualTo(4);
+        assertThat(result.size()).isEqualTo(6);
         assertThat(result.discarded()).isFalse();
         assertThat((boolean) result.get(0)).isTrue();
         assertThat((long) result.get(1)).isEqualTo(4);
         assertThat((boolean) result.get(2)).isTrue();
         assertThat((long) result.get(3)).isEqualTo(5);
+        assertThat((Object) result.get(4)).isNull();
+        assertThat((long) result.get(5)).isEqualTo(5);
     }
 
 }

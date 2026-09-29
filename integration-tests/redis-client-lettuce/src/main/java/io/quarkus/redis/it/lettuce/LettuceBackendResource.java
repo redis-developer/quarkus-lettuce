@@ -532,8 +532,10 @@ public class LettuceBackendResource {
         boolean added = result.get(0);
         boolean addedAgain = result.get(1);
         boolean addedOther = result.get(2);
+        Object mergeResult = result.get(3);
         long count = result.get(4);
-        return result.discarded() + "," + result.size() + "," + added + "," + addedAgain + "," + addedOther + "," + count;
+        return result.discarded() + "," + result.size() + "," + added + "," + addedAgain + "," + addedOther + ","
+                + (mergeResult == null) + "," + count;
     }
 
 }

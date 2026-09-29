@@ -630,9 +630,10 @@ class LettuceBackendTest {
         String key = getKey("tx-hll");
         String body = RestAssured.given().when().post("/lettuce/with-transaction/hyperloglog/" + key)
                 .then().statusCode(200).extract().asString();
-        // pfadd(a,b,c) -> true, pfadd(a) -> false, pfadd(other: c,d) -> true, pfmerge -> void, pfcount(merged) -> 4
-        assertEquals("false,5,true,false,true,4", body);
+        // pfadd(a,b,c) -> true, pfadd(a) -> false, pfadd(other: c,d) -> true, pfmerge -> null (discarded), pfcount(merged) -> 4
+        assertEquals("false,5,true,false,true,true,4", body);
         RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key + "-merged").then()
                 .statusCode(200).body(CoreMatchers.is("4"));
     }
+
 }
