@@ -416,6 +416,60 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void bitmapSetBitGetBitBitCount() {
+        String key = getKey("bitmap-sync");
+
+        RestAssured.given().when().get("/lettuce/bitmap/bitcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/7").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/7").then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/100").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().when().get("/lettuce/bitmap/getbit/" + key + "/7").then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().when().get("/lettuce/bitmap/getbit/" + key + "/8").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+        RestAssured.given().when().get("/lettuce/bitmap/bitcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+    }
+
+    @Test
+    public void bitmapBitField() {
+        String key = getKey("bitmap-bitfield");
+
+        // SET i8 #2 5 -> previous 0, GET i8 16 -> 5, INCRBY i8 #2 1 -> 6
+        RestAssured.given().body("5").when().post("/lettuce/bitmap/bitfield/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(0, 5, 6)));
+        // second round reads the incremented value back as the previous one
+        RestAssured.given().body("9").when().post("/lettuce/bitmap/bitfield/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(6, 9, 10)));
+        // the write landed at absolute bit 16 (#2 * 8), not at bit 2
+        RestAssured.given().when().get("/lettuce/bitmap/getbit/" + key + "/2").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+        RestAssured.given().when().get("/lettuce/bitmap/bitcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+    }
+
+    @Test
+    public void bitmapBitCountReactive() {
+        String key = getKey("bitmap-reactive");
+
+        RestAssured.given().when().get("/lettuce/bitmap/reactive/bitcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/0").then().statusCode(200);
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/3").then().statusCode(200);
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/9").then().statusCode(200);
+
+        RestAssured.given().when().get("/lettuce/bitmap/reactive/bitcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("3"));
+    }
+
+    @Test
     public void withConnectionBlockingClientIds() {
         String body = RestAssured.given().when().get("/lettuce/with-connection/client-ids")
                 .then().statusCode(200).extract().asString();
