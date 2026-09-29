@@ -50,4 +50,5 @@ class LettuceListCommandsConvertersTest {
         }
         return rendered.split(" ");
     }
+
 }

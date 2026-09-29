@@ -18,6 +18,9 @@ import jakarta.ws.rs.QueryParam;
 
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
+import io.quarkus.redis.datasource.bitmap.BitMapCommands;
+import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
 import io.quarkus.redis.datasource.hash.HashCommands;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
@@ -58,6 +61,8 @@ public class LettuceBackendResource {
     private final ReactiveSetCommands<String, String> reactiveSet;
     private final SortedSetCommands<String, String> sortedSet;
     private final ReactiveSortedSetCommands<String, String> reactiveSortedSet;
+    private final BitMapCommands<String> bitmap;
+    private final ReactiveBitMapCommands<String> reactiveBitmap;
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs) {
@@ -75,6 +80,8 @@ public class LettuceBackendResource {
         this.reactiveSet = reactiveDs.set(String.class);
         this.sortedSet = ds.sortedSet(String.class);
         this.reactiveSortedSet = reactiveDs.sortedSet(String.class);
+        this.bitmap = ds.bitmap(String.class);
+        this.reactiveBitmap = reactiveDs.bitmap(String.class);
     }
 
     @GET
@@ -313,6 +320,45 @@ public class LettuceBackendResource {
     @Path("/sortedset/reactive/score/{key}/{member}")
     public Uni<Double> sortedSetScoreReactive(@PathParam("key") String key, @PathParam("member") String member) {
         return reactiveSortedSet.zscore(key, member);
+    }
+
+    @POST
+    @Path("/bitmap/setbit/{key}/{offset}")
+    public int bitmapSetBit(@PathParam("key") String key, @PathParam("offset") long offset, String value) {
+        return bitmap.setbit(key, offset, Integer.parseInt(value));
+    }
+
+    @GET
+    @Path("/bitmap/getbit/{key}/{offset}")
+    public int bitmapGetBit(@PathParam("key") String key, @PathParam("offset") long offset) {
+        return bitmap.getbit(key, offset);
+    }
+
+    @GET
+    @Path("/bitmap/bitcount/{key}")
+    public long bitmapBitCount(@PathParam("key") String key) {
+        return bitmap.bitcount(key);
+    }
+
+    /**
+     * Exercises the {@code #}-prefixed offset, {@code INCRBY} and {@code OVERFLOW} sub-commands: {@code #2}
+     * with an 8-bit type is absolute bit 16, so the {@code GET} at bit 16 reads back the value just written.
+     */
+    @POST
+    @Path("/bitmap/bitfield/{key}")
+    public List<Long> bitmapBitField(@PathParam("key") String key, String value) {
+        BitFieldArgs args = new BitFieldArgs()
+                .overflow(BitFieldArgs.OverflowType.WRAP)
+                .set(BitFieldArgs.signed(8), BitFieldArgs.typeWidthBasedOffset(2), Long.parseLong(value))
+                .get(BitFieldArgs.signed(8), 16)
+                .incrBy(BitFieldArgs.signed(8), BitFieldArgs.typeWidthBasedOffset(2), 1);
+        return bitmap.bitfield(key, args);
+    }
+
+    @GET
+    @Path("/bitmap/reactive/bitcount/{key}")
+    public Uni<Long> bitmapBitCountReactive(@PathParam("key") String key) {
+        return reactiveBitmap.bitcount(key);
     }
 
     @GET

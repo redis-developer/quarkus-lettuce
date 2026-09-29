@@ -45,6 +45,12 @@ public class LettuceTransactionHolder {
      * rather than the call, as the Vert.x backend and the non-transactional path do, and records
      * no entry. The command's {@link LettuceCommand#mapper() mapper} is applied to the raw
      * {@code EXEC} reply when the {@link TransactionResult} is assembled.
+     * <p>
+     * Once {@link #discard()} has been called, {@code DISCARD} has already been sent on the pinned
+     * connection, and it is no longer inside {@code MULTI}; issuing the command's call at that point
+     * would run it for real instead of queuing it. So a call arriving after {@link #discard()} is
+     * rejected outright, without invoking {@code call()}, matching the {@code IllegalStateException}
+     * the Vert.x backend raises when a queued command doesn't come back {@code QUEUED}.
      *
      * @param command the command to issue, carrying its call and result mapper
      * @param <T> the raw Lettuce result type
@@ -53,6 +59,9 @@ public class LettuceTransactionHolder {
      */
     @SuppressWarnings("unchecked")
     public <T, R> Uni<Void> enqueue(LettuceCommand<T, R> command) {
+        if (discarded) {
+            return Uni.createFrom().failure(new IllegalStateException("Unable to add command to the current transaction"));
+        }
         RedisFuture<T> future;
         try {
             future = command.call().get();
