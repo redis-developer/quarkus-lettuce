@@ -470,6 +470,72 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void hyperloglogPfAddPfCount() {
+        String key = getKey("hll-sync");
+
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().body("a,b,c").when().post("/lettuce/hyperloglog/pfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        // re-adding already-observed elements alters no register
+        RestAssured.given().body("a,b").when().post("/lettuce/hyperloglog/pfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("d").when().post("/lettuce/hyperloglog/pfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        // small cardinalities are exact
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("4"));
+        RestAssured.given().when().get("/lettuce/key/type/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("STRING"));
+    }
+
+    @Test
+    public void hyperloglogPfMergeAndUnionCount() {
+        String key1 = getKey("hll-merge-1");
+        String key2 = getKey("hll-merge-2");
+        String dest = getKey("hll-merge-dest");
+
+        RestAssured.given().body("a,b,c").when().post("/lettuce/hyperloglog/pfadd/" + key1).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("c,d,e").when().post("/lettuce/hyperloglog/pfadd/" + key2).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        // union count over two keys does not modify either of them
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key1 + "/" + key2).then()
+                .statusCode(200).body(CoreMatchers.is("5"));
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key1).then()
+                .statusCode(200).body(CoreMatchers.is("3"));
+
+        RestAssured.given().when().post("/lettuce/hyperloglog/pfmerge/" + dest + "/" + key1 + "/" + key2).then()
+                .statusCode(204);
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + dest).then()
+                .statusCode(200).body(CoreMatchers.is("5"));
+        RestAssured.given().when().get("/lettuce/key/exists/" + dest).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
+    public void hyperloglogReactive() {
+        String key = getKey("hll-reactive");
+
+        RestAssured.given().when().get("/lettuce/hyperloglog/reactive/pfcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().body("x,y").when().post("/lettuce/hyperloglog/reactive/pfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("x").when().post("/lettuce/hyperloglog/reactive/pfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+
+        RestAssured.given().when().get("/lettuce/hyperloglog/reactive/pfcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        // blocking and reactive views agree on the same key
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+    }
+
+    @Test
     public void withConnectionBlockingClientIds() {
         String body = RestAssured.given().when().get("/lettuce/with-connection/client-ids")
                 .then().statusCode(200).extract().asString();
@@ -557,5 +623,16 @@ class LettuceBackendTest {
         String body = RestAssured.given().when().post("/lettuce/with-transaction/sortedset/" + key)
                 .then().statusCode(200).extract().asString();
         assertEquals("false,4,true,2,3,a,1.0", body);
+    }
+
+    @Test
+    public void withTransactionHyperLogLog() {
+        String key = getKey("tx-hll");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/hyperloglog/" + key)
+                .then().statusCode(200).extract().asString();
+        // pfadd(a,b,c) -> true, pfadd(a) -> false, pfadd(other: c,d) -> true, pfmerge -> void, pfcount(merged) -> 4
+        assertEquals("false,5,true,false,true,4", body);
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key + "-merged").then()
+                .statusCode(200).body(CoreMatchers.is("4"));
     }
 }
