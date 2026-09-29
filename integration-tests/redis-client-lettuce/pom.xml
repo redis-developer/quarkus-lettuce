@@ -74,6 +74,34 @@
             </resource>
         </resources>
         <plugins>
+            <!-- Self-signed server certificate (CN localhost) for the TLS-only Redis server of the docker-redis profile,
+                 written to target/certificates in the generate-resources phase, i.e. before the containers are started
+                 in the compile phase -->
+            <plugin>
+                <groupId>io.smallrye.certs</groupId>
+                <artifactId>smallrye-certificate-generator-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <certificates>
+                        <certificate>
+                            <name>redis</name>
+                            <formats>
+                                <format>PEM</format>
+                            </formats>
+                            <cn>localhost</cn>
+                            <duration>2</duration>
+                            <client>true</client>
+                        </certificate>
+                    </certificates>
+                </configuration>
+            </plugin>
             <plugin>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
@@ -156,6 +184,30 @@
                                             <exec>
                                                 <postStart>redis-cli PING</postStart>
                                             </exec>
+                                        </wait>
+                                    </run>
+                                </image>
+                                <image>
+                                    <name>redis:7-alpine</name>
+                                    <alias>quarkus-test-redis-tls</alias>
+                                    <run>
+                                        <ports>
+                                            <port>6380:6380</port>
+                                        </ports>
+                                        <volumes>
+                                            <bind>
+                                                <volume>${project.build.directory}/certificates:/certs${volume.access.modifier}</volume>
+                                            </bind>
+                                        </volumes>
+                                        <cmd>redis-server --port 0 --tls-port 6380 --tls-cert-file /certs/redis.crt --tls-key-file /certs/redis.key --tls-ca-cert-file /certs/redis-server-ca.crt --tls-auth-clients no</cmd>
+                                        <log>
+                                            <prefix>Redis TLS:</prefix>
+                                            <date>default</date>
+                                            <color>magenta</color>
+                                        </log>
+                                        <wait>
+                                            <time>5000</time>
+                                            <log>Ready to accept connections</log>
                                         </wait>
                                     </run>
                                 </image>

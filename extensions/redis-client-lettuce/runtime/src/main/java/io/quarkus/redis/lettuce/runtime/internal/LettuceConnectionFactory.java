@@ -42,7 +42,34 @@ public class LettuceConnectionFactory {
     private final RedisURI redisUri;
 
     /**
-     * Creates a Lettuce {@link RedisClient} using the given shared resources, Redis URI and command timeout.
+     * Creates a Lettuce {@link RedisClient} using the given shared resources, Redis URI, client options and command
+     * timeout.
+     *
+     * @param clientName the Quarkus Redis client name, used for logging
+     * @param clientResources shared client resources (with Vert.x event loops)
+     * @param redisUri the Redis URI, carrying the host, the credentials and the TLS mode
+     * @param clientOptions the client options, carrying the TLS material (see {@link LettuceClientSettings}); the
+     *        command timeout options are added to them
+     * @param timeout the {@code quarkus.redis.timeout} applied to non-blocking commands
+     */
+    public LettuceConnectionFactory(String clientName, ClientResources clientResources, RedisURI redisUri,
+            ClientOptions clientOptions, Duration timeout) {
+        LOGGER.infof("Creating Lettuce RedisClient '%s' for %s:%d%s", clientName, redisUri.getHost(), redisUri.getPort(),
+                redisUri.isSsl() ? " (TLS)" : "");
+        ClientOptions options = clientOptions.mutate()
+                .timeoutOptions(TimeoutOptions.builder()
+                        .timeoutCommands(true)
+                        .timeoutSource(new NonBlockingCommandTimeoutSource(timeout))
+                        .build())
+                .build();
+        this.redisClient = RedisClient.create(clientResources, redisUri);
+        this.redisClient.setOptions(options);
+        this.redisUri = redisUri;
+    }
+
+    /**
+     * Creates a Lettuce {@link RedisClient} using the given shared resources, Redis URI and command timeout, with the
+     * default client options. TLS and credentials, if any, must be encoded in the URI.
      *
      * @param clientName the Quarkus Redis client name, used for logging
      * @param clientResources shared client resources (with Vert.x event loops)
@@ -50,17 +77,7 @@ public class LettuceConnectionFactory {
      * @param timeout the {@code quarkus.redis.timeout} applied to non-blocking commands
      */
     public LettuceConnectionFactory(String clientName, ClientResources clientResources, URI redisUri, Duration timeout) {
-        RedisURI lettuceUri = RedisURI.create(redisUri);
-        LOGGER.infof("Creating Lettuce RedisClient '%s' for %s:%d", clientName, lettuceUri.getHost(), lettuceUri.getPort());
-        ClientOptions options = ClientOptions.builder()
-                .timeoutOptions(TimeoutOptions.builder()
-                        .timeoutCommands(true)
-                        .timeoutSource(new NonBlockingCommandTimeoutSource(timeout))
-                        .build())
-                .build();
-        this.redisClient = RedisClient.create(clientResources, lettuceUri);
-        this.redisClient.setOptions(options);
-        this.redisUri = lettuceUri;
+        this(clientName, clientResources, RedisURI.create(redisUri), ClientOptions.create(), timeout);
     }
 
     /**

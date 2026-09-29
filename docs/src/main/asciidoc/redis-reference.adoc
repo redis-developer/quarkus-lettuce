@@ -341,7 +341,7 @@ As a result, some replicas are likely to be underutilized.
 
 === Connect to Redis Cloud
 
-To connect to redis cloud, you need the following properties:
+To connect to Redis cloud, you need the following properties:
 
 [source,properties]
 ----
@@ -349,6 +349,7 @@ quarkus.redis.hosts=<the redis cloud url such as redis://redis-12436.c14.us-east
 quarkus.redis.password=<the password>
 ----
 
+[#use-tls]
 === Use TLS
 
 To use TLS, you need to:
@@ -1104,10 +1105,38 @@ extension to your application:
 
 Adding the dependency is the only switch: the extension builds on `quarkus-redis-client`, so clients are
 configured with the same `quarkus.redis.*` properties and the Redis Dev Services work unchanged.
-In this initial version the Lettuce data sources use only `quarkus.redis[.<name>].hosts` (the first URI; TLS and
-credentials must be encoded in it, for example `rediss://user:password@host:6379`), `timeout` and `active`.
-The remaining client properties (`password`, `tls.*`, the pool, cluster and sentinel settings,
-`hosts-provider-name`, ...) are not applied yet.
+In this initial version the Lettuce data sources apply `quarkus.redis[.<name>].hosts` (the first URI only),
+`password`, `tls.*`, `tls-configuration-name`, `tcp.secure-transport-protocols`, `timeout`, `active`,
+`max-pool-size` and `max-pool-waiting` (see <<connection-pooling-and-blocking-commands>>):
+
+* The credentials are set with `password` or encoded in the URI, for example `redis://user:password@host:6379` or
+`redis://:password@host:6379`.
+The URI is read as the Vert.x Redis client reads it: a password encoded in the URI takes precedence over
+`password`, the username always comes from the URI, and a user info without a colon (`redis://user@host:6379`)
+is a username.
+The `user` and `password` query parameters (`redis://host:6379?password=secret`) are fallbacks, as with the
+Vert.x client.
+* TLS is enabled by a `rediss://` URI or by `tls.enabled=true`.
+The trust and key material, `tls.trust-all` and `tls.hostname-verification-algorithm` are read from the `tls.*`
+properties, or from the named TLS registry configuration referenced by `tls-configuration-name`, as described in
+<<use-tls>> and <<configure-the-authentication>>.
+As with the Vert.x client, `trust-all` skips the certificate chain validation only: the host name is verified
+whenever a hostname verification algorithm other than `NONE` is configured.
+
+The Lettuce data sources deliberately differ from the Vert.x client in three details:
+
+* An empty password encoded in the URI (`redis://user:@host:6379`) counts as absent, so the `password` property
+applies. The Vert.x client authenticates with the empty password.
+* The values of the `user` and `password` query parameters are split and then URL-decoded, like the user info, so
+a percent-encoded `&` or `=` is part of the value and a `+` is a space. The Vert.x client keeps the `+` and cuts
+the value at a percent-encoded `&`.
+* The `LDAPS` hostname verification algorithm verifies the host name with the `HTTPS` rules, the only ones Lettuce
+supports.
+
+The other client properties (the remaining pool settings, `max-waiting-handlers`, `max-nested-arrays`, the cluster
+and sentinel settings, `client-name`, the remaining `tcp.*` properties, ...) are not applied yet: the extension logs a
+warning at startup listing the configured properties it ignores, and a client configured only through
+`hosts-provider-name` is deactivated.
 Lettuce and the libraries it needs in native mode (`LatencyUtils`, `HdrHistogram`) are pulled in transitively.
 
 The key, value (string), hash, list, set, sorted set and bitmap command groups are implemented on the Lettuce backend,
@@ -1123,6 +1152,7 @@ Lettuce, including the ones injected by other extensions. In this initial versio
 created for the same clients: the health check pings it, and `quarkus-redis-cache` and the Micrometer Redis
 metrics keep using it. This is transitional; a Lettuce-based health check and metrics are planned.
 
+[#connection-pooling-and-blocking-commands]
 === Connection pooling and blocking commands
 
 Ordinary commands share one multiplexed, pipelined connection per client, Lettuce's intended design.
