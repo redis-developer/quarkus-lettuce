@@ -83,7 +83,7 @@ public class LettuceRecorder {
                         k -> new LettuceConnectionFactory(name, sharedResources.clientResources(), redisUri,
                                 clientConfig.timeout()));
                 pools.putIfAbsent(name, new LettuceConnectionPool(factory::connectAsync,
-                        clientConfig.maxPoolSize(), clientConfig.maxPoolWaiting()));
+                        clientConfig.maxPoolSize(), clientConfig.maxPoolWaiting(), factory.getDatabase()));
             }
         }
     }
