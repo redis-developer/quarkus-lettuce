@@ -40,6 +40,16 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void securePing() {
+        RestAssured.given()
+                .when()
+                .get("/lettuce/secure/ping")
+                .then()
+                .statusCode(200)
+                .body(CoreMatchers.is("PONG"));
+    }
+
+    @Test
     public void dataSourcesAreServedByLettuce() {
         RestAssured.given()
                 .when()
@@ -416,6 +426,126 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void bitmapSetBitGetBitBitCount() {
+        String key = getKey("bitmap-sync");
+
+        RestAssured.given().when().get("/lettuce/bitmap/bitcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/7").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/7").then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/100").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().when().get("/lettuce/bitmap/getbit/" + key + "/7").then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().when().get("/lettuce/bitmap/getbit/" + key + "/8").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+        RestAssured.given().when().get("/lettuce/bitmap/bitcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+    }
+
+    @Test
+    public void bitmapBitField() {
+        String key = getKey("bitmap-bitfield");
+
+        // SET i8 #2 5 -> previous 0, GET i8 16 -> 5, INCRBY i8 #2 1 -> 6
+        RestAssured.given().body("5").when().post("/lettuce/bitmap/bitfield/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(0, 5, 6)));
+        // second round reads the incremented value back as the previous one
+        RestAssured.given().body("9").when().post("/lettuce/bitmap/bitfield/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(6, 9, 10)));
+        // the write landed at absolute bit 16 (#2 * 8), not at bit 2
+        RestAssured.given().when().get("/lettuce/bitmap/getbit/" + key + "/2").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+        RestAssured.given().when().get("/lettuce/bitmap/bitcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+    }
+
+    @Test
+    public void bitmapBitCountReactive() {
+        String key = getKey("bitmap-reactive");
+
+        RestAssured.given().when().get("/lettuce/bitmap/reactive/bitcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/0").then().statusCode(200);
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/3").then().statusCode(200);
+        RestAssured.given().body("1").when().post("/lettuce/bitmap/setbit/" + key + "/9").then().statusCode(200);
+
+        RestAssured.given().when().get("/lettuce/bitmap/reactive/bitcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("3"));
+    }
+
+    @Test
+    public void hyperloglogPfAddPfCount() {
+        String key = getKey("hll-sync");
+
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().body("a,b,c").when().post("/lettuce/hyperloglog/pfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        // re-adding already-observed elements alters no register
+        RestAssured.given().body("a,b").when().post("/lettuce/hyperloglog/pfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("d").when().post("/lettuce/hyperloglog/pfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        // small cardinalities are exact
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("4"));
+        RestAssured.given().when().get("/lettuce/key/type/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("STRING"));
+    }
+
+    @Test
+    public void hyperloglogPfMergeAndUnionCount() {
+        String key1 = getKey("hll-merge-1");
+        String key2 = getKey("hll-merge-2");
+        String dest = getKey("hll-merge-dest");
+
+        RestAssured.given().body("a,b,c").when().post("/lettuce/hyperloglog/pfadd/" + key1).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("c,d,e").when().post("/lettuce/hyperloglog/pfadd/" + key2).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        // union count over two keys does not modify either of them
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key1 + "/" + key2).then()
+                .statusCode(200).body(CoreMatchers.is("5"));
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key1).then()
+                .statusCode(200).body(CoreMatchers.is("3"));
+
+        RestAssured.given().when().post("/lettuce/hyperloglog/pfmerge/" + dest + "/" + key1 + "/" + key2).then()
+                .statusCode(204);
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + dest).then()
+                .statusCode(200).body(CoreMatchers.is("5"));
+        RestAssured.given().when().get("/lettuce/key/exists/" + dest).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
+    public void hyperloglogReactive() {
+        String key = getKey("hll-reactive");
+
+        RestAssured.given().when().get("/lettuce/hyperloglog/reactive/pfcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+
+        RestAssured.given().body("x,y").when().post("/lettuce/hyperloglog/reactive/pfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("x").when().post("/lettuce/hyperloglog/reactive/pfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+
+        RestAssured.given().when().get("/lettuce/hyperloglog/reactive/pfcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        // blocking and reactive views agree on the same key
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+    }
+
+    @Test
     public void withConnectionBlockingClientIds() {
         String body = RestAssured.given().when().get("/lettuce/with-connection/client-ids")
                 .then().statusCode(200).extract().asString();
@@ -504,4 +634,16 @@ class LettuceBackendTest {
                 .then().statusCode(200).extract().asString();
         assertEquals("false,4,true,2,3,a,1.0", body);
     }
+
+    @Test
+    public void withTransactionHyperLogLog() {
+        String key = getKey("tx-hll");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/hyperloglog/" + key)
+                .then().statusCode(200).extract().asString();
+        // pfadd(a,b,c) -> true, pfadd(a) -> false, pfadd(other: c,d) -> true, pfmerge -> null (discarded), pfcount(merged) -> 4
+        assertEquals("false,5,true,false,true,true,4", body);
+        RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key + "-merged").then()
+                .statusCode(200).body(CoreMatchers.is("4"));
+    }
+
 }

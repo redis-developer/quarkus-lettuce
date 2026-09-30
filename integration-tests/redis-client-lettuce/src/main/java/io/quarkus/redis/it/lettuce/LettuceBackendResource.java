@@ -16,10 +16,16 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.QueryParam;
 
+import io.quarkus.redis.client.RedisClientName;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
+import io.quarkus.redis.datasource.bitmap.BitMapCommands;
+import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
 import io.quarkus.redis.datasource.hash.HashCommands;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
+import io.quarkus.redis.datasource.hyperloglog.HyperLogLogCommands;
+import io.quarkus.redis.datasource.hyperloglog.ReactiveHyperLogLogCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.keys.KeyScanArgs;
 import io.quarkus.redis.datasource.keys.KeyScanCursor;
@@ -46,6 +52,7 @@ public class LettuceBackendResource {
 
     private final RedisDataSource blocking;
     private final ReactiveRedisDataSource reactive;
+    private final RedisDataSource secure;
     private final ValueCommands<String, String> values;
     private final ReactiveValueCommands<String, String> reactiveValues;
     private final KeyCommands<String> keys;
@@ -58,11 +65,17 @@ public class LettuceBackendResource {
     private final ReactiveSetCommands<String, String> reactiveSet;
     private final SortedSetCommands<String, String> sortedSet;
     private final ReactiveSortedSetCommands<String, String> reactiveSortedSet;
+    private final BitMapCommands<String> bitmap;
+    private final ReactiveBitMapCommands<String> reactiveBitmap;
+    private final HyperLogLogCommands<String, String> hyperloglog;
+    private final ReactiveHyperLogLogCommands<String, String> reactiveHyperLogLog;
 
     @Inject
-    public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs) {
+    public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs,
+            @RedisClientName("secure") RedisDataSource secureDs) {
         this.blocking = ds;
         this.reactive = reactiveDs;
+        this.secure = secureDs;
         this.values = ds.value(String.class);
         this.reactiveValues = reactiveDs.value(String.class);
         this.keys = ds.key(String.class);
@@ -75,6 +88,10 @@ public class LettuceBackendResource {
         this.reactiveSet = reactiveDs.set(String.class);
         this.sortedSet = ds.sortedSet(String.class);
         this.reactiveSortedSet = reactiveDs.sortedSet(String.class);
+        this.bitmap = ds.bitmap(String.class);
+        this.reactiveBitmap = reactiveDs.bitmap(String.class);
+        this.hyperloglog = ds.hyperloglog(String.class);
+        this.reactiveHyperLogLog = reactiveDs.hyperloglog(String.class);
     }
 
     @GET
@@ -88,6 +105,17 @@ public class LettuceBackendResource {
     @Path("/ping/command")
     public String pingCommand() {
         Response response = blocking.execute(Command.PING);
+        return response.toString();
+    }
+
+    /**
+     * Pings the {@code secure} client, connected over TLS (a {@code rediss://} URI, a PEM trust certificate and
+     * hostname verification) to the TLS-only Redis server.
+     */
+    @GET
+    @Path("/secure/ping")
+    public String securePing() {
+        Response response = secure.execute("PING");
         return response.toString();
     }
 
@@ -315,6 +343,82 @@ public class LettuceBackendResource {
         return reactiveSortedSet.zscore(key, member);
     }
 
+    @POST
+    @Path("/bitmap/setbit/{key}/{offset}")
+    public int bitmapSetBit(@PathParam("key") String key, @PathParam("offset") long offset, String value) {
+        return bitmap.setbit(key, offset, Integer.parseInt(value));
+    }
+
+    @GET
+    @Path("/bitmap/getbit/{key}/{offset}")
+    public int bitmapGetBit(@PathParam("key") String key, @PathParam("offset") long offset) {
+        return bitmap.getbit(key, offset);
+    }
+
+    @GET
+    @Path("/bitmap/bitcount/{key}")
+    public long bitmapBitCount(@PathParam("key") String key) {
+        return bitmap.bitcount(key);
+    }
+
+    /**
+     * Exercises the {@code #}-prefixed offset, {@code INCRBY} and {@code OVERFLOW} sub-commands: {@code #2}
+     * with an 8-bit type is absolute bit 16, so the {@code GET} at bit 16 reads back the value just written.
+     */
+    @POST
+    @Path("/bitmap/bitfield/{key}")
+    public List<Long> bitmapBitField(@PathParam("key") String key, String value) {
+        BitFieldArgs args = new BitFieldArgs()
+                .overflow(BitFieldArgs.OverflowType.WRAP)
+                .set(BitFieldArgs.signed(8), BitFieldArgs.typeWidthBasedOffset(2), Long.parseLong(value))
+                .get(BitFieldArgs.signed(8), 16)
+                .incrBy(BitFieldArgs.signed(8), BitFieldArgs.typeWidthBasedOffset(2), 1);
+        return bitmap.bitfield(key, args);
+    }
+
+    @GET
+    @Path("/bitmap/reactive/bitcount/{key}")
+    public Uni<Long> bitmapBitCountReactive(@PathParam("key") String key) {
+        return reactiveBitmap.bitcount(key);
+    }
+
+    @POST
+    @Path("/hyperloglog/pfadd/{key}")
+    public boolean hyperloglogPfAdd(@PathParam("key") String key, String value) {
+        return hyperloglog.pfadd(key, value.split(","));
+    }
+
+    @GET
+    @Path("/hyperloglog/pfcount/{key}")
+    public long hyperloglogPfCount(@PathParam("key") String key) {
+        return hyperloglog.pfcount(key);
+    }
+
+    @GET
+    @Path("/hyperloglog/pfcount/{key1}/{key2}")
+    public long hyperloglogPfCountUnion(@PathParam("key1") String key1, @PathParam("key2") String key2) {
+        return hyperloglog.pfcount(key1, key2);
+    }
+
+    @POST
+    @Path("/hyperloglog/pfmerge/{dest}/{src1}/{src2}")
+    public void hyperloglogPfMerge(@PathParam("dest") String dest, @PathParam("src1") String src1,
+            @PathParam("src2") String src2) {
+        hyperloglog.pfmerge(dest, src1, src2);
+    }
+
+    @POST
+    @Path("/hyperloglog/reactive/pfadd/{key}")
+    public Uni<Boolean> hyperloglogPfAddReactive(@PathParam("key") String key, String value) {
+        return reactiveHyperLogLog.pfadd(key, value.split(","));
+    }
+
+    @GET
+    @Path("/hyperloglog/reactive/pfcount/{key}")
+    public Uni<Long> hyperloglogPfCountReactive(@PathParam("key") String key) {
+        return reactiveHyperLogLog.pfcount(key);
+    }
+
     @GET
     @Path("/with-connection/client-ids")
     public String withConnectionClientIds() {
@@ -426,4 +530,27 @@ public class LettuceBackendResource {
         return result.discarded() + "," + result.size() + "," + added + "," + addedCount + "," + card
                 + "," + min.value() + "," + min.score();
     }
+
+    @POST
+    @Path("/with-transaction/hyperloglog/{key}")
+    public String withTransactionHyperLogLog(@PathParam("key") String key) {
+        String other = key + "-other";
+        String merged = key + "-merged";
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var h = tx.hyperloglog(String.class, String.class);
+            h.pfadd(key, "a", "b", "c");
+            h.pfadd(key, "a");
+            h.pfadd(other, "c", "d");
+            h.pfmerge(merged, key, other);
+            h.pfcount(merged);
+        });
+        boolean added = result.get(0);
+        boolean addedAgain = result.get(1);
+        boolean addedOther = result.get(2);
+        Object mergeResult = result.get(3);
+        long count = result.get(4);
+        return result.discarded() + "," + result.size() + "," + added + "," + addedAgain + "," + addedOther + ","
+                + (mergeResult == null) + "," + count;
+    }
+
 }

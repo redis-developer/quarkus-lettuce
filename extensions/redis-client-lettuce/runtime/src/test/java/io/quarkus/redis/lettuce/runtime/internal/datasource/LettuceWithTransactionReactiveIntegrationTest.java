@@ -5,12 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
+import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
 import io.smallrye.mutiny.Uni;
@@ -140,6 +142,30 @@ class LettuceWithTransactionReactiveIntegrationTest extends CommandsTestBase {
                 .withTransaction(tx -> tx.value(String.class, String.class).set("k", "v").chain(tx::discard)).await()
                 .atMost(TIMEOUT);
         assertThat(result.discarded()).isTrue();
+        assertThat(rawGet("k")).isNull();
+    }
+
+    @Test
+    void commandIssuedAfterDiscardIsRejectedAndRecordsNothing() {
+        AtomicReference<Throwable> rejected = new AtomicReference<>();
+        AtomicReference<ReactiveTransactionalRedisDataSource> captured = new AtomicReference<>();
+        TransactionResult result = ds.withTransaction(tx -> {
+            captured.set(tx);
+            var value = tx.value(String.class, String.class);
+            // DISCARD already left MULTI: the holder must refuse the command instead of running it for real.
+            return tx.discard()
+                    .chain(() -> value.set("k", "v"))
+                    .onFailure().invoke(rejected::set)
+                    .onFailure().recoverWithNull()
+                    .replaceWithVoid();
+        }).await().atMost(TIMEOUT);
+        assertThat(rejected.get())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Unable to add command to the current transaction");
+        assertThat(captured.get().discarded()).isTrue();
+        assertThat(result.discarded()).isTrue();
+        assertThat(result.hasErrors()).isFalse();
+        assertThat(result.size()).isZero();
         assertThat(rawGet("k")).isNull();
     }
 
