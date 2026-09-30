@@ -130,10 +130,10 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
         return _bitopNot(destination, source).toUni();
     }
 
-    LettuceCommand<Long, Long> _bitopNot(K key, K source) {
-        nonNull(key, "key");
+    LettuceCommand<Long, Long> _bitopNot(K destination, K source) {
+        nonNull(destination, "destination");
         nonNull(source, "source");
-        return LettuceCommand.of(() -> async.bitopNot(marshaller.encode(key), marshaller.encode(source)));
+        return LettuceCommand.of(() -> async.bitopNot(marshaller.encode(destination), marshaller.encode(source)));
     }
 
     @SafeVarargs

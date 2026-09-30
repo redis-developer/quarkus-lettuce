@@ -9,12 +9,14 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
+import io.smallrye.mutiny.Uni;
 
 class LettuceWithTransactionBlockingIntegrationTest extends CommandsTestBase {
 
@@ -124,6 +126,28 @@ class LettuceWithTransactionBlockingIntegrationTest extends CommandsTestBase {
     }
 
     @Test
+    void releaseFailureDoesNotHideTheTransactionBlocksOwnException() {
+        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool()) {
+            @Override
+            Uni<Void> releaseConnection(StatefulRedisConnection<byte[], byte[]> conn) {
+                return Uni.createFrom().failure(new IllegalStateException("release failed"));
+            }
+        };
+        RedisDataSource failingRelease = new LettuceBlockingRedisDataSourceImpl(reactive, TIMEOUT);
+        assertThatThrownBy(() -> failingRelease.withTransaction(tx -> {
+            tx.value(String.class, String.class).set("k", "v");
+            throw new RuntimeException("boom");
+        }))
+                .hasMessage("boom")
+                .satisfies(t -> {
+                    assertThat(t.getSuppressed()).hasSize(1);
+                    assertThat(t.getSuppressed()[0]).isInstanceOf(IllegalStateException.class).hasMessage("release failed");
+                });
+        // DISCARD still ran before the failed release.
+        assertThat(rawGet("k")).isNull();
+    }
+
+    @Test
     void connectionReturnedAfterDiscardServesSubsequentWithConnection() {
         ds.withTransaction(tx -> {
             tx.value(String.class, String.class).set("k", "v");
@@ -142,6 +166,22 @@ class LettuceWithTransactionBlockingIntegrationTest extends CommandsTestBase {
             tx.discard();
         });
         assertThat(result.discarded()).isTrue();
+        assertThat(rawGet("k")).isNull();
+    }
+
+    @Test
+    void commandIssuedAfterDiscardIsRejectedAndRecordsNothing() {
+        TransactionResult result = ds.withTransaction(tx -> {
+            tx.discard();
+            // DISCARD already left MULTI: the holder must refuse the command instead of running it for real.
+            assertThatThrownBy(() -> tx.value(String.class, String.class).set("k", "v"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("Unable to add command to the current transaction");
+            assertThat(tx.discarded()).isTrue();
+        });
+        assertThat(result.discarded()).isTrue();
+        assertThat(result.hasErrors()).isFalse();
+        assertThat(result.size()).isZero();
         assertThat(rawGet("k")).isNull();
     }
 

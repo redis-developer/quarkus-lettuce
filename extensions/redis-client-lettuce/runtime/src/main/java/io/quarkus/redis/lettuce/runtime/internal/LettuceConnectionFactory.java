@@ -15,6 +15,7 @@ import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandType;
 import io.lettuce.core.protocol.RedisCommand;
+import io.lettuce.core.protocol.TransactionalCommand;
 import io.lettuce.core.resource.ClientResources;
 
 /**
@@ -41,7 +42,34 @@ public class LettuceConnectionFactory {
     private final RedisURI redisUri;
 
     /**
-     * Creates a Lettuce {@link RedisClient} using the given shared resources, Redis URI and command timeout.
+     * Creates a Lettuce {@link RedisClient} using the given shared resources, Redis URI, client options and command
+     * timeout.
+     *
+     * @param clientName the Quarkus Redis client name, used for logging
+     * @param clientResources shared client resources (with Vert.x event loops)
+     * @param redisUri the Redis URI, carrying the host, the credentials and the TLS mode
+     * @param clientOptions the client options, carrying the TLS material (see {@link LettuceClientSettings}); the
+     *        command timeout options are added to them
+     * @param timeout the {@code quarkus.redis.timeout} applied to non-blocking commands
+     */
+    public LettuceConnectionFactory(String clientName, ClientResources clientResources, RedisURI redisUri,
+            ClientOptions clientOptions, Duration timeout) {
+        LOGGER.infof("Creating Lettuce RedisClient '%s' for %s:%d%s", clientName, redisUri.getHost(), redisUri.getPort(),
+                redisUri.isSsl() ? " (TLS)" : "");
+        ClientOptions options = clientOptions.mutate()
+                .timeoutOptions(TimeoutOptions.builder()
+                        .timeoutCommands(true)
+                        .timeoutSource(new NonBlockingCommandTimeoutSource(timeout))
+                        .build())
+                .build();
+        this.redisClient = RedisClient.create(clientResources, redisUri);
+        this.redisClient.setOptions(options);
+        this.redisUri = redisUri;
+    }
+
+    /**
+     * Creates a Lettuce {@link RedisClient} using the given shared resources, Redis URI and command timeout, with the
+     * default client options. TLS and credentials, if any, must be encoded in the URI.
      *
      * @param clientName the Quarkus Redis client name, used for logging
      * @param clientResources shared client resources (with Vert.x event loops)
@@ -49,17 +77,7 @@ public class LettuceConnectionFactory {
      * @param timeout the {@code quarkus.redis.timeout} applied to non-blocking commands
      */
     public LettuceConnectionFactory(String clientName, ClientResources clientResources, URI redisUri, Duration timeout) {
-        RedisURI lettuceUri = RedisURI.create(redisUri);
-        LOGGER.infof("Creating Lettuce RedisClient '%s' for %s:%d", clientName, lettuceUri.getHost(), lettuceUri.getPort());
-        ClientOptions options = ClientOptions.builder()
-                .timeoutOptions(TimeoutOptions.builder()
-                        .timeoutCommands(true)
-                        .timeoutSource(new NonBlockingCommandTimeoutSource(timeout))
-                        .build())
-                .build();
-        this.redisClient = RedisClient.create(clientResources, lettuceUri);
-        this.redisClient.setOptions(options);
-        this.redisUri = lettuceUri;
+        this(clientName, clientResources, RedisURI.create(redisUri), ClientOptions.create(), timeout);
     }
 
     /**
@@ -96,6 +114,14 @@ public class LettuceConnectionFactory {
     }
 
     /**
+     * Returns the database index of the configured URI ({@code 0} unless the URI names one).
+     * Every connection this factory opens starts on it.
+     */
+    public int getDatabase() {
+        return redisUri.getDatabase();
+    }
+
+    /**
      * Returns the underlying {@link RedisClient}.
      */
     public RedisClient getRedisClient() {
@@ -113,9 +139,15 @@ public class LettuceConnectionFactory {
 
     /**
      * Applies {@code quarkus.redis.timeout} to ordinary commands so a stuck future eventually fails
-     * and its connection is released, instead of being held forever. Blocking commands are exempted:
-     * their timeout is the explicit {@code Duration} argument already sent to Redis, and a stuck one
-     * only holds a single pooled connection rather than the shared one.
+     * and its connection is released, instead of being held forever. Two kinds are exempted:
+     * <ul>
+     * <li>Blocking commands: their timeout is the explicit {@code Duration} argument already sent to
+     * Redis, and a stuck one only holds a single pooled connection rather than the shared one.</li>
+     * <li>Commands queued between {@code MULTI} and {@code EXEC}: Redis answers {@code QUEUED} at once,
+     * but Lettuce completes their futures only with the {@code EXEC} reply, so a timer started when they
+     * are written would fail commands the transaction then went on to execute. {@code EXEC} itself is
+     * timed and bounds them all.</li>
+     * </ul>
      */
     private static final class NonBlockingCommandTimeoutSource extends TimeoutOptions.TimeoutSource {
 
@@ -127,6 +159,9 @@ public class LettuceConnectionFactory {
 
         @Override
         public long getTimeout(RedisCommand<?, ?, ?> command) {
+            if (command instanceof TransactionalCommand<?, ?, ?>) {
+                return -1; // completes on EXEC, bounded by the EXEC timeout
+            }
             return command.getType() instanceof CommandType type && BLOCKING_COMMANDS.contains(type) ? -1 : timeoutMillis;
         }
 
