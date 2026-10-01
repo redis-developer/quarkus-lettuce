@@ -342,7 +342,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
 
     private static List<String> decodeHashes(List<Value<String>> hashes) {
         if (hashes == null || hashes.isEmpty()) {
-            return Collections.emptyList();
+            return new ArrayList<>();
         }
         List<String> decoded = new ArrayList<>();
         for (Value<String> hash : hashes) {
@@ -353,7 +353,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
 
     private static List<GeoPosition> decodePositions(List<GeoCoordinates> coordinates) {
         if (coordinates == null || coordinates.isEmpty()) {
-            return Collections.emptyList();
+            return new ArrayList<>();
         }
         List<GeoPosition> decoded = new ArrayList<>();
         for (GeoCoordinates coordinate : coordinates) {
