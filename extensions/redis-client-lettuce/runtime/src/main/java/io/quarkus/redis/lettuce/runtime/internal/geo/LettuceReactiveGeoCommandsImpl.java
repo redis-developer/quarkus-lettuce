@@ -343,7 +343,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         if (hashes == null || hashes.isEmpty()) {
             return new ArrayList<>();
         }
-        List<String> decoded = new ArrayList<>();
+        List<String> decoded = new ArrayList<>(hashes.size());
         for (Value<String> hash : hashes) {
             decoded.add(hash.hasValue() ? hash.getValue() : null);
         }
@@ -354,7 +354,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         if (coordinates == null || coordinates.isEmpty()) {
             return new ArrayList<>();
         }
-        List<GeoPosition> decoded = new ArrayList<>();
+        List<GeoPosition> decoded = new ArrayList<>(coordinates.size());
         for (GeoCoordinates coordinate : coordinates) {
             decoded.add(LettuceGeoCommandsConverters.toGeoPosition(coordinate));
         }
