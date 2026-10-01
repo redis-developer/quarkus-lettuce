@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 
 import io.lettuce.core.KeyValue;
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
@@ -19,6 +18,7 @@ import io.quarkus.redis.datasource.hash.ReactiveHashScanCursor;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -36,7 +36,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     private final Type fieldType;
 
     public LettuceReactiveHashCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type fieldType, Type valueType) {
+            LettuceConnection connection, Type keyType, Type fieldType, Type valueType) {
         super(connection, keyType, valueType, new Marshaller(keyType, fieldType, valueType));
         this.dataSource = dataSource;
         this.fieldType = fieldType;

@@ -211,6 +211,38 @@
                                         </wait>
                                     </run>
                                 </image>
+                                <!-- Six-node cluster (three upstream nodes with one replica each) in one container, see
+                                     src/test/resources/redis-cluster/start-cluster.sh: the nodes announce 127.0.0.1 and
+                                     their own port, so every port is published on the same host port -->
+                                <image>
+                                    <name>redis:7-alpine</name>
+                                    <alias>quarkus-test-redis-cluster</alias>
+                                    <run>
+                                        <ports>
+                                            <port>6400:6400</port>
+                                            <port>6401:6401</port>
+                                            <port>6402:6402</port>
+                                            <port>6403:6403</port>
+                                            <port>6404:6404</port>
+                                            <port>6405:6405</port>
+                                        </ports>
+                                        <volumes>
+                                            <bind>
+                                                <volume>${project.basedir}/src/test/resources/redis-cluster:/cluster${volume.access.modifier}</volume>
+                                            </bind>
+                                        </volumes>
+                                        <cmd>sh /cluster/start-cluster.sh 6400 6401 6402 6403 6404 6405</cmd>
+                                        <log>
+                                            <prefix>Redis cluster:</prefix>
+                                            <date>default</date>
+                                            <color>yellow</color>
+                                        </log>
+                                        <wait>
+                                            <time>120000</time>
+                                            <log>CLUSTER READY</log>
+                                        </wait>
+                                    </run>
+                                </image>
                             </images>
                             <allContainers>true</allContainers>
                         </configuration>

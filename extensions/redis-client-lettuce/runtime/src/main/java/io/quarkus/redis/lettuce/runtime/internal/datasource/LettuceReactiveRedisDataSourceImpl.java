@@ -12,7 +12,6 @@ import java.util.function.Function;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandType;
@@ -42,6 +41,7 @@ import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResu
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
@@ -65,7 +65,11 @@ import io.vertx.redis.client.Response;
  * <p>
  * Wires the implemented command groups to their Lettuce impls (see the {@code lettuce/<group>}
  * packages, e.g. {@link LettuceReactiveValueCommandsImpl}) and implements {@code execute(...)},
- * {@code flushall()} and {@code select(...)} on top of the Lettuce async API.
+ * {@code flushall()} and {@code select(...)} on top of the Lettuce async API. The connection is a
+ * {@link LettuceConnection}, to a standalone server or to a cluster: on a cluster every command is
+ * routed to the node owning its key, {@code flushall()} runs on every upstream node, {@code select(...)}
+ * is rejected by the server and {@code withTransaction(...)} fails at once (see
+ * {@link LettuceConnection#TRANSACTIONS_NOT_SUPPORTED_ON_CLUSTER}).
  * {@code withConnection(...)} runs the user block on a connection borrowed from the {@code pool};
  * {@code withTransaction(...)} runs it on a pinned, pooled connection under {@code MULTI}/{@code EXEC},
  * including the {@code WATCH}-based optimistic-locking variants. A {@code SELECT} issued on a pinned
@@ -80,16 +84,16 @@ import io.vertx.redis.client.Response;
 public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSource {
 
     private final Vertx vertx;
-    private final StatefulRedisConnection<byte[], byte[]> connection;
+    private final LettuceConnection connection;
     private final LettuceConnectionPool pool;
     private final boolean pinned;
 
-    public LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<byte[], byte[]> connection,
+    public LettuceReactiveRedisDataSourceImpl(Vertx vertx, LettuceConnection connection,
             LettuceConnectionPool pool) {
         this(vertx, connection, pool, false);
     }
 
-    private LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<byte[], byte[]> connection,
+    private LettuceReactiveRedisDataSourceImpl(Vertx vertx, LettuceConnection connection,
             LettuceConnectionPool pool, boolean pinned) {
         this.vertx = nonNull(vertx, "vertx");
         this.connection = nonNull(connection, "connection");
@@ -102,7 +106,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * pool is only used to report a {@code SELECT} on the connection; scoped operations reuse the
      * pinned connection and blocking commands run on it directly.
      */
-    static LettuceReactiveRedisDataSourceImpl pinnedTo(Vertx vertx, StatefulRedisConnection<byte[], byte[]> connection,
+    static LettuceReactiveRedisDataSourceImpl pinnedTo(Vertx vertx, LettuceConnection connection,
             LettuceConnectionPool pool) {
         return new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool, true);
     }
@@ -127,7 +131,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         return vertx;
     }
 
-    public StatefulRedisConnection<byte[], byte[]> getConnection() {
+    public LettuceConnection getConnection() {
         return connection;
     }
 
@@ -181,7 +185,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     public Uni<Void> select(long index) {
         positiveOrZero(index, "index");
         markDatabaseDirty();
-        return LettuceResult.toUni(() -> connection.async().select((int) index)).replaceWithVoid();
+        return LettuceResult.toUni(() -> connection.select((int) index)).replaceWithVoid();
     }
 
     @Override
@@ -193,11 +197,11 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                         + "or remove the quarkus-redis-client-lettuce extension to use the Vert.x backend.");
     }
 
-    StatefulRedisConnection<byte[], byte[]> acquireConnection(Duration timeout) {
+    LettuceConnection acquireConnection(Duration timeout) {
         return pool.acquireBlocking(timeout);
     }
 
-    Uni<Void> releaseConnection(StatefulRedisConnection<byte[], byte[]> conn) {
+    Uni<Void> releaseConnection(LettuceConnection conn) {
         return pool.release(conn);
     }
 
@@ -240,16 +244,22 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * Runs {@code body} on a transaction-scoped connection. When this data source is already
      * pinned (nested inside {@code withConnection}), the pinned connection is reused and left
      * open for the outer scope to release. Otherwise, a connection is borrowed from the pool and
-     * released on every termination path.
+     * released on every termination path. On a cluster there is no transaction to run: the
+     * returned {@code Uni} fails at once, before any connection is borrowed, with the message
+     * of {@link LettuceConnection#TRANSACTIONS_NOT_SUPPORTED_ON_CLUSTER}.
      */
-    private <T> Uni<T> withTxConnection(Function<StatefulRedisConnection<byte[], byte[]>, Uni<T>> body) {
+    private <T> Uni<T> withTxConnection(Function<LettuceConnection, Uni<T>> body) {
+        if (connection.isCluster()) {
+            return Uni.createFrom()
+                    .failure(new UnsupportedOperationException(LettuceConnection.TRANSACTIONS_NOT_SUPPORTED_ON_CLUSTER));
+        }
         if (pinned) {
             return Uni.createFrom().deferred(() -> body.apply(connection));
         }
         return pool.withScoped(body);
     }
 
-    private Uni<TransactionResult> runTx(StatefulRedisConnection<byte[], byte[]> conn,
+    private Uni<TransactionResult> runTx(LettuceConnection conn,
             Function<ReactiveTransactionalRedisDataSource, Uni<Void>> tx, String[] watchedKeys) {
         LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn, pool);
         LettuceTransactionHolder holder = new LettuceTransactionHolder();
@@ -258,7 +268,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
         Uni<Void> watch = watchedKeys == null ? Uni.createFrom().voidItem() : watch(conn, watchedKeys);
         return watch
-                .chain(() -> LettuceResult.toUni(() -> conn.async().multi()).replaceWithVoid())
+                .chain(() -> LettuceResult.toUni(() -> conn.multi()).replaceWithVoid())
                 .chain(() -> Uni.createFrom().deferred(() -> tx.apply(txDs)))
                 .onItemOrFailure().transformToUni((x, failure) -> {
                     if (failure != null) {
@@ -267,14 +277,14 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                     if (holder.discarded()) {
                         return Uni.createFrom().item(TransactionResultImpl.DISCARDED);
                     }
-                    return LettuceResult.toUni(() -> conn.async().exec())
+                    return LettuceResult.toUni(() -> conn.exec())
                             .chain(execResult -> execResult == null || execResult.wasDiscarded()
                                     ? Uni.createFrom().item(TransactionResultImpl.DISCARDED)
                                     : holder.toResult());
                 });
     }
 
-    private <I> Uni<OptimisticLockingTransactionResult<I>> runOptimisticTx(StatefulRedisConnection<byte[], byte[]> conn,
+    private <I> Uni<OptimisticLockingTransactionResult<I>> runOptimisticTx(LettuceConnection conn,
             Function<ReactiveRedisDataSource, Uni<I>> preTx,
             BiFunction<I, ReactiveTransactionalRedisDataSource, Uni<Void>> tx, String[] watchedKeys) {
         LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn, pool);
@@ -284,14 +294,14 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
         return watch(conn, watchedKeys)
                 .chain(() -> Uni.createFrom().deferred(() -> preTx.apply(pinnedDs)))
-                .onFailure().recoverWithUni(failure -> LettuceResult.toUni(() -> conn.async().unwatch())
+                .onFailure().recoverWithUni(failure -> LettuceResult.toUni(() -> conn.unwatch())
                         .onItemOrFailure().transformToUni((r, f) -> {
                             if (f != null) {
                                 failure.addSuppressed(f);
                             }
                             return Uni.createFrom().failure(failure);
                         }))
-                .chain(input -> LettuceResult.toUni(() -> conn.async().multi()).replaceWithVoid()
+                .chain(input -> LettuceResult.toUni(() -> conn.multi()).replaceWithVoid()
                         .chain(() -> Uni.createFrom().deferred(() -> tx.apply(input, txDs)))
                         .onItemOrFailure().transformToUni((x, failure) -> {
                             if (failure != null) {
@@ -300,7 +310,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                             if (holder.discarded()) {
                                 return Uni.createFrom().item(OptimisticLockingTransactionResultImpl.discarded(input));
                             }
-                            return LettuceResult.toUni(() -> conn.async().exec())
+                            return LettuceResult.toUni(() -> conn.exec())
                                     .chain(execResult -> execResult == null || execResult.wasDiscarded()
                                             ? Uni.createFrom()
                                                     .item(OptimisticLockingTransactionResultImpl.discarded(input))
@@ -308,9 +318,9 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                         }));
     }
 
-    private Uni<Void> watch(StatefulRedisConnection<byte[], byte[]> conn, String[] keys) {
+    private Uni<Void> watch(LettuceConnection conn, String[] keys) {
         byte[][] encodedKeys = encodeKeys(keys);
-        return LettuceResult.toUni(() -> conn.async().watch(encodedKeys)).replaceWithVoid();
+        return LettuceResult.toUni(() -> conn.watch(encodedKeys)).replaceWithVoid();
     }
 
     static byte[][] encodeKeys(String[] keys) {
@@ -326,12 +336,12 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * (unless the user already discarded) and re-propagates the original failure, attaching any
      * {@code DISCARD} failure as suppressed. Mirrors the Vert.x backend's abort path.
      */
-    private static <T> Uni<T> abort(StatefulRedisConnection<byte[], byte[]> conn, LettuceTransactionHolder holder,
+    private static <T> Uni<T> abort(LettuceConnection conn, LettuceTransactionHolder holder,
             Throwable failure) {
         if (holder.discarded()) {
             return Uni.createFrom().failure(failure);
         }
-        return LettuceResult.toUni(() -> conn.async().discard())
+        return LettuceResult.toUni(() -> conn.discard())
                 .onItemOrFailure().transformToUni((r, f) -> {
                     if (f != null) {
                         failure.addSuppressed(f);

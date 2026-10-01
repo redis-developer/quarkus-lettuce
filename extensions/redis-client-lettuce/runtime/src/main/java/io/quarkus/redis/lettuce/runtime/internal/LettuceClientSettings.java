@@ -12,7 +12,10 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -23,11 +26,13 @@ import javax.net.ssl.X509TrustManager;
 import org.jboss.logging.Logger;
 
 import io.lettuce.core.ClientOptions;
+import io.lettuce.core.ReadFrom;
 import io.lettuce.core.RedisCredentialsProvider;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.SslOptions;
 import io.lettuce.core.SslVerifyMode;
 import io.lettuce.core.StaticCredentialsProvider;
+import io.lettuce.core.cluster.ClusterTopologyRefreshOptions;
 import io.quarkus.redis.runtime.client.config.RedisClientConfig;
 import io.quarkus.tls.TlsConfiguration;
 import io.quarkus.tls.TlsConfigurationRegistry;
@@ -35,10 +40,12 @@ import io.quarkus.tls.runtime.config.TlsConfigUtils;
 import io.vertx.core.Vertx;
 import io.vertx.core.net.NetClientOptions;
 import io.vertx.core.net.TrustOptions;
+import io.vertx.redis.client.RedisReplicas;
 
 /**
- * The Lettuce {@link RedisURI} and {@link ClientOptions} derived from a {@code quarkus.redis[.<name>].*} client
- * configuration: the (first) host, the credentials and the TLS settings.
+ * The Lettuce {@link RedisURI}s and {@link ClientOptions} derived from a {@code quarkus.redis[.<name>].*} client
+ * configuration: the hosts, the credentials and the TLS settings, plus the cluster settings ({@link #readFrom} and
+ * {@link #topologyRefreshOptions}).
  * <p>
  * The credentials and TLS properties are interpreted like the Vert.x Redis client interprets them, except for the
  * differences documented below:
@@ -85,11 +92,11 @@ public final class LettuceClientSettings {
         }
     };
 
-    private final RedisURI redisUri;
+    private final List<RedisURI> redisUris;
     private final ClientOptions clientOptions;
 
-    private LettuceClientSettings(RedisURI redisUri, ClientOptions clientOptions) {
-        this.redisUri = redisUri;
+    private LettuceClientSettings(List<RedisURI> redisUris, ClientOptions clientOptions) {
+        this.redisUris = redisUris;
         this.clientOptions = clientOptions;
     }
 
@@ -98,37 +105,99 @@ public final class LettuceClientSettings {
      *
      * @param name the Quarkus Redis client name
      * @param config the client configuration
-     * @param host the Redis URI to connect to (the first configured host)
+     * @param hosts the configured Redis URIs, in configuration order; the standalone client connects to the first
+     *        one, the cluster client discovers the topology from all of them
      * @param vertx the Vert.x instance, used to load the configured trust and key material
      * @param tlsRegistry the TLS registry providing the named TLS configurations
      * @return the settings, never {@code null}
      * @throws IllegalStateException if the referenced named TLS configuration does not exist or its material cannot
      *         be loaded
      */
-    public static LettuceClientSettings create(String name, RedisClientConfig config, URI host, Vertx vertx,
+    public static LettuceClientSettings create(String name, RedisClientConfig config, Collection<URI> hosts, Vertx vertx,
             TlsConfigurationRegistry tlsRegistry) {
-        RedisURI redisUri = RedisURI.create(host);
-        // Lettuce parsed the credentials of the URI its own way; replace them with the Vert.x interpretation.
-        redisUri.setCredentialsProvider(credentials(UserInfo.parse(host), config.password().orElse(null)));
-
+        if (hosts.isEmpty()) {
+            throw new IllegalArgumentException("At least one host is required for the Redis client " + name);
+        }
         NetClientOptions net = new NetClientOptions();
-        configureTls(name, config, tlsRegistry, net, host);
+        configureTls(name, config, tlsRegistry, net, hosts);
 
         ClientOptions.Builder options = ClientOptions.builder();
-        redisUri.setSsl(net.isSsl());
         if (net.isSsl()) {
-            redisUri.setVerifyPeer(verifyMode(net));
             options.sslOptions(sslOptions(name, net, vertx));
         }
-        return new LettuceClientSettings(redisUri, options.build());
+
+        // The TLS mode and the password property apply to every host alike, as with the Vert.x client; this is also
+        // what Lettuce expects of the seed nodes of a cluster, as it connects to the nodes it discovers with the
+        // settings of the first one.
+        List<RedisURI> redisUris = new ArrayList<>(hosts.size());
+        for (URI host : hosts) {
+            RedisURI redisUri = RedisURI.create(host);
+            // Lettuce parsed the credentials of the URI its own way; replace them with the Vert.x interpretation.
+            redisUri.setCredentialsProvider(credentials(UserInfo.parse(host), config.password().orElse(null)));
+            redisUri.setSsl(net.isSsl());
+            if (net.isSsl()) {
+                redisUri.setVerifyPeer(verifyMode(net));
+            }
+            redisUris.add(redisUri);
+        }
+        return new LettuceClientSettings(List.copyOf(redisUris), options.build());
     }
 
+    /**
+     * The URI of the first configured host: the one the standalone client connects to.
+     */
     public RedisURI redisUri() {
-        return redisUri;
+        return redisUris.get(0);
+    }
+
+    /**
+     * The URIs of all the configured hosts, in configuration order: the seed nodes of the cluster client.
+     */
+    public List<RedisURI> redisUris() {
+        return redisUris;
     }
 
     public ClientOptions clientOptions() {
         return clientOptions;
+    }
+
+    /**
+     * Maps {@code quarkus.redis[.<name>].replicas} onto the nodes a cluster connection sends its read-only commands
+     * to: {@code NEVER} (the default) reads from the upstream nodes only, {@code SHARE} from any node, {@code ALWAYS}
+     * from the replicas, falling back to the upstream node of a shard that has no usable replica, as the Vert.x
+     * client does ({@link ReadFrom#REPLICA} would fail such reads instead). As with the Vert.x client, writes always
+     * go to the upstream nodes.
+     */
+    public static ReadFrom readFrom(Optional<RedisReplicas> replicas) {
+        return switch (replicas.orElse(RedisReplicas.NEVER)) {
+            case NEVER -> ReadFrom.UPSTREAM;
+            case SHARE -> ReadFrom.ANY;
+            case ALWAYS -> ReadFrom.REPLICA_PREFERRED;
+        };
+    }
+
+    /**
+     * How a cluster client keeps its view of the cluster topology up to date: it is refreshed periodically, every
+     * {@code quarkus.redis[.<name>].topology-cache-ttl} (see {@link #topologyCacheTtl}), and adaptively on
+     * {@code MOVED} and {@code ASK} redirects, on uncovered slots and unknown nodes, and when a node keeps failing to
+     * reconnect. A non-positive TTL, which disables the topology cache of the Vert.x client, disables the periodic
+     * refresh and leaves the adaptive one.
+     */
+    public static ClusterTopologyRefreshOptions topologyRefreshOptions(Duration topologyCacheTtl) {
+        ClusterTopologyRefreshOptions.Builder refresh = ClusterTopologyRefreshOptions.builder()
+                .enableAllAdaptiveRefreshTriggers();
+        if (!topologyCacheTtl.isZero() && !topologyCacheTtl.isNegative()) {
+            refresh.enablePeriodicRefresh(topologyCacheTtl);
+        }
+        return refresh.build();
+    }
+
+    /**
+     * The TTL of the topology cache, read the way the Vert.x client reads it: {@code topology-cache-ttl}, else its
+     * deprecated alias {@code hash-slot-cache-ttl}.
+     */
+    public static Duration topologyCacheTtl(RedisClientConfig config) {
+        return config.topologyCacheTtl().orElse(config.hashSlotCacheTtl());
     }
 
     /**
@@ -212,16 +281,22 @@ public final class LettuceClientSettings {
     }
 
     /**
-     * Mirrors {@code VertxRedisClientFactory.configureTLS} (and the TLS-relevant part of its TCP configuration) for
-     * a single host, so that both backends read the {@code tls.*}, {@code tls-configuration-name} and
-     * {@code tcp.secure-transport-protocols} properties the same way.
+     * Mirrors {@code VertxRedisClientFactory.configureTLS} (and the TLS-relevant part of its TCP configuration), so
+     * that both backends read the {@code tls.*}, {@code tls-configuration-name} and
+     * {@code tcp.secure-transport-protocols} properties the same way: one {@code rediss://} host enables TLS for all.
      */
     private static void configureTls(String name, RedisClientConfig config, TlsConfigurationRegistry tlsRegistry,
-            NetClientOptions net, URI host) {
+            NetClientOptions net, Collection<URI> hosts) {
         TlsConfiguration configuration = null;
         boolean defaultTrustAll = false;
 
-        boolean tlsFromHosts = "rediss".equals(host.getScheme());
+        boolean tlsFromHosts = false;
+        for (URI host : hosts) {
+            if ("rediss".equals(host.getScheme())) {
+                tlsFromHosts = true;
+                break;
+            }
+        }
 
         // Check if we have a named TLS configuration or a default configuration:
         if (config.tlsConfigurationName().isPresent()) {

@@ -2,7 +2,6 @@ package io.quarkus.redis.lettuce.runtime.internal.datasource;
 
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.ProtocolKeyword;
@@ -28,6 +27,7 @@ import io.quarkus.redis.datasource.topk.ReactiveTransactionalTopKCommands;
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
 import io.quarkus.redis.datasource.value.ReactiveTransactionalValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveTransactionalBitMapCommandsImpl;
@@ -65,7 +65,7 @@ import io.vertx.redis.client.Command;
 public class LettuceReactiveTransactionalRedisDataSourceImpl implements ReactiveTransactionalRedisDataSource {
 
     private final LettuceReactiveRedisDataSourceImpl reactive;
-    private final StatefulRedisConnection<byte[], byte[]> connection;
+    private final LettuceConnection connection;
     private final LettuceTransactionHolder tx;
 
     public LettuceReactiveTransactionalRedisDataSourceImpl(LettuceReactiveRedisDataSourceImpl reactive,
@@ -77,7 +77,7 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public Uni<Void> discard() {
-        return LettuceResult.toUni(() -> connection.async().discard())
+        return LettuceResult.toUni(() -> connection.discard())
                 .invoke(tx::discard)
                 .replaceWithVoid();
     }

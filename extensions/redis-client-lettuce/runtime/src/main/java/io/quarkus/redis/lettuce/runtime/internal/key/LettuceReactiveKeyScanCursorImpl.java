@@ -9,7 +9,7 @@ import java.util.function.Function;
 
 import io.lettuce.core.KeyScanArgs;
 import io.lettuce.core.ScanCursor;
-import io.lettuce.core.api.async.RedisAsyncCommands;
+import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.quarkus.redis.datasource.keys.ReactiveKeyScanCursor;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.smallrye.mutiny.Multi;
@@ -23,17 +23,17 @@ import io.smallrye.mutiny.Uni;
  */
 public class LettuceReactiveKeyScanCursorImpl<K> implements ReactiveKeyScanCursor<K> {
 
-    private final RedisAsyncCommands<byte[], byte[]> async;
+    private final RedisClusterAsyncCommands<byte[], byte[]> async;
     private final KeyScanArgs keyScanArgs;
     private final Function<List<byte[]>, List<K>> decoder;
     private ScanCursor cursor = ScanCursor.INITIAL;
 
-    public LettuceReactiveKeyScanCursorImpl(RedisAsyncCommands<byte[], byte[]> async,
+    public LettuceReactiveKeyScanCursorImpl(RedisClusterAsyncCommands<byte[], byte[]> async,
             Function<List<byte[]>, List<K>> decoder) {
         this(async, new KeyScanArgs(), decoder);
     }
 
-    public LettuceReactiveKeyScanCursorImpl(RedisAsyncCommands<byte[], byte[]> async, KeyScanArgs keyScanArgs,
+    public LettuceReactiveKeyScanCursorImpl(RedisClusterAsyncCommands<byte[], byte[]> async, KeyScanArgs keyScanArgs,
             Function<List<byte[]>, List<K>> decoder) {
         nonNull(async, "async");
         nonNull(keyScanArgs, "args");

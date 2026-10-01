@@ -16,6 +16,7 @@ import org.testcontainers.utility.DockerImageName;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.codec.RedisCodec;
 import io.netty.channel.EventLoopGroup;
@@ -38,6 +39,8 @@ public abstract class CommandsTestBase {
     protected static RedisURI redisUri;
     protected static RedisCodec<byte[], byte[]> codec;
     protected static StatefulRedisConnection<byte[], byte[]> connection;
+    /** {@link #connection} as the data sources see it. */
+    protected static LettuceConnection lettuceConnection;
 
     protected final String key = UUID.randomUUID().toString();
 
@@ -56,6 +59,7 @@ public abstract class CommandsTestBase {
         redisClient = RedisClient.create(lettuceResources.clientResources(), redisUri);
         codec = ByteArrayCodec.INSTANCE;
         connection = redisClient.connect(codec);
+        lettuceConnection = LettuceConnection.standalone(connection);
     }
 
     @AfterAll
@@ -91,12 +95,17 @@ public abstract class CommandsTestBase {
         return container;
     }
 
-    protected static CompletionStage<StatefulRedisConnection<byte[], byte[]>> connectAsync() {
-        return redisClient.connectAsync(codec, redisUri);
+    protected static CompletionStage<LettuceConnection> connectAsync() {
+        return redisClient.connectAsync(codec, redisUri).thenApply(LettuceConnection::standalone);
     }
 
-    protected static Supplier<CompletionStage<StatefulRedisConnection<byte[], byte[]>>> connector() {
+    protected static Supplier<CompletionStage<LettuceConnection>> connector() {
         return CommandsTestBase::connectAsync;
+    }
+
+    /** The sync API of a standalone {@link LettuceConnection}, for the raw checks of the tests. */
+    protected static RedisCommands<byte[], byte[]> sync(LettuceConnection connection) {
+        return ((StatefulRedisConnection<byte[], byte[]>) connection.connection()).sync();
     }
 
     protected static LettuceConnectionPool pool() {
@@ -108,7 +117,7 @@ public abstract class CommandsTestBase {
     }
 
     protected static LettuceReactiveRedisDataSourceImpl reactiveDataSource() {
-        return new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool());
+        return new LettuceReactiveRedisDataSourceImpl(vertx, lettuceConnection, pool());
     }
 
     protected static LettuceBlockingRedisDataSourceImpl blockingDataSource() {
