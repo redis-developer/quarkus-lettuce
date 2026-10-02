@@ -13,7 +13,6 @@ import java.util.Map;
 import io.lettuce.core.KeyValue;
 import io.lettuce.core.LcsArgs;
 import io.lettuce.core.StringMatchResult;
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.string.ReactiveStringCommands;
 import io.quarkus.redis.datasource.value.GetExArgs;
@@ -21,6 +20,7 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.SetArgs;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -36,7 +36,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     private final ReactiveRedisDataSource dataSource;
 
     public LettuceReactiveValueCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type valueType) {
+            LettuceConnection connection, Type keyType, Type valueType) {
         super(connection, keyType, valueType, new Marshaller(keyType, valueType));
         this.dataSource = dataSource;
     }

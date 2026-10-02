@@ -3,14 +3,20 @@ package io.quarkus.redis.lettuce.runtime.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.URI;
+import java.time.Duration;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
+import io.lettuce.core.ReadFrom;
 import io.lettuce.core.RedisCredentials;
 import io.lettuce.core.SslVerifyMode;
 import io.lettuce.core.StaticCredentialsProvider;
+import io.lettuce.core.cluster.ClusterTopologyRefreshOptions;
+import io.lettuce.core.cluster.ClusterTopologyRefreshOptions.RefreshTrigger;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceClientSettings.UserInfo;
 import io.vertx.core.net.NetClientOptions;
+import io.vertx.redis.client.RedisReplicas;
 
 /**
  * Unit tests for the URI credential parsing, the password precedence and the peer verification mapping of
@@ -91,5 +97,28 @@ class LettuceClientSettingsTest {
         assertThat(LettuceClientSettings.verifyMode(net)).isEqualTo(SslVerifyMode.CA);
         net.setHostnameVerificationAlgorithm("none");
         assertThat(LettuceClientSettings.verifyMode(net)).isEqualTo(SslVerifyMode.CA);
+    }
+
+    @Test
+    void mapsReplicasOntoReadFrom() {
+        assertThat(LettuceClientSettings.readFrom(Optional.empty())).isEqualTo(ReadFrom.UPSTREAM);
+        assertThat(LettuceClientSettings.readFrom(Optional.of(RedisReplicas.NEVER))).isEqualTo(ReadFrom.UPSTREAM);
+        assertThat(LettuceClientSettings.readFrom(Optional.of(RedisReplicas.SHARE))).isEqualTo(ReadFrom.ANY);
+        // like the Vert.x client, ALWAYS falls back to the upstream node of a shard without a usable replica
+        assertThat(LettuceClientSettings.readFrom(Optional.of(RedisReplicas.ALWAYS))).isEqualTo(ReadFrom.REPLICA_PREFERRED);
+    }
+
+    @Test
+    void refreshesTheTopologyPeriodicallyAndAdaptively() {
+        ClusterTopologyRefreshOptions options = LettuceClientSettings.topologyRefreshOptions(Duration.ofSeconds(2));
+        assertThat(options.isPeriodicRefreshEnabled()).isTrue();
+        assertThat(options.getRefreshPeriod()).isEqualTo(Duration.ofSeconds(2));
+        assertThat(options.getAdaptiveRefreshTriggers()).containsExactlyInAnyOrder(RefreshTrigger.values());
+
+        // a non-positive TTL disables the topology cache of the Vert.x client; Lettuce needs a positive period, so
+        // only the adaptive refresh is left
+        ClusterTopologyRefreshOptions uncached = LettuceClientSettings.topologyRefreshOptions(Duration.ZERO);
+        assertThat(uncached.isPeriodicRefreshEnabled()).isFalse();
+        assertThat(uncached.getAdaptiveRefreshTriggers()).containsExactlyInAnyOrder(RefreshTrigger.values());
     }
 }

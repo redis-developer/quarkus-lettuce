@@ -12,7 +12,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
 
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.keys.CopyArgs;
 import io.quarkus.redis.datasource.keys.ExpireArgs;
@@ -23,6 +22,7 @@ import io.quarkus.redis.datasource.keys.RedisKeyNotFoundException;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -37,7 +37,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     private final ReactiveRedisDataSource dataSource;
 
     public LettuceReactiveKeyCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType) {
+            LettuceConnection connection, Type keyType) {
         super(connection, keyType, keyType, new Marshaller(keyType));
         this.dataSource = dataSource;
     }

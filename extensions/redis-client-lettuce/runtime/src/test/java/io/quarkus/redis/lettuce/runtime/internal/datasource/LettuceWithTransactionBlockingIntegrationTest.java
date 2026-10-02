@@ -9,12 +9,12 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.smallrye.mutiny.Uni;
 
@@ -127,9 +127,9 @@ class LettuceWithTransactionBlockingIntegrationTest extends CommandsTestBase {
 
     @Test
     void releaseFailureDoesNotHideTheTransactionBlocksOwnException() {
-        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool()) {
+        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, lettuceConnection, pool()) {
             @Override
-            Uni<Void> releaseConnection(StatefulRedisConnection<byte[], byte[]> conn) {
+            Uni<Void> releaseConnection(LettuceConnection conn) {
                 return Uni.createFrom().failure(new IllegalStateException("release failed"));
             }
         };

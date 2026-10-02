@@ -10,10 +10,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import io.lettuce.core.RedisCommandTimeoutException;
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionFactory;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 
@@ -27,7 +27,7 @@ class LettuceCommandTimeoutIntegrationTest extends CommandsTestBase {
     private static final Duration COMMAND_TIMEOUT = Duration.ofMillis(500);
 
     private LettuceConnectionFactory factory;
-    private StatefulRedisConnection<byte[], byte[]> conn;
+    private LettuceConnection conn;
     private LettuceConnectionPool pool;
     private RedisDataSource ds;
 

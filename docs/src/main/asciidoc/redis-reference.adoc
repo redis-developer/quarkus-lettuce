@@ -1105,10 +1105,12 @@ extension to your application:
 
 Adding the dependency is the only switch: the extension builds on `quarkus-redis-client`, so clients are
 configured with the same `quarkus.redis.*` properties and the Redis Dev Services work unchanged.
-In this initial version the Lettuce data sources apply `quarkus.redis[.<name>].hosts` (the first URI only),
-`password`, `tls.*`, `tls-configuration-name`, `tcp.secure-transport-protocols`, `timeout`, `active`,
-`max-pool-size` and `max-pool-waiting` (see <<connection-pooling-and-blocking-commands>>):
+In this initial version the Lettuce data sources apply `quarkus.redis[.<name>].hosts`, `client-type` (`standalone`,
+the default, and `cluster`, see <<lettuce-cluster>>), `password`, `tls.*`, `tls-configuration-name`,
+`tcp.secure-transport-protocols`, `timeout`, `active`, `max-pool-size` and `max-pool-waiting` (see
+<<connection-pooling-and-blocking-commands>>), and for a cluster `replicas` and `topology-cache-ttl`:
 
+* A standalone client connects to the first URI of `hosts`; a cluster client discovers the cluster from all of them.
 * The credentials are set with `password` or encoded in the URI, for example `redis://user:password@host:6379` or
 `redis://:password@host:6379`.
 The URI is read as the Vert.x Redis client reads it: a password encoded in the URI takes precedence over
@@ -1133,11 +1135,57 @@ the value at a percent-encoded `&`.
 * The `LDAPS` hostname verification algorithm verifies the host name with the `HTTPS` rules, the only ones Lettuce
 supports.
 
-The other client properties (the remaining pool settings, `max-waiting-handlers`, `max-nested-arrays`, the cluster
-and sentinel settings, `client-name`, the remaining `tcp.*` properties, ...) are not applied yet: the extension logs a
-warning at startup listing the configured properties it ignores, and a client configured only through
-`hosts-provider-name` is deactivated.
+The other client properties (the `replication` and `sentinel` client types and their settings, the remaining pool
+settings, `max-waiting-handlers`, `max-nested-arrays`, `cluster-transactions`, `client-name`, the remaining `tcp.*`
+properties, ...) are not applied yet: the extension logs a warning at startup listing the configured properties it
+ignores, and a client configured only through `hosts-provider-name` is deactivated.
 Lettuce and the libraries it needs in native mode (`LatencyUtils`, `HdrHistogram`) are pulled in transitively.
+
+[[lettuce-cluster]]
+=== Redis cluster
+
+With `quarkus.redis[.<name>].client-type=cluster`, the data sources are backed by a Lettuce cluster client, configured
+as described in <<use-the-cluster-mode>>:
+
+[source,properties]
+----
+quarkus.redis.hosts=redis://node1:7000,redis://node2:7000,redis://node3:7000
+quarkus.redis.client-type=cluster
+quarkus.redis.replicas=share # defaults to "never"
+----
+
+The client discovers the cluster topology from the configured hosts (the _seed_ nodes, which need not be all the
+members) and routes every command to the node owning its key, following `MOVED` and `ASK` redirects.
+Its view of the topology is refreshed every `topology-cache-ttl` (or its deprecated alias `hash-slot-cache-ttl`,
+default `1s`), and as soon as a redirect, an uncovered slot, an unknown node or a node that keeps failing to
+reconnect reveals a change. A non-positive TTL disables the periodic refresh and leaves the adaptive one.
+`replicas` selects the nodes read-only commands are sent to: `never` reads from the upstream nodes only,
+`share` from any node and `always` from the replicas, falling back to the upstream node of a shard that has no
+usable replica, as with the Vert.x client; writes always go to the upstream nodes.
+Lettuce only reads from a replica whose replication offset it has seen advance, so on a cluster that has not
+replicated anything yet `always` reads from the upstream nodes until the topology refresh that follows the first
+write.
+The credentials and the TLS settings apply to every node.
+
+The command groups work unchanged on a cluster, with the limits of Redis cluster itself:
+
+* Multi-key commands fail with a `CROSSSLOT` error from the server when their keys hash to different slots, unless
+the keys share a hash tag (`{user:1}:a` and `{user:1}:b`), as with the Vert.x client.
+`MGET`, `MSET`, `DEL`, `UNLINK`, `EXISTS` and `TOUCH` are split per slot and work across slots.
+* `withTransaction(...)` fails with an `UnsupportedOperationException` before any command is sent: Redis does not
+support `MULTI`/`EXEC`/`WATCH` across nodes and Lettuce does not route them.
+The Vert.x client fails the same way unless `cluster-transactions=single-node` is set, which the Lettuce backend
+does not support.
+* `select(...)` is rejected by the server: a cluster only has database `0`.
+* `flushall()` runs on every upstream node, and `SCAN` visits every upstream node in turn.
+
+Blocking commands, `withConnection(...)` and `withTransaction(...)` borrow cluster connections from the pool
+described in <<connection-pooling-and-blocking-commands>>; each pooled cluster connection has its own connections to
+the nodes.
+
+The Lettuce beans of a cluster client are `io.lettuce.core.cluster.RedisClusterClient` and
+`io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>` (see below); the `RedisClient` and
+`StatefulRedisConnection<String, String>` beans of such a client are inactive and name the types to inject instead.
 
 The key, value (string), hash, list, set, sorted set, bitmap, hyperloglog and geo command groups are implemented on
 the Lettuce backend, including their transactional variants. The other groups (stream, pub/sub, JSON, bloom,
@@ -1172,8 +1220,10 @@ does not borrow a second connection from the pool, and it blocks that connection
 it would without pooling.
 
 The extension also exposes the Lettuce client itself as CDI beans for every client that is injected through a
-Lettuce type (using `@RedisClientName` for named clients): `io.lettuce.core.RedisClient`,
-`io.lettuce.core.api.StatefulRedisConnection<String, String>` and the shared
+Lettuce type (using `@RedisClientName` for named clients): `io.lettuce.core.RedisClient` and
+`io.lettuce.core.api.StatefulRedisConnection<String, String>` for a standalone client,
+`io.lettuce.core.cluster.RedisClusterClient` and
+`io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>` for a cluster client, and the shared
 `io.lettuce.core.resource.ClientResources` (backed by the Vert.x event loops).
 
 == Configure Redis observability

@@ -19,7 +19,6 @@ import io.lettuce.core.GeoArgs;
 import io.lettuce.core.GeoCoordinates;
 import io.lettuce.core.GeoWithin;
 import io.lettuce.core.Value;
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.output.IntegerOutput;
 import io.lettuce.core.protocol.CommandArgs;
@@ -39,6 +38,7 @@ import io.quarkus.redis.datasource.geo.GeoValue;
 import io.quarkus.redis.datasource.geo.ReactiveGeoCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -58,7 +58,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
     private final Codec valueCodec;
 
     public LettuceReactiveGeoCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type valueType) {
+            LettuceConnection connection, Type keyType, Type valueType) {
         super(connection, keyType, valueType, new Marshaller(keyType, valueType));
         this.dataSource = dataSource;
         this.keyCodec = Codecs.getDefaultCodecFor(keyType);

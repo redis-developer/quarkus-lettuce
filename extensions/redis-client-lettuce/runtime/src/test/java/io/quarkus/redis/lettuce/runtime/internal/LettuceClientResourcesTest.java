@@ -14,8 +14,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import io.lettuce.core.KeyValue;
-import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.api.async.RedisAsyncCommands;
+import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.netty.channel.EventLoopGroup;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.internal.VertxInternal;
@@ -75,8 +74,8 @@ class LettuceClientResourcesTest {
 
     @Test
     void pingViaAsyncApi() throws Exception {
-        try (StatefulRedisConnection<byte[], byte[]> connection = connectionFactory.connect()) {
-            RedisAsyncCommands<byte[], byte[]> async = connection.async();
+        try (LettuceConnection connection = connectionFactory.connect()) {
+            RedisClusterAsyncCommands<byte[], byte[]> async = connection.async();
 
             CompletionStage<String> result = async.ping().toCompletableFuture();
             String pong = result.toCompletableFuture().get(5, TimeUnit.SECONDS);
@@ -87,8 +86,8 @@ class LettuceClientResourcesTest {
 
     @Test
     void completionStageToUniConversion() {
-        try (StatefulRedisConnection<byte[], byte[]> connection = connectionFactory.connect()) {
-            RedisAsyncCommands<byte[], byte[]> async = connection.async();
+        try (LettuceConnection connection = connectionFactory.connect()) {
+            RedisClusterAsyncCommands<byte[], byte[]> async = connection.async();
 
             // Use Supplier form to preserve Uni laziness
             Uni<String> uni = Uni.createFrom().completionStage(() -> async.ping().toCompletableFuture());
@@ -100,8 +99,8 @@ class LettuceClientResourcesTest {
 
     @Test
     void setAndGetViaAsyncApi() {
-        try (StatefulRedisConnection<byte[], byte[]> connection = connectionFactory.connect()) {
-            RedisAsyncCommands<byte[], byte[]> async = connection.async();
+        try (LettuceConnection connection = connectionFactory.connect()) {
+            RedisClusterAsyncCommands<byte[], byte[]> async = connection.async();
 
             byte[] key = "test-key".getBytes(StandardCharsets.UTF_8);
             byte[] value = "test-value".getBytes(StandardCharsets.UTF_8);
@@ -116,8 +115,8 @@ class LettuceClientResourcesTest {
 
     @Test
     void lettuceUsesVertxEventLoopThreads() throws Exception {
-        try (StatefulRedisConnection<byte[], byte[]> connection = connectionFactory.connect()) {
-            RedisAsyncCommands<byte[], byte[]> async = connection.async();
+        try (LettuceConnection connection = connectionFactory.connect()) {
+            RedisClusterAsyncCommands<byte[], byte[]> async = connection.async();
 
             // Execute a command and capture the thread name from the completion callback.
             // BLPOP on a missing key blocks server-side (~200ms), guaranteeing the future is

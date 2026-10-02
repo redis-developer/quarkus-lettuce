@@ -2,6 +2,7 @@ package io.quarkus.redis.lettuce.deployment;
 
 import static io.quarkus.redis.runtime.client.config.RedisConfig.DEFAULT_CLIENT_NAME;
 
+import java.lang.annotation.Annotation;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -9,6 +10,7 @@ import java.util.function.Supplier;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Default;
+import jakarta.inject.Singleton;
 
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.ClassType;
@@ -47,8 +49,11 @@ import io.quarkus.vertx.deployment.VertxBuildItem;
  * <p>
  * Additionally, for every client injected through a Lettuce type, the following beans are produced:
  * <ul>
- * <li>{@code io.lettuce.core.RedisClient}</li>
- * <li>{@code io.lettuce.core.api.StatefulRedisConnection<String, String>}</li>
+ * <li>{@code io.lettuce.core.RedisClient} and {@code io.lettuce.core.api.StatefulRedisConnection<String, String>},
+ * active when the client is configured as a standalone server;</li>
+ * <li>{@code io.lettuce.core.cluster.RedisClusterClient} and
+ * {@code io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>}, active when the client is
+ * configured as a cluster ({@code client-type=cluster}).</li>
  * </ul>
  * And a shared {@code io.lettuce.core.resource.ClientResources} backed by the Vert.x event loops.
  */
@@ -61,20 +66,31 @@ public class LettuceProcessor {
     private static final DotName LETTUCE_REDIS_CLIENT = DotName.createSimple("io.lettuce.core.RedisClient");
     private static final DotName LETTUCE_STATEFUL_CONNECTION = DotName
             .createSimple("io.lettuce.core.api.StatefulRedisConnection");
+    private static final DotName LETTUCE_REDIS_CLUSTER_CLIENT = DotName
+            .createSimple("io.lettuce.core.cluster.RedisClusterClient");
+    private static final DotName LETTUCE_STATEFUL_CLUSTER_CONNECTION = DotName
+            .createSimple("io.lettuce.core.cluster.api.StatefulRedisClusterConnection");
     private static final DotName LETTUCE_CLIENT_RESOURCES = DotName.createSimple("io.lettuce.core.resource.ClientResources");
 
-    private static final Type STATEFUL_CONNECTION_STRING_STRING = ParameterizedType.create(
-            LETTUCE_STATEFUL_CONNECTION,
-            new Type[] {
-                    ClassType.create(DotName.createSimple("java.lang.String")),
-                    ClassType.create(DotName.createSimple("java.lang.String"))
-            },
-            null);
+    private static final Type STATEFUL_CONNECTION_STRING_STRING = stringString(LETTUCE_STATEFUL_CONNECTION);
+    private static final Type STATEFUL_CLUSTER_CONNECTION_STRING_STRING = stringString(LETTUCE_STATEFUL_CLUSTER_CONNECTION);
 
     private static final List<DotName> LETTUCE_INJECTION_TYPES = List.of(
             LETTUCE_REDIS_CLIENT,
             LETTUCE_STATEFUL_CONNECTION,
+            LETTUCE_REDIS_CLUSTER_CLIENT,
+            LETTUCE_STATEFUL_CLUSTER_CONNECTION,
             LETTUCE_CLIENT_RESOURCES);
+
+    private static Type stringString(DotName connectionType) {
+        return ParameterizedType.create(
+                connectionType,
+                new Type[] {
+                        ClassType.create(DotName.createSimple("java.lang.String")),
+                        ClassType.create(DotName.createSimple("java.lang.String"))
+                },
+                null);
+    }
 
     @BuildStep
     FeatureBuildItem feature() {
@@ -106,6 +122,8 @@ public class LettuceProcessor {
         // and its supporting classes to runtime init. (Lettuce 7.x builds that group directly in
         // DefaultClientResources; the former AddressResolverGroupProvider holder class no longer exists.)
         runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.RedisClient"));
+        // RedisClusterClient.create() is folded the same way for the cluster client type.
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.cluster.RedisClusterClient"));
         runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.DefaultClientResources"));
         runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.DefaultClientResources$Builder"));
     }
@@ -165,14 +183,27 @@ public class LettuceProcessor {
         recorder.initialize(vertxBuildItem.getVertx(), tlsRegistryBuildItem.registry(), names);
 
         for (String name : lettuceNames) {
-            Supplier<ActiveResult> checkActive = recorder.checkActive(name);
+            // The client type is runtime configuration: both the standalone and the cluster beans are registered,
+            // and the ones of the other topology are inactive, with a message naming the types to inject instead.
+            Supplier<ActiveResult> checkActiveStandalone = recorder.checkActiveStandalone(name);
+            Supplier<ActiveResult> checkActiveCluster = recorder.checkActiveCluster(name);
 
             syntheticBeans.produce(
                     createLettuceBean(name, LETTUCE_REDIS_CLIENT, ClassType.create(LETTUCE_REDIS_CLIENT),
-                            checkActive, recorder.getRedisClient(name)));
+                            checkActiveStandalone, recorder.getRedisClient(name)));
             syntheticBeans.produce(
                     createLettuceBean(name, LETTUCE_STATEFUL_CONNECTION, STATEFUL_CONNECTION_STRING_STRING,
-                            checkActive, recorder.getConnection(name)));
+                            checkActiveStandalone, recorder.getConnection(name)));
+            // A singleton, unlike the other Lettuce beans: the client proxy ArC would generate for an application
+            // scoped RedisClusterClient lives in io.lettuce.core.cluster and overrides methods whose signatures
+            // name the package-private io.lettuce.core.RedisHandshake, which the native image build rejects when
+            // it links the proxy (the RedisClient proxy is fine, being in the same package as RedisHandshake).
+            syntheticBeans.produce(
+                    createLettuceBean(name, LETTUCE_REDIS_CLUSTER_CLIENT, ClassType.create(LETTUCE_REDIS_CLUSTER_CLIENT),
+                            checkActiveCluster, recorder.getClusterClient(name), Singleton.class));
+            syntheticBeans.produce(
+                    createLettuceBean(name, LETTUCE_STATEFUL_CLUSTER_CONNECTION, STATEFUL_CLUSTER_CONNECTION_STRING_STRING,
+                            checkActiveCluster, recorder.getConnection(name)));
         }
 
         for (String name : dataSourceNames) {
@@ -195,11 +226,20 @@ public class LettuceProcessor {
     }
 
     /**
-     * Creates a Lettuce synthetic bean with the given type, checkActive guard (a recorder proxy, or {@code null}
-     * for an always-active bean), and supplier.
+     * Creates an application scoped Lettuce synthetic bean with the given type, checkActive guard (a recorder proxy,
+     * or {@code null} for an always-active bean), and supplier.
      */
     static SyntheticBeanBuildItem createLettuceBean(String name, DotName implClass, Type beanType,
             Supplier<ActiveResult> checkActive, Supplier<?> supplier) {
+        return createLettuceBean(name, implClass, beanType, checkActive, supplier, ApplicationScoped.class);
+    }
+
+    /**
+     * Creates a Lettuce synthetic bean with the given type, checkActive guard (a recorder proxy, or {@code null}
+     * for an always-active bean), supplier and scope.
+     */
+    static SyntheticBeanBuildItem createLettuceBean(String name, DotName implClass, Type beanType,
+            Supplier<ActiveResult> checkActive, Supplier<?> supplier, Class<? extends Annotation> scope) {
 
         SyntheticBeanBuildItem.ExtendedBeanConfigurator configurator = SyntheticBeanBuildItem
                 .configure(implClass)
@@ -208,7 +248,7 @@ public class LettuceProcessor {
                 .setRuntimeInit()
                 .unremovable()
                 .supplier(supplier)
-                .scope(ApplicationScoped.class);
+                .scope(scope);
         if (checkActive != null) {
             configurator.checkActive(checkActive);
         }
