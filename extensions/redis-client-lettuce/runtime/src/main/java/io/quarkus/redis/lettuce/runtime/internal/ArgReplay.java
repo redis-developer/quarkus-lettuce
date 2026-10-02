@@ -28,7 +28,9 @@ public final class ArgReplay {
      */
     public static <K, V> void replay(List<?> tokens, CommandArgs<K, V> args) {
         for (Object token : tokens) {
-            args.add(token);
+            if (token != null) {
+                args.add(token);
+            }
         }
     }
 
@@ -46,7 +48,7 @@ public final class ArgReplay {
      */
     public static <K, V> void replayExcept(List<?> tokens, CommandArgs<K, V> args, Set<String> skip) {
         for (Object token : tokens) {
-            if (!(token instanceof String s && skip.contains(s))) {
+            if (token != null && !(token instanceof String s && skip.contains(s))) {
                 args.add(token);
             }
         }

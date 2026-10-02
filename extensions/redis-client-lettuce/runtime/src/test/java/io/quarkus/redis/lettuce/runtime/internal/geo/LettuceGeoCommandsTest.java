@@ -28,7 +28,9 @@ import io.quarkus.redis.datasource.geo.GeoSearchStoreArgs;
 import io.quarkus.redis.datasource.geo.GeoUnit;
 import io.quarkus.redis.datasource.geo.GeoValue;
 import io.quarkus.redis.datasource.geo.ReactiveGeoCommands;
+import io.quarkus.redis.datasource.geo.TransactionalGeoCommands;
 import io.quarkus.redis.datasource.sortedset.ScoredValue;
+import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
 import io.quarkus.redis.lettuce.runtime.internal.Place;
 
@@ -151,6 +153,30 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
     }
 
     @Test
+    void geoaddInTransaction() {
+        TransactionResult result = blockingDs.withTransaction(tx -> {
+            TransactionalGeoCommands<String, Place> geo = tx.geo(Place.class);
+            geo.geoadd(key, CRUSSOL_LONGITUDE, CRUSSOL_LATITUDE, Place.crussol);
+            geo.geoadd(key, GRIGNAN_LONGITUDE, GRIGNAN_LATITUDE, Place.grignan);
+        });
+        assertThat(result.discarded()).isFalse();
+        assertThat(result).containsSequence(true, true);
+    }
+
+    @Test
+    void geoaddMultiGeoItemsInTransaction() {
+        TransactionResult result = blockingDs.withTransaction(tx -> {
+            TransactionalGeoCommands<String, Place> geo = tx.geo(Place.class);
+            geo.geoadd(key,
+                    GeoItem.of(Place.crussol, CRUSSOL_LONGITUDE, CRUSSOL_LATITUDE),
+                    GeoItem.of(Place.grignan, GRIGNAN_LONGITUDE, GRIGNAN_LATITUDE),
+                    GeoItem.of(Place.suze, SUZE_LONGITUDE, SUZE_LATITUDE));
+        }, key);
+        assertThat(result.discarded()).isFalse();
+        assertThat(result).contains(3);
+    }
+
+    @Test
     void georadius() {
         populate();
         Set<Place> places = blockingGeo.georadius(key, 44.9396, CRUSSOL_LATITUDE, 1, GeoUnit.KM);
@@ -181,6 +207,24 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
         assertThat(list).hasSize(2);
         assertThat(list.get(0).member).isEqualTo(Place.crussol);
         assertThat(list.get(1).member).isEqualTo(Place.grignan); // 58 Km from crussol
+    }
+
+    @Test
+    void georadiusInTransaction() {
+        populate();
+
+        TransactionResult result = blockingDs.withTransaction(tx -> {
+            TransactionalGeoCommands<String, Place> geo = tx.geo(Place.class);
+            geo.georadius(key, CRUSSOL_LONGITUDE, CRUSSOL_LATITUDE, 1, GeoUnit.KM);
+            geo.georadius(key, CRUSSOL_LONGITUDE, CRUSSOL_LATITUDE, 60, GeoUnit.KM);
+        });
+
+        assertThat(result.discarded()).isFalse();
+        Set<Place> georadius = result.get(0);
+        Set<Place> largerGeoradius = result.get(1);
+
+        assertThat(georadius).hasSize(1).contains(Place.crussol);
+        assertThat(largerGeoradius).hasSize(2).contains(Place.crussol).contains(Place.grignan);
     }
 
     @Test
