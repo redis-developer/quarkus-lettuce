@@ -9,7 +9,6 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.OptionalDouble;
@@ -342,9 +341,9 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
 
     private static List<String> decodeHashes(List<Value<String>> hashes) {
         if (hashes == null || hashes.isEmpty()) {
-            return Collections.emptyList();
+            return new ArrayList<>();
         }
-        List<String> decoded = new ArrayList<>();
+        List<String> decoded = new ArrayList<>(hashes.size());
         for (Value<String> hash : hashes) {
             decoded.add(hash.hasValue() ? hash.getValue() : null);
         }
@@ -353,9 +352,9 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
 
     private static List<GeoPosition> decodePositions(List<GeoCoordinates> coordinates) {
         if (coordinates == null || coordinates.isEmpty()) {
-            return Collections.emptyList();
+            return new ArrayList<>();
         }
-        List<GeoPosition> decoded = new ArrayList<>();
+        List<GeoPosition> decoded = new ArrayList<>(coordinates.size());
         for (GeoCoordinates coordinate : coordinates) {
             decoded.add(LettuceGeoCommandsConverters.toGeoPosition(coordinate));
         }
