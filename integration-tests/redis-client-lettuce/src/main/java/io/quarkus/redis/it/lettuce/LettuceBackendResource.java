@@ -25,6 +25,13 @@ import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
 import io.quarkus.redis.datasource.bitmap.BitMapCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
+import io.quarkus.redis.datasource.geo.GeoCommands;
+import io.quarkus.redis.datasource.geo.GeoPosition;
+import io.quarkus.redis.datasource.geo.GeoSearchArgs;
+import io.quarkus.redis.datasource.geo.GeoSearchStoreArgs;
+import io.quarkus.redis.datasource.geo.GeoUnit;
+import io.quarkus.redis.datasource.geo.GeoValue;
+import io.quarkus.redis.datasource.geo.ReactiveGeoCommands;
 import io.quarkus.redis.datasource.hash.HashCommands;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.hyperloglog.HyperLogLogCommands;
@@ -74,6 +81,8 @@ public class LettuceBackendResource {
     private final ReactiveBitMapCommands<String> reactiveBitmap;
     private final HyperLogLogCommands<String, String> hyperloglog;
     private final ReactiveHyperLogLogCommands<String, String> reactiveHyperLogLog;
+    private final GeoCommands<String, String> geo;
+    private final ReactiveGeoCommands<String, String> reactiveGeo;
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs,
@@ -101,6 +110,8 @@ public class LettuceBackendResource {
         this.reactiveBitmap = reactiveDs.bitmap(String.class);
         this.hyperloglog = ds.hyperloglog(String.class);
         this.reactiveHyperLogLog = reactiveDs.hyperloglog(String.class);
+        this.geo = ds.geo(String.class);
+        this.reactiveGeo = reactiveDs.geo(String.class);
     }
 
     @GET
@@ -496,6 +507,82 @@ public class LettuceBackendResource {
         return reactiveHyperLogLog.pfcount(key);
     }
 
+    @POST
+    @Path("/geo/add/{key}/{longitude}/{latitude}")
+    public boolean geoAdd(@PathParam("key") String key, @PathParam("longitude") double longitude,
+            @PathParam("latitude") double latitude, String member) {
+        return geo.geoadd(key, longitude, latitude, member);
+    }
+
+    @GET
+    @Path("/geo/dist/{key}/{from}/{to}")
+    public Double geoDist(@PathParam("key") String key, @PathParam("from") String from, @PathParam("to") String to) {
+        OptionalDouble distance = geo.geodist(key, from, to, GeoUnit.KM);
+        return distance.isPresent() ? distance.getAsDouble() : null;
+    }
+
+    @GET
+    @Path("/geo/hash/{key}/{member}")
+    public String geoHash(@PathParam("key") String key, @PathParam("member") String member) {
+        return geo.geohash(key, member).get(0);
+    }
+
+    @GET
+    @Path("/geo/pos/{key}/{member}")
+    public String geoPos(@PathParam("key") String key, @PathParam("member") String member) {
+        GeoPosition position = geo.geopos(key, member).get(0);
+        return position == null ? null : position.longitude() + "," + position.latitude();
+    }
+
+    @GET
+    @Path("/geo/search/{key}")
+    public List<String> geoSearch(@PathParam("key") String key, @QueryParam("longitude") double longitude,
+            @QueryParam("latitude") double latitude, @QueryParam("radius") double radius) {
+        GeoSearchArgs<String> args = new GeoSearchArgs<String>()
+                .fromCoordinate(longitude, latitude)
+                .byRadius(radius, GeoUnit.KM)
+                .ascending()
+                .withDistance();
+        return geo.geosearch(key, args).stream()
+                .map(v -> v.member() + "," + v.distance().getAsDouble())
+                .toList();
+    }
+
+    /**
+     * {@code GEORADIUSBYMEMBER} is deprecated in Redis in favour of {@code GEOSEARCH}, but still supported.
+     */
+    @SuppressWarnings("deprecation")
+    @GET
+    @Path("/geo/radiusbymember/{key}/{member}/{radius}")
+    public Set<String> geoRadiusByMember(@PathParam("key") String key, @PathParam("member") String member,
+            @PathParam("radius") double radius) {
+        return geo.georadiusbymember(key, member, radius, GeoUnit.KM);
+    }
+
+    @POST
+    @Path("/geo/searchstore/{dest}/{key}/{member}/{radius}")
+    public long geoSearchStore(@PathParam("dest") String dest, @PathParam("key") String key,
+            @PathParam("member") String member, @PathParam("radius") double radius) {
+        GeoSearchStoreArgs<String> args = new GeoSearchStoreArgs<String>()
+                .fromMember(member)
+                .byRadius(radius, GeoUnit.KM);
+        return geo.geosearchstore(dest, key, args, false);
+    }
+
+    @POST
+    @Path("/geo/reactive/add/{key}/{longitude}/{latitude}")
+    public Uni<Boolean> geoAddReactive(@PathParam("key") String key, @PathParam("longitude") double longitude,
+            @PathParam("latitude") double latitude, String member) {
+        return reactiveGeo.geoadd(key, longitude, latitude, member);
+    }
+
+    @GET
+    @Path("/geo/reactive/dist/{key}/{from}/{to}")
+    public Uni<Double> geoDistReactive(@PathParam("key") String key, @PathParam("from") String from,
+            @PathParam("to") String to) {
+        return reactiveGeo.geodist(key, from, to, GeoUnit.KM);
+    }
+
     @GET
     @Path("/with-connection/client-ids")
     public String withConnectionClientIds() {
@@ -628,6 +715,33 @@ public class LettuceBackendResource {
         long count = result.get(4);
         return result.discarded() + "," + result.size() + "," + added + "," + addedAgain + "," + addedOther + ","
                 + (mergeResult == null) + "," + count;
+    }
+
+    @POST
+    @Path("/with-transaction/geo/{key}")
+    public String withTransactionGeo(@PathParam("key") String key) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var g = tx.geo(String.class, String.class);
+            g.geoadd(key, 13.361389, 38.115556, "Palermo");
+            g.geoadd(key, 15.087269, 37.502669, "Catania");
+            g.geodist(key, "Palermo", "Catania", GeoUnit.KM);
+            g.geopos(key, "Palermo", "missing");
+            g.geosearch(key, new GeoSearchArgs<String>().fromMember("Palermo").byRadius(200, GeoUnit.KM).ascending());
+        });
+        boolean addedPalermo = result.get(0);
+        boolean addedCatania = result.get(1);
+        double distance = result.get(2);
+        List<GeoPosition> positions = result.get(3);
+        List<GeoValue<String>> found = result.get(4);
+        StringBuilder sb = new StringBuilder();
+        sb.append(result.discarded()).append(',').append(result.size()).append(',')
+                .append(addedPalermo).append(',').append(addedCatania).append(',')
+                .append(Math.round(distance)).append(',')
+                .append(positions.size()).append(',').append(positions.get(1) == null);
+        for (GeoValue<String> value : found) {
+            sb.append(',').append(value.member());
+        }
+        return sb.toString();
     }
 
 }

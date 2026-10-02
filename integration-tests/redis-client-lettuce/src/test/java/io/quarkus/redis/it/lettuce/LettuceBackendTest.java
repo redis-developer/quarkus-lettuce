@@ -601,6 +601,129 @@ class LettuceBackendTest {
                 .statusCode(200).body(CoreMatchers.is("2"));
     }
 
+    private void addSicily(String key) {
+        RestAssured.given().body("Palermo").when().post("/lettuce/geo/add/" + key + "/13.361389/38.115556").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("Catania").when().post("/lettuce/geo/add/" + key + "/15.087269/37.502669").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
+    public void geoAddDistHashPos() {
+        String key = getKey("geo-sync");
+
+        RestAssured.given().when().get("/lettuce/geo/dist/" + key + "/Palermo/Catania").then()
+                .statusCode(204);
+
+        addSicily(key);
+        // re-adding an existing member at the same position adds nothing
+        RestAssured.given().body("Palermo").when().post("/lettuce/geo/add/" + key + "/13.361389/38.115556").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+
+        double distance = Double.parseDouble(RestAssured.given().when()
+                .get("/lettuce/geo/dist/" + key + "/Palermo/Catania").then().statusCode(200).extract().asString());
+        assertEquals(166.2742, distance, 0.001);
+        RestAssured.given().when().get("/lettuce/geo/dist/" + key + "/Palermo/missing").then()
+                .statusCode(204);
+
+        RestAssured.given().when().get("/lettuce/geo/hash/" + key + "/Palermo").then()
+                .statusCode(200).body(CoreMatchers.is("sqc8b49rny0"));
+        RestAssured.given().when().get("/lettuce/geo/hash/" + key + "/Catania").then()
+                .statusCode(200).body(CoreMatchers.is("sqdtr74hyu0"));
+        RestAssured.given().when().get("/lettuce/geo/hash/" + key + "/missing").then()
+                .statusCode(204);
+
+        String[] position = RestAssured.given().when().get("/lettuce/geo/pos/" + key + "/Palermo").then()
+                .statusCode(200).extract().asString().split(",");
+        // geohash encoding loses precision, so the stored position is only close to the submitted one
+        assertEquals(13.361389, Double.parseDouble(position[0]), 0.0001);
+        assertEquals(38.115556, Double.parseDouble(position[1]), 0.0001);
+        RestAssured.given().when().get("/lettuce/geo/pos/" + key + "/missing").then()
+                .statusCode(204);
+
+        // a geo index is stored as a sorted set
+        RestAssured.given().when().get("/lettuce/key/type/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("ZSET"));
+    }
+
+    @Test
+    public void geoSearchAndRadiusByMember() {
+        String key = getKey("geo-search");
+        addSicily(key);
+
+        List<String> found = RestAssured.given()
+                .queryParam("longitude", 15).queryParam("latitude", 37).queryParam("radius", 200)
+                .when().get("/lettuce/geo/search/" + key).then()
+                .statusCode(200).extract().jsonPath().getList("$", String.class);
+        assertEquals(2, found.size(), () -> "expected both members within 200 km, got " + found);
+        // ascending: Catania (~56 km) comes before Palermo (~190 km)
+        String[] first = found.get(0).split(",");
+        String[] second = found.get(1).split(",");
+        assertEquals("Catania", first[0]);
+        assertEquals(56.4413, Double.parseDouble(first[1]), 0.001);
+        assertEquals("Palermo", second[0]);
+        assertEquals(190.4424, Double.parseDouble(second[1]), 0.001);
+
+        RestAssured.given()
+                .queryParam("longitude", 15).queryParam("latitude", 37).queryParam("radius", 100)
+                .when().get("/lettuce/geo/search/" + key).then()
+                .statusCode(200).body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.startsWith("Catania,"));
+
+        RestAssured.given().when().get("/lettuce/geo/radiusbymember/" + key + "/Catania/200").then()
+                .statusCode(200)
+                .body("$", CoreMatchers.hasItems("Palermo", "Catania"))
+                .body("size()", CoreMatchers.is(2));
+        // Palermo is ~166 km from Catania, so only Catania itself is within 100 km
+        RestAssured.given().when().get("/lettuce/geo/radiusbymember/" + key + "/Catania/100").then()
+                .statusCode(200)
+                .body("$", CoreMatchers.equalTo(List.of("Catania")));
+    }
+
+    @Test
+    public void geoSearchStore() {
+        String key = getKey("geo-store-src");
+        String dest = getKey("geo-store-dest");
+        addSicily(key);
+
+        RestAssured.given().when().post("/lettuce/geo/searchstore/" + dest + "/" + key + "/Palermo/200").then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().when().get("/lettuce/key/type/" + dest).then()
+                .statusCode(200).body(CoreMatchers.is("ZSET"));
+        // the destination is a full geo index: positions survive the copy
+        RestAssured.given().when().get("/lettuce/geo/hash/" + dest + "/Catania").then()
+                .statusCode(200).body(CoreMatchers.is("sqdtr74hyu0"));
+
+        // a narrower radius overwrites the destination with fewer members
+        RestAssured.given().when().post("/lettuce/geo/searchstore/" + dest + "/" + key + "/Palermo/100").then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().when().get("/lettuce/sortedset/card/" + dest).then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+    }
+
+    @Test
+    public void geoReactive() {
+        String key = getKey("geo-reactive");
+
+        RestAssured.given().when().get("/lettuce/geo/reactive/dist/" + key + "/Palermo/Catania").then()
+                .statusCode(204);
+
+        RestAssured.given().body("Palermo").when().post("/lettuce/geo/reactive/add/" + key + "/13.361389/38.115556")
+                .then().statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("Catania").when().post("/lettuce/geo/reactive/add/" + key + "/15.087269/37.502669")
+                .then().statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("Catania").when().post("/lettuce/geo/reactive/add/" + key + "/15.087269/37.502669")
+                .then().statusCode(200).body(CoreMatchers.is("false"));
+
+        double distance = Double.parseDouble(RestAssured.given().when()
+                .get("/lettuce/geo/reactive/dist/" + key + "/Palermo/Catania").then().statusCode(200).extract()
+                .asString());
+        assertEquals(166.2742, distance, 0.001);
+        // blocking and reactive views agree on the same key
+        RestAssured.given().when().get("/lettuce/geo/hash/" + key + "/Palermo").then()
+                .statusCode(200).body(CoreMatchers.is("sqc8b49rny0"));
+    }
+
     @Test
     public void withConnectionBlockingClientIds() {
         String body = RestAssured.given().when().get("/lettuce/with-connection/client-ids")
@@ -700,6 +823,18 @@ class LettuceBackendTest {
         assertEquals("false,5,true,false,true,true,4", body);
         RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key + "-merged").then()
                 .statusCode(200).body(CoreMatchers.is("4"));
+    }
+
+    @Test
+    public void withTransactionGeo() {
+        String key = getKey("tx-geo");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/geo/" + key)
+                .then().statusCode(200).extract().asString();
+        // geoadd x2 -> true, geodist -> ~166 km, geopos(Palermo, missing) -> 2 entries with a null second,
+        // geosearch from Palermo within 200 km ascending -> Palermo (0 km) then Catania
+        assertEquals("false,5,true,true,166,2,true,Palermo,Catania", body);
+        RestAssured.given().when().get("/lettuce/sortedset/card/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
     }
 
 }

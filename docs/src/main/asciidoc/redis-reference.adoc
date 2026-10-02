@@ -1187,8 +1187,8 @@ The Lettuce beans of a cluster client are `io.lettuce.core.cluster.RedisClusterC
 `io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>` (see below); the `RedisClient` and
 `StatefulRedisConnection<String, String>` beans of such a client are inactive and name the types to inject instead.
 
-The key, value (string), hash, list, set, sorted set, bitmap and hyperloglog command groups are implemented on the
-Lettuce backend, including their transactional variants. The other groups (geo, stream, pub/sub, JSON, bloom,
+The key, value (string), hash, list, set, sorted set, bitmap, hyperloglog and geo command groups are implemented on
+the Lettuce backend, including their transactional variants. The other groups (stream, pub/sub, JSON, bloom,
 cuckoo, count-min, top-k, graph, search, autosuggest and time series) are not implemented yet and throw an
 `UnsupportedOperationException` when requested from a data source.
 
