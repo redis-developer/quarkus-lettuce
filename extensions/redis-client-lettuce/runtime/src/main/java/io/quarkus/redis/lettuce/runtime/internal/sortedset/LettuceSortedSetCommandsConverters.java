@@ -37,9 +37,10 @@ public final class LettuceSortedSetCommandsConverters {
      * Converts a score range, optionally swapping its bounds.
      * <p>
      * Lettuce writes {@code REV} ranges as {@code max min} on the wire, swapping the bounds itself. The Vert.x
-     * backend only does that swap for {@code ZRANGE ... BYSCORE} on an unbounded range; everywhere else it sends
-     * the bounds exactly as the caller ordered them, so callers pass {@code (max, min)} when reversing. Swapping
-     * here lets Lettuce's own swap restore the caller's order, keeping both backends byte-identical.
+     * backend swaps unconditionally for {@code ZRANGE ... BYLEX} but for {@code ZRANGE ... BYSCORE} only on an
+     * unbounded range; everywhere else it sends the bounds exactly as the caller ordered them, so callers pass
+     * {@code (max, min)} when reversing. Swapping here lets Lettuce's own swap restore the caller's order, keeping
+     * both backends byte-identical.
      */
     private static io.lettuce.core.Range<Number> toLettuceScoreRange(ScoreRange<Double> range, boolean swapBounds) {
         String lowerBound = swapBounds ? range.getUpperBound() : range.getLowerBound();
@@ -111,6 +112,7 @@ public final class LettuceSortedSetCommandsConverters {
     }
 
     public static ZRange.ByLex<byte[]> toLettuceByLex(Range<String> range, ZRangeArgs quarkus) {
+        // No pre-swap: Vert.x swaps BYLEX REV bounds unconditionally, exactly as Lettuce does on its own.
         ZRange.ByLex<byte[]> byLex = ZRange.byLex(toLettuceLexRange(range));
         if (quarkus.isReverse()) {
             byLex.rev();
