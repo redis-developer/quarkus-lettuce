@@ -2,6 +2,7 @@ package io.quarkus.redis.lettuce.runtime.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
@@ -31,6 +32,20 @@ class ArgReplayTest {
         CommandArgs<String, String> args = newArgs().addKey("k");
         ArgReplay.replay(List.of("EX", 10L), args);
         assertThat(tokens(args)).containsExactly("key<k>", "EX", "10");
+    }
+
+    @Test
+    void replaySkipsNullTokensLikeVertxRedisCommandPut() {
+        CommandArgs<String, String> args = newArgs();
+        ArgReplay.replay(Arrays.asList("COUNT", 3L, null, "ANY"), args);
+        assertThat(tokens(args)).containsExactly("COUNT", "3", "ANY");
+    }
+
+    @Test
+    void replayExceptSkipsNullTokens() {
+        CommandArgs<String, String> args = newArgs();
+        ArgReplay.replayExcept(Arrays.asList(null, "GET", "EX", 10L), args, Set.of("GET"));
+        assertThat(tokens(args)).containsExactly("EX", "10");
     }
 
     @Test
