@@ -46,8 +46,10 @@ import io.quarkus.redis.datasource.list.ReactiveListCommands;
 import io.quarkus.redis.datasource.set.ReactiveSetCommands;
 import io.quarkus.redis.datasource.set.SetCommands;
 import io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands;
+import io.quarkus.redis.datasource.sortedset.ScoreRange;
 import io.quarkus.redis.datasource.sortedset.ScoredValue;
 import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
+import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
@@ -426,6 +428,31 @@ public class LettuceBackendResource {
     }
 
     @GET
+    @Path("/sortedset/range/{key}/{start}/{stop}")
+    public List<String> sortedSetRange(@PathParam("key") String key, @PathParam("start") long start,
+            @PathParam("stop") long stop, @QueryParam("rev") boolean rev) {
+        ZRangeArgs args = new ZRangeArgs();
+        if (rev) {
+            args.rev();
+        }
+        return sortedSet.zrange(key, start, stop, args);
+    }
+
+    @GET
+    @Path("/sortedset/rangebyscore/{key}/{min}/{max}")
+    public List<String> sortedSetRangeByScore(@PathParam("key") String key, @PathParam("min") double min,
+            @PathParam("max") double max, @QueryParam("offset") long offset, @QueryParam("count") int count) {
+        return sortedSet.zrangebyscore(key, ScoreRange.from(min, max), new ZRangeArgs().limit(offset, count));
+    }
+
+    @POST
+    @Path("/sortedset/rangestore/{dst}/{src}/{min}/{max}")
+    public long sortedSetRangeStore(@PathParam("dst") String dst, @PathParam("src") String src,
+            @PathParam("min") long min, @PathParam("max") long max) {
+        return sortedSet.zrangestore(dst, src, min, max);
+    }
+
+    @GET
     @Path("/sortedset/reactive/score/{key}/{member}")
     public Uni<Double> sortedSetScoreReactive(@PathParam("key") String key, @PathParam("member") String member) {
         return reactiveSortedSet.zscore(key, member);
@@ -686,13 +713,23 @@ public class LettuceBackendResource {
             s.zadd(key, Map.of("b", 2.0, "c", 3.0));
             s.zcard(key);
             s.zpopmin(key);
+            s.zrangeWithScores(key, 0, -1, new ZRangeArgs().rev());
+            s.zrangestore(key + "-dst", key, 0, -1);
         });
         boolean added = result.get(0);
         int addedCount = result.get(1);
         long card = result.get(2);
         ScoredValue<String> min = result.get(3);
-        return result.discarded() + "," + result.size() + "," + added + "," + addedCount + "," + card
-                + "," + min.value() + "," + min.score();
+        List<ScoredValue<String>> reversed = result.get(4);
+        long stored = result.get(5);
+        StringBuilder sb = new StringBuilder();
+        sb.append(result.discarded()).append(',').append(result.size()).append(',')
+                .append(added).append(',').append(addedCount).append(',').append(card).append(',')
+                .append(min.value()).append(',').append(min.score());
+        for (ScoredValue<String> value : reversed) {
+            sb.append(',').append(value.value()).append(':').append(value.score());
+        }
+        return sb.append(',').append(stored).toString();
     }
 
     @POST

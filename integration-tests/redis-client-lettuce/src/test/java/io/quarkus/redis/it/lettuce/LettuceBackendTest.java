@@ -471,6 +471,29 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void sortedSetRangeCommands() {
+        String key = getKey("zset-range");
+        String dest = getKey("zset-range-dest");
+
+        RestAssured.given().body("a").when().post("/lettuce/sortedset/add/" + key + "/1.0").then().statusCode(200);
+        RestAssured.given().body("b").when().post("/lettuce/sortedset/add/" + key + "/2.0").then().statusCode(200);
+        RestAssured.given().body("c").when().post("/lettuce/sortedset/add/" + key + "/3.0").then().statusCode(200);
+        RestAssured.given().body("d").when().post("/lettuce/sortedset/add/" + key + "/4.0").then().statusCode(200);
+
+        // ZRANGE ... REV orders from the highest score down
+        RestAssured.given().when().get("/lettuce/sortedset/range/" + key + "/0/-1?rev=true").then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of("d", "c", "b", "a")));
+        // ZRANGE ... BYSCORE LIMIT 1 2 skips the lowest match and then takes two
+        RestAssured.given().when().get("/lettuce/sortedset/rangebyscore/" + key + "/1.0/4.0?offset=1&count=2").then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of("b", "c")));
+        // ZRANGESTORE copies the two lowest-ranked members into the destination
+        RestAssured.given().when().post("/lettuce/sortedset/rangestore/" + dest + "/" + key + "/0/1").then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().when().get("/lettuce/sortedset/range/" + dest + "/0/-1").then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of("a", "b")));
+    }
+
+    @Test
     public void sortedSetScoreReactive() {
         String key = getKey("zset-reactive");
 
@@ -811,7 +834,10 @@ class LettuceBackendTest {
         String key = getKey("tx-zset");
         String body = RestAssured.given().when().post("/lettuce/with-transaction/sortedset/" + key)
                 .then().statusCode(200).extract().asString();
-        assertEquals("false,4,true,2,3,a,1.0", body);
+        // after ZPOPMIN removed "a", ZRANGE 0 -1 REV WITHSCORES yields c then b, and ZRANGESTORE copies both
+        assertEquals("false,6,true,2,3,a,1.0,c:3.0,b:2.0,2", body);
+        RestAssured.given().when().get("/lettuce/sortedset/card/" + key + "-dst").then()
+                .statusCode(200).body(CoreMatchers.is("2"));
     }
 
     @Test
