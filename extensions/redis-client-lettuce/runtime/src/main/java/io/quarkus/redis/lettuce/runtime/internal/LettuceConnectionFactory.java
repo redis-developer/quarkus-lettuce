@@ -34,9 +34,10 @@ import io.lettuce.core.resource.ClientResources;
  * {@link RedisClusterClient} (cluster) created with shared {@link ClientResources}.
  * <p>
  * The connections it opens are {@link LettuceConnection}s, the same handle whatever the topology, so the data
- * sources and the {@link LettuceConnectionPool} do not depend on the client type. A cluster client discovers the
- * topology from the configured seed nodes, refreshes it periodically and on {@code MOVED}/{@code ASK} redirects and
- * reconnects (see {@link ClusterTopologyRefreshOptions}), and reads from the nodes selected by its {@link ReadFrom}.
+ * sources and the {@link LettuceConnectionPool} do not depend on the client type. The client type decides the
+ * {@link Topology}: a cluster client discovers the topology from the configured seed nodes, refreshes it
+ * periodically and on {@code MOVED}/{@code ASK} redirects and reconnects (see
+ * {@link ClusterTopologyRefreshOptions}), and reads from the nodes selected by its {@link ReadFrom}.
  * <p>
  * The client is created with externally managed {@link ClientResources} (which use Vert.x event loops).
  * The caller is responsible for shutting down the client before shutting down the {@link ClientResources}.
@@ -55,15 +56,7 @@ public class LettuceConnectionFactory {
             CommandType.BLPOP, CommandType.BRPOP, CommandType.BLMOVE, CommandType.BLMPOP, CommandType.BRPOPLPUSH,
             CommandType.BZPOPMIN, CommandType.BZPOPMAX, CommandType.BZMPOP);
 
-    private final AbstractRedisClient client;
-    /** The standalone client, {@code null} for a cluster. */
-    private final RedisClient redisClient;
-    /** The cluster client, {@code null} for a standalone server. */
-    private final RedisClusterClient clusterClient;
-    /** The URI of the standalone server, or the first seed node of the cluster. */
-    private final RedisURI redisUri;
-    /** The nodes a cluster connection reads from, {@code null} for a standalone server. */
-    private final ReadFrom readFrom;
+    private final Topology topology;
 
     /**
      * Creates a Lettuce {@link RedisClient} using the given shared resources, Redis URI, client options and command
@@ -80,21 +73,18 @@ public class LettuceConnectionFactory {
             ClientOptions clientOptions, Duration timeout) {
         LOGGER.infof("Creating Lettuce RedisClient '%s' for %s:%d%s", clientName, redisUri.getHost(), redisUri.getPort(),
                 redisUri.isSsl() ? " (TLS)" : "");
-        this.redisClient = RedisClient.create(clientResources, redisUri);
-        this.redisClient.setOptions(withCommandTimeout(clientOptions, timeout));
-        this.clusterClient = null;
-        this.client = redisClient;
-        this.redisUri = redisUri;
-        this.readFrom = null;
+        RedisClient client = RedisClient.create(clientResources, redisUri);
+        client.setOptions(withCommandTimeout(clientOptions, timeout));
+        this.topology = new Standalone(client, redisUri);
     }
 
     /**
      * Creates a Lettuce {@link RedisClusterClient} using the given shared resources, seed nodes, client options,
      * topology refresh options, read preference and command timeout.
      * <p>
-     * Lettuce connects to the nodes it discovers with the settings of the first seed URI (credentials, TLS,
-     * database), so all the seeds are expected to carry the same ones, as {@link LettuceClientSettings} produces
-     * them.
+     * Lettuce connects to the nodes it discovers with the settings of the first seed URI (credentials, TLS), so all
+     * the seeds are expected to carry the same ones, as {@link LettuceClientSettings} produces them. A cluster only
+     * has database {@code 0}: the database of the seed URIs is ignored.
      *
      * @param clientName the Quarkus Redis client name, used for logging
      * @param clientResources shared client resources (with Vert.x event loops)
@@ -118,14 +108,11 @@ public class LettuceConnectionFactory {
         }
         LOGGER.infof("Creating Lettuce RedisClusterClient '%s' for the seed nodes %s%s, reading from %s", clientName,
                 describe(seeds), seeds.get(0).isSsl() ? " (TLS)" : "", describe(readFrom));
-        this.clusterClient = RedisClusterClient.create(clientResources, seeds);
-        this.clusterClient.setOptions(ClusterClientOptions.builder(withCommandTimeout(clientOptions, timeout))
+        RedisClusterClient client = RedisClusterClient.create(clientResources, seeds);
+        client.setOptions(ClusterClientOptions.builder(withCommandTimeout(clientOptions, timeout))
                 .topologyRefreshOptions(topologyRefresh)
                 .build());
-        this.redisClient = null;
-        this.client = clusterClient;
-        this.redisUri = seeds.get(0);
-        this.readFrom = readFrom;
+        this.topology = new Cluster(client, readFrom);
     }
 
     /**
@@ -195,12 +182,7 @@ public class LettuceConnectionFactory {
      * @return a new {@link LettuceConnection}
      */
     public LettuceConnection connect() {
-        if (clusterClient != null) {
-            StatefulRedisClusterConnection<byte[], byte[]> connection = clusterClient.connect(ByteArrayCodec.INSTANCE);
-            connection.setReadFrom(readFrom);
-            return LettuceConnection.cluster(connection);
-        }
-        return LettuceConnection.standalone(redisClient.connect(ByteArrayCodec.INSTANCE));
+        return topology.connect();
     }
 
     /**
@@ -212,13 +194,7 @@ public class LettuceConnectionFactory {
      * @return a {@link CompletionStage} completing with a new {@link LettuceConnection}
      */
     public CompletionStage<LettuceConnection> connectAsync() {
-        if (clusterClient != null) {
-            return clusterClient.connectAsync(ByteArrayCodec.INSTANCE).thenApply(connection -> {
-                connection.setReadFrom(readFrom);
-                return LettuceConnection.cluster(connection);
-            });
-        }
-        return redisClient.connectAsync(ByteArrayCodec.INSTANCE, redisUri).thenApply(LettuceConnection::standalone);
+        return topology.connectAsync();
     }
 
     /**
@@ -227,12 +203,7 @@ public class LettuceConnectionFactory {
      * {@link StatefulRedisClusterConnection} to a cluster.
      */
     public <K, V> StatefulConnection<K, V> connect(RedisCodec<K, V> codec) {
-        if (clusterClient != null) {
-            StatefulRedisClusterConnection<K, V> connection = clusterClient.connect(codec);
-            connection.setReadFrom(readFrom);
-            return connection;
-        }
-        return redisClient.connect(codec);
+        return topology.connect(codec);
     }
 
     /**
@@ -241,21 +212,21 @@ public class LettuceConnectionFactory {
      * other database (Lettuce ignores the database of the seed URIs; the recorder warns about it).
      */
     public int getDatabase() {
-        return clusterClient != null ? 0 : redisUri.getDatabase();
+        return topology.database();
     }
 
     /**
      * Whether this factory connects to a cluster.
      */
     public boolean isCluster() {
-        return clusterClient != null;
+        return topology instanceof Cluster;
     }
 
     /**
      * Returns the underlying Lettuce client: a {@link RedisClient} or a {@link RedisClusterClient}.
      */
     public AbstractRedisClient getClient() {
-        return client;
+        return topology.client();
     }
 
     /**
@@ -264,10 +235,10 @@ public class LettuceConnectionFactory {
      * @throws IllegalStateException if this factory connects to a cluster
      */
     public RedisClient getRedisClient() {
-        if (redisClient == null) {
-            throw new IllegalStateException("This Lettuce client connects to a cluster, use getClusterClient()");
+        if (topology instanceof Standalone standalone) {
+            return standalone.client();
         }
-        return redisClient;
+        throw new IllegalStateException("This Lettuce client connects to a cluster, use getClusterClient()");
     }
 
     /**
@@ -276,10 +247,10 @@ public class LettuceConnectionFactory {
      * @throws IllegalStateException if this factory connects to a standalone server
      */
     public RedisClusterClient getClusterClient() {
-        if (clusterClient == null) {
-            throw new IllegalStateException("This Lettuce client connects to a standalone server, use getRedisClient()");
+        if (topology instanceof Cluster cluster) {
+            return cluster.client();
         }
-        return clusterClient;
+        throw new IllegalStateException("This Lettuce client connects to a standalone server, use getRedisClient()");
     }
 
     /**
@@ -287,8 +258,89 @@ public class LettuceConnectionFactory {
      * Must be called before shutting down the shared {@link ClientResources}.
      */
     public void shutdown() {
-        LOGGER.infof("Shutting down Lettuce %s", client.getClass().getSimpleName());
-        client.shutdown();
+        LOGGER.infof("Shutting down Lettuce %s", topology.client().getClass().getSimpleName());
+        topology.client().shutdown();
+    }
+
+    /**
+     * How the connections of a client are opened, one implementation per client type: the Lettuce client, the
+     * connections it opens with the byte-array codec for the data sources and the pool, and with a given codec for
+     * the Lettuce beans, and the database every connection starts on.
+     */
+    private sealed interface Topology permits Standalone, Cluster {
+
+        AbstractRedisClient client();
+
+        LettuceConnection connect();
+
+        CompletionStage<LettuceConnection> connectAsync();
+
+        <K, V> StatefulConnection<K, V> connect(RedisCodec<K, V> codec);
+
+        int database();
+
+    }
+
+    /**
+     * A standalone server: plain connections to {@code uri}, starting on its database.
+     */
+    private record Standalone(RedisClient client, RedisURI uri) implements Topology {
+
+        @Override
+        public LettuceConnection connect() {
+            return LettuceConnection.standalone(client.connect(ByteArrayCodec.INSTANCE));
+        }
+
+        @Override
+        public CompletionStage<LettuceConnection> connectAsync() {
+            return client.connectAsync(ByteArrayCodec.INSTANCE, uri).thenApply(LettuceConnection::standalone);
+        }
+
+        @Override
+        public <K, V> StatefulConnection<K, V> connect(RedisCodec<K, V> codec) {
+            return client.connect(codec);
+        }
+
+        @Override
+        public int database() {
+            return uri.getDatabase();
+        }
+
+    }
+
+    /**
+     * A cluster: connections routing each command to the node owning its key and reading from the nodes
+     * {@code readFrom} selects. A cluster only has database {@code 0}.
+     */
+    private record Cluster(RedisClusterClient client, ReadFrom readFrom) implements Topology {
+
+        @Override
+        public LettuceConnection connect() {
+            StatefulRedisClusterConnection<byte[], byte[]> connection = client.connect(ByteArrayCodec.INSTANCE);
+            connection.setReadFrom(readFrom);
+            return LettuceConnection.cluster(connection);
+        }
+
+        @Override
+        public CompletionStage<LettuceConnection> connectAsync() {
+            return client.connectAsync(ByteArrayCodec.INSTANCE).thenApply(connection -> {
+                connection.setReadFrom(readFrom);
+                return LettuceConnection.cluster(connection);
+            });
+        }
+
+        @Override
+        public <K, V> StatefulConnection<K, V> connect(RedisCodec<K, V> codec) {
+            StatefulRedisClusterConnection<K, V> connection = client.connect(codec);
+            connection.setReadFrom(readFrom);
+            return connection;
+        }
+
+        @Override
+        public int database() {
+            return 0;
+        }
+
     }
 
     /**
