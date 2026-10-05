@@ -71,6 +71,9 @@ public final class LettuceClientSettings {
 
     private static final Logger LOGGER = Logger.getLogger(LettuceClientSettings.class);
 
+    /** The default of {@code topology-cache-ttl} and of its deprecated alias {@code hash-slot-cache-ttl}. */
+    public static final Duration DEFAULT_TOPOLOGY_CACHE_TTL = Duration.ofSeconds(1);
+
     /**
      * Accepts every certificate chain, like the Vert.x trust-all option. It is deliberately a plain (not extended)
      * {@link X509TrustManager}: the JDK wraps it and keeps performing the endpoint identification when a hostname
@@ -193,11 +196,12 @@ public final class LettuceClientSettings {
     }
 
     /**
-     * The TTL of the topology cache, read the way the Vert.x client reads it: {@code topology-cache-ttl}, else its
-     * deprecated alias {@code hash-slot-cache-ttl}.
+     * The TTL of the topology cache, {@code topology-cache-ttl}. The property always has its default, so its
+     * deprecated alias {@code hash-slot-cache-ttl} is not applied, by this backend or by the Vert.x one (whose
+     * factory falls back on the alias only when {@code topology-cache-ttl} is absent, which it never is).
      */
     public static Duration topologyCacheTtl(RedisClientConfig config) {
-        return config.topologyCacheTtl().orElse(config.hashSlotCacheTtl());
+        return config.topologyCacheTtl().orElse(DEFAULT_TOPOLOGY_CACHE_TTL);
     }
 
     /**

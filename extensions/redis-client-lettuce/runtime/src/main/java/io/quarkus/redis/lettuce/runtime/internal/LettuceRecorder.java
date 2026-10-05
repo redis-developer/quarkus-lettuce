@@ -53,7 +53,6 @@ public class LettuceRecorder {
 
     private static final Logger LOGGER = Logger.getLogger(LettuceRecorder.class);
     private static final Duration POOL_CLOSE_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration DEFAULT_TOPOLOGY_CACHE_TTL = Duration.ofSeconds(1);
 
     private final RuntimeValue<RedisConfig> runtimeConfig;
 
@@ -140,13 +139,13 @@ public class LettuceRecorder {
             if (config.replicas().isPresent()) {
                 ignored.add(getPropertyName(name, "replicas"));
             }
-            if (config.topologyCacheTtl().isPresent()
-                    && !config.topologyCacheTtl().get().equals(DEFAULT_TOPOLOGY_CACHE_TTL)) {
+            if (!LettuceClientSettings.topologyCacheTtl(config).equals(LettuceClientSettings.DEFAULT_TOPOLOGY_CACHE_TTL)) {
                 ignored.add(getPropertyName(name, "topology-cache-ttl"));
             }
-            if (!config.hashSlotCacheTtl().equals(DEFAULT_TOPOLOGY_CACHE_TTL)) {
-                ignored.add(getPropertyName(name, "hash-slot-cache-ttl"));
-            }
+        }
+        // the deprecated alias is applied by neither backend (see LettuceClientSettings.topologyCacheTtl)
+        if (!config.hashSlotCacheTtl().equals(LettuceClientSettings.DEFAULT_TOPOLOGY_CACHE_TTL)) {
+            ignored.add(getPropertyName(name, "hash-slot-cache-ttl") + " (deprecated, use topology-cache-ttl)");
         }
         if (config.clusterTransactions().isPresent()) {
             ignored.add(getPropertyName(name, "cluster-transactions"));
