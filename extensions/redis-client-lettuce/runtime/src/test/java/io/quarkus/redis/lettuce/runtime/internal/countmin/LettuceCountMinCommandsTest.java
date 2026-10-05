@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -110,6 +112,86 @@ class LettuceCountMinCommandsTest extends CommandsTestBase {
         blockingCountMin.cmsInitByDim(key3, 10, 2);
         blockingCountMin.cmsMerge(key3, List.of(key1, key2), List.of());
         assertThat(blockingCountMin.cmsQuery(key3, leia)).isEqualTo(4L);
+    }
+
+    @Test
+    void mergeRejectsWeightCountMismatch() {
+        String key1 = key + "1";
+        String key2 = key + "2";
+        blockingCountMin.cmsInitByDim(key1, 10, 2);
+        blockingCountMin.cmsInitByDim(key2, 10, 2);
+
+        Person leia = new Person("leia", "ordana");
+        blockingCountMin.cmsIncrBy(key1, leia, 2);
+        blockingCountMin.cmsIncrBy(key2, leia, 3);
+
+        blockingCountMin.cmsInitByDim(key, 10, 2);
+
+        // Fewer weights than sources
+        assertThatThrownBy(() -> blockingCountMin.cmsMerge(key, List.of(key1, key2), List.of(2)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("weight")
+                .hasMessageContaining("2 expected")
+                .hasMessageContaining("1 given");
+        // More weights than sources
+        assertThatThrownBy(() -> blockingCountMin.cmsMerge(key, List.of(key1, key2), List.of(2, 1, 1)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("weight")
+                .hasMessageContaining("2 expected")
+                .hasMessageContaining("3 given");
+
+        // The rejected merges never reached the server: the destination sketch is still empty.
+        assertThat(blockingCountMin.cmsQuery(key, leia)).isEqualTo(0L);
+    }
+
+    @Test
+    void mergeRejectsNullWeight() {
+        String key1 = key + "1";
+        String key2 = key + "2";
+        blockingCountMin.cmsInitByDim(key1, 10, 2);
+        blockingCountMin.cmsInitByDim(key2, 10, 2);
+
+        Person leia = new Person("leia", "ordana");
+        blockingCountMin.cmsIncrBy(key1, leia, 2);
+        blockingCountMin.cmsIncrBy(key2, leia, 3);
+
+        blockingCountMin.cmsInitByDim(key, 10, 2);
+
+        List<Integer> weights = new ArrayList<>();
+        weights.add(2);
+        weights.add(null);
+        assertThatThrownBy(() -> blockingCountMin.cmsMerge(key, List.of(key1, key2), weights))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("weight");
+
+        // The rejected merge never reached the server: the destination sketch is still empty.
+        assertThat(blockingCountMin.cmsQuery(key, leia)).isEqualTo(0L);
+    }
+
+    @Test
+    void incrbyRejectsNullCouple() {
+        Person luke = new Person("luke", "skywalker");
+        Person leia = new Person("leia", "ordana");
+        blockingCountMin.cmsInitByDim(key, 10, 2);
+
+        // A `null` item in the couples map
+        Map<Person, Long> nullKey = new HashMap<>();
+        nullKey.put(luke, 1L);
+        nullKey.put(null, 2L);
+        assertThatThrownBy(() -> blockingCountMin.cmsIncrBy(key, nullKey))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("couples");
+
+        // A `null` increment in the couples map
+        Map<Person, Long> nullValue = new HashMap<>();
+        nullValue.put(luke, 1L);
+        nullValue.put(leia, null);
+        assertThatThrownBy(() -> blockingCountMin.cmsIncrBy(key, nullValue))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("couples");
+
+        // The rejected calls never reached the server, so no partial increment was applied.
+        assertThat(blockingCountMin.cmsQuery(key, luke, leia)).containsExactly(0L, 0L);
     }
 
     @Test
