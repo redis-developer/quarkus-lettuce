@@ -243,6 +243,40 @@
                                         </wait>
                                     </run>
                                 </image>
+                                <!-- Sentinel deployment (a master, its replica and three sentinels) in one container, see
+                                     src/test/resources/redis-cluster/start-sentinel.sh: every process announces 127.0.0.1
+                                     and its own port, so every port is published on the same host port -->
+                                <image>
+                                    <name>redis:7-alpine</name>
+                                    <alias>quarkus-test-redis-sentinel</alias>
+                                    <run>
+                                        <ports>
+                                            <port>6500:6500</port>
+                                            <port>6501:6501</port>
+                                            <port>6502:6502</port>
+                                            <port>6503:6503</port>
+                                            <port>6504:6504</port>
+                                        </ports>
+                                        <env>
+                                            <MASTER_NAME>mymaster</MASTER_NAME>
+                                        </env>
+                                        <volumes>
+                                            <bind>
+                                                <volume>${project.basedir}/src/test/resources/redis-cluster:/cluster${volume.access.modifier}</volume>
+                                            </bind>
+                                        </volumes>
+                                        <cmd>sh /cluster/start-sentinel.sh 6500 6501 6502 6503 6504</cmd>
+                                        <log>
+                                            <prefix>Redis sentinel:</prefix>
+                                            <date>default</date>
+                                            <color>green</color>
+                                        </log>
+                                        <wait>
+                                            <time>120000</time>
+                                            <log>SENTINEL READY</log>
+                                        </wait>
+                                    </run>
+                                </image>
                             </images>
                             <allContainers>true</allContainers>
                         </configuration>
