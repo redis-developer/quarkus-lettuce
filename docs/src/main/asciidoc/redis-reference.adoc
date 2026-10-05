@@ -1179,6 +1179,8 @@ does not support.
 * `select(...)` is rejected by the server: a cluster only has database `0`, and a database selected in a host URI
 (`redis://node1:7000/1`) is ignored and reported in the startup warning.
 * `flushall()` runs on every upstream node, and `SCAN` visits every upstream node in turn.
+* A raw `execute(...)` command is routed by its key like the typed commands, using the key positions the Vert.x
+client knows for every Redis command; a command unknown to it, such as a module command, is sent to a default node.
 
 Blocking commands, `withConnection(...)` and `withTransaction(...)` borrow cluster connections from the pool
 described in <<connection-pooling-and-blocking-commands>>; each pooled cluster connection has its own connections to
