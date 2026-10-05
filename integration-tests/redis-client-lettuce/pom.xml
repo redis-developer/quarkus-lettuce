@@ -211,8 +211,9 @@
                                         </wait>
                                     </run>
                                 </image>
-                                <!-- Six-node cluster (three upstream nodes with one replica each) in one container, see
-                                     src/test/resources/redis-cluster/start-cluster.sh: the nodes announce 127.0.0.1 and
+                                <!-- Six-node cluster (three upstream nodes with one replica each) in one container, started
+                                     by the script the deployment tests use too (extensions/redis-client-lettuce/deployment/
+                                     src/test/resources/redis-cluster/start-cluster.sh): the nodes announce 127.0.0.1 and
                                      their own port, so every port is published on the same host port -->
                                 <image>
                                     <name>redis:7-alpine</name>
@@ -228,7 +229,7 @@
                                         </ports>
                                         <volumes>
                                             <bind>
-                                                <volume>${project.basedir}/src/test/resources/redis-cluster:/cluster${volume.access.modifier}</volume>
+                                                <volume>${project.basedir}/../../extensions/redis-client-lettuce/deployment/src/test/resources/redis-cluster:/cluster${volume.access.modifier}</volume>
                                             </bind>
                                         </volumes>
                                         <cmd>sh /cluster/start-cluster.sh 6400 6401 6402 6403 6404 6405</cmd>
