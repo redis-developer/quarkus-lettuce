@@ -117,7 +117,7 @@ public class LettuceConnectionFactory {
                     + clientName);
         }
         LOGGER.infof("Creating Lettuce RedisClusterClient '%s' for the seed nodes %s%s, reading from %s", clientName,
-                describe(seeds), seeds.get(0).isSsl() ? " (TLS)" : "", readFrom);
+                describe(seeds), seeds.get(0).isSsl() ? " (TLS)" : "", describe(readFrom));
         this.clusterClient = RedisClusterClient.create(clientResources, seeds);
         this.clusterClient.setOptions(ClusterClientOptions.builder(withCommandTimeout(clientOptions, timeout))
                 .topologyRefreshOptions(topologyRefresh)
@@ -160,6 +160,25 @@ public class LettuceConnectionFactory {
                         .timeoutSource(new NonBlockingCommandTimeoutSource(timeout))
                         .build())
                 .build();
+    }
+
+    /**
+     * Names the read setting for the logs: the {@link ReadFrom} constants do not override {@code toString()}.
+     */
+    private static String describe(ReadFrom readFrom) {
+        if (readFrom == ReadFrom.UPSTREAM) {
+            return "the upstream nodes";
+        }
+        if (readFrom == ReadFrom.ANY) {
+            return "any node";
+        }
+        if (readFrom == ReadFrom.REPLICA_PREFERRED) {
+            return "the replicas, else the upstream node";
+        }
+        if (readFrom == ReadFrom.REPLICA) {
+            return "the replicas";
+        }
+        return readFrom.getClass().getSimpleName();
     }
 
     private static String describe(List<RedisURI> seeds) {
