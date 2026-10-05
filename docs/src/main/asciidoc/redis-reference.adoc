@@ -1139,9 +1139,9 @@ warning at startup listing the configured properties it ignores, and a client co
 `hosts-provider-name` is deactivated.
 Lettuce and the libraries it needs in native mode (`LatencyUtils`, `HdrHistogram`) are pulled in transitively.
 
-The key, value (string), hash, list, set, sorted set, bitmap, hyperloglog and geo command groups are implemented on
-the Lettuce backend, including their transactional variants. The other groups (stream, pub/sub, JSON, bloom,
-cuckoo, count-min, top-k, graph, search, autosuggest and time series) are not implemented yet and throw an
+The key, value (string), hash, list, set, sorted set, bitmap, hyperloglog, geo and count-min command groups are
+implemented on the Lettuce backend, including their transactional variants. The other groups (stream, pub/sub, JSON,
+bloom, cuckoo, top-k, graph, search, autosuggest and time series) are not implemented yet and throw an
 `UnsupportedOperationException` when requested from a data source.
 
 The data source methods exposing Vert.x types, such as `ReactiveRedisDataSource.getRedis()`, are not supported
