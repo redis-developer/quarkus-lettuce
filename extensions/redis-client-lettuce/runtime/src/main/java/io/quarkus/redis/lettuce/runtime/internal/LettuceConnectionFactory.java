@@ -236,11 +236,12 @@ public class LettuceConnectionFactory {
     }
 
     /**
-     * Returns the database index of the configured URI ({@code 0} unless the URI names one).
-     * Every connection this factory opens starts on it. A cluster only has database {@code 0}.
+     * Returns the database every connection this factory opens starts on: the database index of the configured URI
+     * ({@code 0} unless the URI names one) for a standalone server, always {@code 0} for a cluster, which has no
+     * other database (Lettuce ignores the database of the seed URIs; the recorder warns about it).
      */
     public int getDatabase() {
-        return redisUri.getDatabase();
+        return clusterClient != null ? 0 : redisUri.getDatabase();
     }
 
     /**

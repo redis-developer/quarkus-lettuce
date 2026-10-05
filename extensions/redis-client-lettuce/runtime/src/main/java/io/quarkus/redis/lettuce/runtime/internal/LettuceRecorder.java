@@ -16,6 +16,7 @@ import java.util.function.Supplier;
 
 import org.jboss.logging.Logger;
 
+import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulConnection;
 import io.lettuce.core.codec.StringCodec;
 import io.netty.channel.EventLoopGroup;
@@ -122,14 +123,22 @@ public class LettuceRecorder {
      * The Lettuce backend applies the hosts, timeout, active, password, TLS, {@code tcp.secure-transport-protocols},
      * {@code max-pool-size} and {@code max-pool-waiting} properties, and {@code client-type} when it is
      * {@code standalone} or {@code cluster}; for a cluster it also applies {@code replicas} and
-     * {@code topology-cache-ttl} (or {@code hash-slot-cache-ttl}). A standalone client only uses the first host, and
-     * the other client types fall back to a standalone client on the first host. Tell users at startup which other
-     * configured properties are not applied, instead of silently connecting differently than configured. Properties
-     * with a default value are reported only when set to something else.
+     * {@code topology-cache-ttl}, but not the database of a host URI (a cluster only has database 0). A standalone
+     * client only uses the first host, and the other client types fall back to a standalone client on the first
+     * host. Tell users at startup which other configured properties are not applied, instead of silently connecting
+     * differently than configured. Properties with a default value are reported only when set to something else.
      */
     private static void warnAboutUnsupportedConfiguration(String name, RedisClientConfig config, Set<URI> hosts) {
         List<String> ignored = new ArrayList<>();
-        if (!isCluster(config)) {
+        if (isCluster(config)) {
+            // a cluster only has database 0; Lettuce ignores the database of the seed URIs rather than selecting it
+            for (URI host : hosts) {
+                if (RedisURI.create(host).getDatabase() != 0) {
+                    ignored.add(getPropertyName(name, HOSTS) + " (the database of a URI: a cluster only has database 0)");
+                    break;
+                }
+            }
+        } else {
             if (hosts.size() > 1) {
                 ignored.add(getPropertyName(name, HOSTS) + " (only the first URI is used)");
             }

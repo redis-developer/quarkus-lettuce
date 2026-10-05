@@ -1176,7 +1176,8 @@ the keys share a hash tag (`{user:1}:a` and `{user:1}:b`), as with the Vert.x cl
 support `MULTI`/`EXEC`/`WATCH` across nodes and Lettuce does not route them.
 The Vert.x client fails the same way unless `cluster-transactions=single-node` is set, which the Lettuce backend
 does not support.
-* `select(...)` is rejected by the server: a cluster only has database `0`.
+* `select(...)` is rejected by the server: a cluster only has database `0`, and a database selected in a host URI
+(`redis://node1:7000/1`) is ignored and reported in the startup warning.
 * `flushall()` runs on every upstream node, and `SCAN` visits every upstream node in turn.
 
 Blocking commands, `withConnection(...)` and `withTransaction(...)` borrow cluster connections from the pool
