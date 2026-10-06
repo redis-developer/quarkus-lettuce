@@ -33,6 +33,7 @@ import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.hyperloglog.HyperLogLogCommands;
 import io.quarkus.redis.datasource.hyperloglog.ReactiveHyperLogLogCommands;
 import io.quarkus.redis.datasource.json.JsonCommands;
+import io.quarkus.redis.datasource.json.ReactiveJsonCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.list.ListCommands;
 import io.quarkus.redis.datasource.list.ReactiveListCommands;
@@ -56,6 +57,7 @@ import io.quarkus.redis.runtime.datasource.BlockingBitmapCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingGeoCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHashCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHyperLogLogCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingJsonCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingKeyCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingListCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingSetCommandsImpl;
@@ -438,12 +440,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K> JsonCommands<K> json(Class<K> redisKeyType) {
-        throw groupNotImplemented("json");
+        ReactiveJsonCommands<K> r = reactive.json(redisKeyType);
+        return new BlockingJsonCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K> JsonCommands<K> json(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("json");
+        ReactiveJsonCommands<K> r = reactive.json(redisKeyType);
+        return new BlockingJsonCommandsImpl<>(this, r, timeout);
     }
 
     @Override
