@@ -1,6 +1,8 @@
 package io.quarkus.redis.it.lettuce;
 
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
@@ -22,6 +24,8 @@ import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
 import io.quarkus.redis.datasource.bitmap.BitMapCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
+import io.quarkus.redis.datasource.countmin.CountMinCommands;
+import io.quarkus.redis.datasource.countmin.ReactiveCountMinCommands;
 import io.quarkus.redis.datasource.geo.GeoCommands;
 import io.quarkus.redis.datasource.geo.GeoPosition;
 import io.quarkus.redis.datasource.geo.GeoSearchArgs;
@@ -80,6 +84,8 @@ public class LettuceBackendResource {
     private final ReactiveHyperLogLogCommands<String, String> reactiveHyperLogLog;
     private final GeoCommands<String, String> geo;
     private final ReactiveGeoCommands<String, String> reactiveGeo;
+    private final CountMinCommands<String, String> countmin;
+    private final ReactiveCountMinCommands<String, String> reactiveCountMin;
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs,
@@ -105,6 +111,8 @@ public class LettuceBackendResource {
         this.reactiveHyperLogLog = reactiveDs.hyperloglog(String.class);
         this.geo = ds.geo(String.class);
         this.reactiveGeo = reactiveDs.geo(String.class);
+        this.countmin = ds.countmin(String.class);
+        this.reactiveCountMin = reactiveDs.countmin(String.class);
     }
 
     @GET
@@ -458,6 +466,78 @@ public class LettuceBackendResource {
     }
 
     @POST
+    @Path("/countmin/init/{key}/{width}/{depth}")
+    public void countMinInitByDim(@PathParam("key") String key, @PathParam("width") long width,
+            @PathParam("depth") long depth) {
+        countmin.cmsInitByDim(key, width, depth);
+    }
+
+    @POST
+    @Path("/countmin/initbyprob/{key}/{error}/{probability}")
+    public void countMinInitByProb(@PathParam("key") String key, @PathParam("error") double error,
+            @PathParam("probability") double probability) {
+        countmin.cmsInitByProb(key, error, probability);
+    }
+
+    @POST
+    @Path("/countmin/incrby/{key}/{item}/{increment}")
+    public long countMinIncrBy(@PathParam("key") String key, @PathParam("item") String item,
+            @PathParam("increment") long increment) {
+        return countmin.cmsIncrBy(key, item, increment);
+    }
+
+    /**
+     * Body: {@code item=increment,item=increment,...}. Uses an insertion-ordered map so the reply order is deterministic.
+     */
+    @POST
+    @Path("/countmin/incrby/{key}")
+    public Map<String, Long> countMinIncrByMany(@PathParam("key") String key, String couples) {
+        Map<String, Long> map = new LinkedHashMap<>();
+        for (String couple : couples.split(",")) {
+            String[] parts = couple.split("=");
+            map.put(parts[0], Long.parseLong(parts[1]));
+        }
+        return countmin.cmsIncrBy(key, map);
+    }
+
+    @GET
+    @Path("/countmin/query/{key}/{item}")
+    public long countMinQuery(@PathParam("key") String key, @PathParam("item") String item) {
+        return countmin.cmsQuery(key, item);
+    }
+
+    @GET
+    @Path("/countmin/query/{key}")
+    public List<Long> countMinQueryMany(@PathParam("key") String key, @QueryParam("items") String items) {
+        return countmin.cmsQuery(key, items.split(","));
+    }
+
+    /**
+     * Merges {@code src1} and {@code src2} into {@code dest}. Weights are optional: {@code ?weights=2,1}.
+     */
+    @POST
+    @Path("/countmin/merge/{dest}/{src1}/{src2}")
+    public void countMinMerge(@PathParam("dest") String dest, @PathParam("src1") String src1,
+            @PathParam("src2") String src2, @QueryParam("weights") String weights) {
+        List<Integer> weightList = weights == null ? null
+                : Arrays.stream(weights.split(",")).map(Integer::parseInt).toList();
+        countmin.cmsMerge(dest, List.of(src1, src2), weightList);
+    }
+
+    @POST
+    @Path("/countmin/reactive/incrby/{key}/{item}/{increment}")
+    public Uni<Long> countMinIncrByReactive(@PathParam("key") String key, @PathParam("item") String item,
+            @PathParam("increment") long increment) {
+        return reactiveCountMin.cmsIncrBy(key, item, increment);
+    }
+
+    @GET
+    @Path("/countmin/reactive/query/{key}/{item}")
+    public Uni<Long> countMinQueryReactive(@PathParam("key") String key, @PathParam("item") String item) {
+        return reactiveCountMin.cmsQuery(key, item);
+    }
+
+    @POST
     @Path("/geo/add/{key}/{longitude}/{latitude}")
     public boolean geoAdd(@PathParam("key") String key, @PathParam("longitude") double longitude,
             @PathParam("latitude") double latitude, String member) {
@@ -702,6 +782,33 @@ public class LettuceBackendResource {
             sb.append(',').append(value.member());
         }
         return sb.toString();
+    }
+
+    @POST
+    @Path("/with-transaction/countmin/{key}")
+    public String withTransactionCountMin(@PathParam("key") String key) {
+        String other = key + "-other";
+        String merged = key + "-merged";
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var c = tx.countmin(String.class, String.class);
+            c.cmsInitByDim(key, 100, 5);
+            c.cmsInitByDim(other, 100, 5);
+            c.cmsInitByDim(merged, 100, 5);
+            c.cmsIncrBy(key, "a", 3);
+            Map<String, Long> couples = new LinkedHashMap<>();
+            couples.put("a", 2L);
+            couples.put("b", 4L);
+            c.cmsIncrBy(other, couples);
+            c.cmsMerge(merged, List.of(key, other), List.of(2, 1));
+            c.cmsQuery(merged, "a", "b");
+        });
+        Object init = result.get(0);
+        long incremented = result.get(3);
+        List<Long> counts = result.get(4);
+        Object mergeResult = result.get(5);
+        List<Long> queried = result.get(6);
+        return result.discarded() + "," + result.size() + "," + (init == null) + "," + incremented + "," + counts + ","
+                + (mergeResult == null) + "," + queried;
     }
 
 }

@@ -31,6 +31,8 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveTransactionalBitMapCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveCountMinCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveTransactionalCountMinCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveGeoCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveTransactionalGeoCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
@@ -210,7 +212,11 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalCountMinCommands<K, V> countmin(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("countmin");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        LettuceReactiveCountMinCommandsImpl<K, V> reactiveCountMin = (LettuceReactiveCountMinCommandsImpl<K, V>) reactive
+                .countmin(redisKeyType, valueType);
+        return new LettuceReactiveTransactionalCountMinCommandsImpl<>(this, reactiveCountMin, tx);
     }
 
     @Override
