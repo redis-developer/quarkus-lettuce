@@ -11,13 +11,9 @@ import java.util.Collections;
 import java.util.List;
 
 import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.json.JsonPath;
 import io.lettuce.core.json.JsonType;
 import io.lettuce.core.json.arguments.JsonRangeArgs;
-import io.lettuce.core.output.ArrayOutput;
-import io.lettuce.core.protocol.CommandArgs;
-import io.lettuce.core.protocol.CommandType;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.json.JsonSetArgs;
 import io.quarkus.redis.datasource.json.ReactiveJsonCommands;
@@ -322,16 +318,10 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         return _jsonNumincrby(key, path, value).toUni();
     }
 
-    LettuceCommand<List<Object>, Void> _jsonNumincrby(K key, String path, double value) {
+    LettuceCommand<List<Number>, Void> _jsonNumincrby(K key, String path, double value) {
         nonNull(key, "key");
         notNullOrBlank(path, "path");
-        byte[] encodedKey = marshaller.encode(key);
-        // Lettuce's jsonNumincrby parses the reply as a list of numbers, but depending on the protocol and the path the
-        // server answers with a JSON-encoded array (e.g. "[4,7,null]") or with typed RESP3 values, which its number
-        // output cannot handle. The reply is discarded anyway, so the command is dispatched with a tolerant output.
-        return LettuceCommand.discarding(() -> async.dispatch(CommandType.JSON_NUMINCRBY,
-                new ArrayOutput<>(ByteArrayCodec.INSTANCE),
-                new CommandArgs<>(ByteArrayCodec.INSTANCE).addKey(encodedKey).add(path).add(value)));
+        return LettuceCommand.discarding(() -> async.jsonNumincrby(marshaller.encode(key), JsonPath.of(path), value));
     }
 
     @Override
