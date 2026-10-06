@@ -210,7 +210,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         nonNull(path, "path");
         nonNull(value, "value");
         String encoded = Json.encode(value);
-        JsonRangeArgs range = JsonRangeArgs.Builder.start(start).stop(end);
+        JsonRangeArgs range = LettuceJsonCommandsConverter.toLettuceJsonRangeArgs(start, end);
         return LettuceCommand.of(() -> async.jsonArrindex(marshaller.encode(key), JsonPath.of(path), encoded, range),
                 AbstractLettuceCommands::toInteger);
     }
@@ -253,10 +253,11 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     <T> LettuceCommand<List<String>, List<T>> _jsonArrPop(K key, Class<T> clazz, String path, int index) {
         nonNull(key, "key");
         nonNull(clazz, "clazz");
-        if (path == null) {
+        if (path == null && index == -1) {
             return LettuceCommand.of(() -> async.jsonArrpopRaw(marshaller.encode(key)), raw -> decodeJsonValues(raw, clazz));
         }
-        return LettuceCommand.of(() -> async.jsonArrpopRaw(marshaller.encode(key), JsonPath.of(path), index),
+        JsonPath jsonPath = path == null ? JsonPath.ROOT_PATH : JsonPath.of(path);
+        return LettuceCommand.of(() -> async.jsonArrpopRaw(marshaller.encode(key), jsonPath, index),
                 raw -> decodeJsonValues(raw, clazz));
     }
 
@@ -268,7 +269,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<List<Long>, List<Integer>> _jsonArrTrim(K key, String path, int start, int stop) {
         nonNull(key, "key");
         nonNull(path, "path");
-        JsonRangeArgs range = JsonRangeArgs.Builder.start(start).stop(stop);
+        JsonRangeArgs range = LettuceJsonCommandsConverter.toLettuceJsonRangeArgs(start, stop);
         return LettuceCommand.of(() -> async.jsonArrtrim(marshaller.encode(key), JsonPath.of(path), range),
                 AbstractLettuceCommands::toInteger);
     }
@@ -483,11 +484,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
 
     static <T> List<T> decodeJsonValues(List<String> raw, Class<T> clazz) {
         List<T> list = new ArrayList<>();
-        if (raw == null || raw.isEmpty()) {
-            list.add(null);
-            return list;
-        }
-        for (String item : raw) {
+        for (String item : orEmpty(raw)) {
             list.add(item == null ? null : Json.decodeValue(item, clazz));
         }
         return list;

@@ -289,6 +289,20 @@ class LettuceJsonCommandsTest extends CommandsTestBase {
     }
 
     @Test
+    void jsonArrayPopWithIndexAndDefaultPath() {
+        blockingJson.jsonSet("arr", "$", JsonArray.of(1, 2, 3, 4));
+        assertThat(blockingJson.jsonArrPop("arr", Integer.class, null, 0)).containsExactly(1);
+        assertThat(blockingJson.jsonArrPop("arr", Integer.class, null, 1)).containsExactly(3);
+        assertThat(blockingJson.jsonGetArray("arr")).containsExactly(2, 4);
+    }
+
+    @Test
+    void jsonArrayPopNoMatch() {
+        blockingJson.jsonSet(key, "$", JsonObject.of("a", JsonArray.of(1, 2)));
+        assertThat(blockingJson.jsonArrPop(key, Integer.class, "$..missing", -1)).isEmpty();
+    }
+
+    @Test
     void jsonArrayPopWithNull() {
         JsonObject test = JsonObject.of("a", JsonArray.of("foo", "bar"),
                 "nested", JsonObject.of("a", 2), "nested2", JsonObject.of("a", new JsonArray()));
@@ -322,6 +336,20 @@ class LettuceJsonCommandsTest extends CommandsTestBase {
         assertThat(blockingJson.jsonArrTrim(key, "$..a", 1, 1)).containsExactly(0, 1);
         assertThat(blockingJson.jsonGetObject(key).getJsonArray("a")).isEmpty();
         assertThat(blockingJson.jsonGetObject(key).getJsonObject("nested").getJsonArray("a")).containsExactly(4);
+    }
+
+    @Test
+    void jsonArrayTrimWithZeroBounds() {
+        blockingJson.jsonSet(key, "$", JsonObject.of("a", JsonArray.of(1, 2, 3, 4)));
+
+        // stop == 0 keeps the first element only; Lettuce's own range arguments would drop the bounds here
+        assertThat(blockingJson.jsonArrTrim(key, "$.a", 0, 0)).containsExactly(1);
+        assertThat(blockingJson.jsonGetObject(key).getJsonArray("a")).containsExactly(1);
+
+        blockingJson.jsonSet(key, "$", JsonObject.of("a", JsonArray.of(1, 2, 3, 4)));
+        // start > stop empties the array
+        assertThat(blockingJson.jsonArrTrim(key, "$.a", 2, 0)).containsExactly(0);
+        assertThat(blockingJson.jsonGetObject(key).getJsonArray("a")).isEmpty();
     }
 
     @Test
