@@ -168,7 +168,7 @@
                         <configuration>
                             <images>
                                 <image>
-                                    <name>redis:7-alpine</name>
+                                    <name>redis:8</name>
                                     <alias>quarkus-test-redis</alias>
                                     <run>
                                         <ports>
@@ -188,7 +188,7 @@
                                     </run>
                                 </image>
                                 <image>
-                                    <name>redis:7-alpine</name>
+                                    <name>redis:8</name>
                                     <alias>quarkus-test-redis-tls</alias>
                                     <run>
                                         <ports>
@@ -211,11 +211,12 @@
                                         </wait>
                                     </run>
                                 </image>
-                                <!-- Six-node cluster (three upstream nodes with one replica each) in one container, see
-                                     src/test/resources/redis-cluster/start-cluster.sh: the nodes announce 127.0.0.1 and
+                                <!-- Six-node cluster (three upstream nodes with one replica each) in one container, started
+                                     by the script the deployment tests use too (extensions/redis-client-lettuce/deployment/
+                                     src/test/resources/redis-cluster/start-cluster.sh): the nodes announce 127.0.0.1 and
                                      their own port, so every port is published on the same host port -->
                                 <image>
-                                    <name>redis:7-alpine</name>
+                                    <name>redis:8</name>
                                     <alias>quarkus-test-redis-cluster</alias>
                                     <run>
                                         <ports>
@@ -228,7 +229,7 @@
                                         </ports>
                                         <volumes>
                                             <bind>
-                                                <volume>${project.basedir}/src/test/resources/redis-cluster:/cluster${volume.access.modifier}</volume>
+                                                <volume>${project.basedir}/../../extensions/redis-client-lettuce/deployment/src/test/resources/redis-cluster:/cluster${volume.access.modifier}</volume>
                                             </bind>
                                         </volumes>
                                         <cmd>sh /cluster/start-cluster.sh 6400 6401 6402 6403 6404 6405</cmd>
@@ -243,11 +244,12 @@
                                         </wait>
                                     </run>
                                 </image>
-                                <!-- Sentinel deployment (a master, its replica and three sentinels) in one container, see
-                                     src/test/resources/redis-cluster/start-sentinel.sh: every process announces 127.0.0.1
+                                <!-- Sentinel deployment (a master, its replica and three sentinels) in one container, started
+                                     by the script the deployment tests use too (extensions/redis-client-lettuce/deployment/
+                                     src/test/resources/redis-cluster/start-sentinel.sh): every process announces 127.0.0.1
                                      and its own port, so every port is published on the same host port -->
                                 <image>
-                                    <name>redis:7-alpine</name>
+                                    <name>redis:8</name>
                                     <alias>quarkus-test-redis-sentinel</alias>
                                     <run>
                                         <ports>
@@ -262,7 +264,7 @@
                                         </env>
                                         <volumes>
                                             <bind>
-                                                <volume>${project.basedir}/src/test/resources/redis-cluster:/cluster${volume.access.modifier}</volume>
+                                                <volume>${project.basedir}/../../extensions/redis-client-lettuce/deployment/src/test/resources/redis-cluster:/cluster${volume.access.modifier}</volume>
                                             </bind>
                                         </volumes>
                                         <cmd>sh /cluster/start-sentinel.sh 6500 6501 6502 6503 6504</cmd>

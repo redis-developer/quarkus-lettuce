@@ -19,6 +19,7 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
  * <ul>
  * <li>{@code redis.cluster.hosts}: the {@code redis://} URIs of the first three nodes, the seeds the clients discover
  * the topology from (a few nodes only, as the other three are to be discovered);</li>
+ * <li>{@code redis.cluster.hosts-db1}: the same three URIs selecting database 1, which a cluster does not have;</li>
  * <li>{@code redis.cluster.all-hosts}: the URIs of all the nodes.</li>
  * </ul>
  * The nodes announce {@code 127.0.0.1} and a port that is the same inside the container and on the host, as a client
@@ -47,7 +48,7 @@ public class RedisClusterTestResource implements QuarkusTestResourceLifecycleMan
     private static final class RedisClusterContainer extends GenericContainer<RedisClusterContainer> {
 
         RedisClusterContainer(List<Integer> ports) {
-            super(DockerImageName.parse(System.getProperty("redis.base.image", "redis:7-alpine")));
+            super(DockerImageName.parse(System.getProperty("redis.base.image", "redis:8")));
             for (int port : ports) {
                 addFixedExposedPort(port, port);
             }
@@ -69,6 +70,7 @@ public class RedisClusterTestResource implements QuarkusTestResourceLifecycleMan
         CLUSTER.start();
         return Map.of(
                 "redis.cluster.hosts", hosts(PORTS.subList(0, SEEDS)),
+                "redis.cluster.hosts-db1", hosts(PORTS.subList(0, SEEDS)).replace(",", "/1,") + "/1",
                 "redis.cluster.all-hosts", hosts(PORTS));
     }
 

@@ -31,6 +31,8 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveTransactionalBitMapCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveCountMinCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveTransactionalCountMinCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveGeoCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveTransactionalGeoCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
@@ -49,6 +51,7 @@ import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveTransactio
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveValueCommandsImpl;
 import io.smallrye.mutiny.Uni;
 import io.vertx.redis.client.Command;
+import io.vertx.redis.client.impl.CommandMap;
 
 /**
  * Lettuce-backed implementation of {@link ReactiveTransactionalRedisDataSource}.
@@ -114,13 +117,15 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     @Override
     public Uni<Void> execute(String command, String... args) {
         nonNull(command, "command");
-        return enqueueRaw(LettuceReactiveRedisDataSourceImpl.resolve(command), args);
+        return enqueueRaw(LettuceReactiveRedisDataSourceImpl.resolve(command),
+                LettuceReactiveRedisDataSourceImpl.rawArgs(CommandMap.getKnownCommand(command), args));
     }
 
     @Override
     public Uni<Void> execute(Command command, String... args) {
         nonNull(command, "command");
-        return enqueueRaw(LettuceReactiveRedisDataSourceImpl.resolve(command.toString()), args);
+        return enqueueRaw(LettuceReactiveRedisDataSourceImpl.resolve(command.toString()),
+                LettuceReactiveRedisDataSourceImpl.rawArgs(command, args));
     }
 
     @Override
@@ -210,7 +215,11 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalCountMinCommands<K, V> countmin(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("countmin");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        LettuceReactiveCountMinCommandsImpl<K, V> reactiveCountMin = (LettuceReactiveCountMinCommandsImpl<K, V>) reactive
+                .countmin(redisKeyType, valueType);
+        return new LettuceReactiveTransactionalCountMinCommandsImpl<>(this, reactiveCountMin, tx);
     }
 
     @Override
@@ -238,16 +247,8 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
         throw groupNotImplemented("timeseries");
     }
 
-    private Uni<Void> enqueueRaw(ProtocolKeyword type, String... args) {
+    private Uni<Void> enqueueRaw(ProtocolKeyword type, CommandArgs<byte[], byte[]> commandArgs) {
         LettuceVertxResponseOutput<byte[], byte[]> output = new LettuceVertxResponseOutput<>(ByteArrayCodec.INSTANCE);
-        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE);
-        if (args != null) {
-            for (String arg : args) {
-                if (arg != null) {
-                    commandArgs.add(arg);
-                }
-            }
-        }
         return tx.enqueue(LettuceCommand.of(() -> connection.async().dispatch(type, output, commandArgs),
                 ignored -> output.toVertxResponse()));
     }

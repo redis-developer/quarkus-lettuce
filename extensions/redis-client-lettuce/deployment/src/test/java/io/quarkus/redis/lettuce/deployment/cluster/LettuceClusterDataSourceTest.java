@@ -140,6 +140,53 @@ public class LettuceClusterDataSourceTest {
     }
 
     @Test
+    void routesRawCommandsByKey() {
+        // one key per upstream node, so that whatever the default node is, some keys live elsewhere
+        Map<String, RedisClusterNode> keys = new java.util.LinkedHashMap<>();
+        for (int i = 0; keys.size() < upstreamNodes().size(); i++) {
+            String key = "raw:" + i;
+            RedisClusterNode owner = cluster.getPartitions().getPartitionBySlot(SlotHash.getSlot(key));
+            if (keys.values().stream().noneMatch(node -> node.getNodeId().equals(owner.getNodeId()))) {
+                keys.put(key, owner);
+            }
+        }
+        for (String key : keys.keySet()) {
+            blocking.execute("SET", key, "v");
+        }
+        Map<String, long[]> before = getStats();
+
+        for (int i = 0; i < 5; i++) {
+            for (String key : keys.keySet()) {
+                assertThat(blocking.execute("GET", key).toString()).isEqualTo("v");
+            }
+        }
+
+        // every GET was served by the node owning its key: no node answered one with a MOVED redirect
+        Map<String, long[]> after = getStats();
+        for (RedisClusterNode node : upstreamNodes()) {
+            long served = after.get(node.getNodeId())[0] - before.get(node.getNodeId())[0];
+            long rejected = after.get(node.getNodeId())[1] - before.get(node.getNodeId())[1];
+            assertThat(rejected).as("GETs answered with MOVED by %s", node.getNodeId()).isZero();
+            assertThat(served).as("GETs served by %s", node.getNodeId()).isEqualTo(5);
+        }
+    }
+
+    /** Per upstream node: the {@code GET}s it served and the ones it rejected (with a {@code MOVED} redirect). */
+    private Map<String, long[]> getStats() {
+        Map<String, long[]> stats = new java.util.HashMap<>();
+        java.util.regex.Pattern pattern = java.util.regex.Pattern
+                .compile("cmdstat_get:calls=(\\d+),[^\\n]*rejected_calls=(\\d+)");
+        for (RedisClusterNode node : upstreamNodes()) {
+            java.util.regex.Matcher matcher = pattern
+                    .matcher(cluster.getConnection(node.getNodeId()).sync().info("commandstats"));
+            stats.put(node.getNodeId(), matcher.find()
+                    ? new long[] { Long.parseLong(matcher.group(1)), Long.parseLong(matcher.group(2)) }
+                    : new long[] { 0, 0 });
+        }
+        return stats;
+    }
+
+    @Test
     void rejectsTransactionsAtOnce() {
         ValueCommands<String, String> values = blocking.value(String.class);
         values.set("tx:key", "before");

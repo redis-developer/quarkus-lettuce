@@ -899,4 +899,85 @@ class LettuceBackendTest {
                 .statusCode(200).body(CoreMatchers.is("2"));
     }
 
+    @Test
+    public void countMinIncrByAndQuery() {
+        String key = getKey("cms-sync");
+        String probKey = getKey("cms-prob");
+
+        RestAssured.given().when().post("/lettuce/countmin/init/" + key + "/100/5").then().statusCode(204);
+        RestAssured.given().when().post("/lettuce/countmin/initbyprob/" + probKey + "/0.001/0.01").then().statusCode(204);
+        // re-initialising an existing sketch is a server-side error
+        RestAssured.given().when().post("/lettuce/countmin/init/" + key + "/100/5").then().statusCode(500);
+
+        RestAssured.given().when().post("/lettuce/countmin/incrby/" + key + "/leia/10").then()
+                .statusCode(200).body(CoreMatchers.is("10"));
+        RestAssured.given().body("leia=2,luke=5,anakin=3").when().post("/lettuce/countmin/incrby/" + key).then()
+                .statusCode(200)
+                .body("leia", CoreMatchers.is(12))
+                .body("luke", CoreMatchers.is(5))
+                .body("anakin", CoreMatchers.is(3));
+
+        RestAssured.given().when().get("/lettuce/countmin/query/" + key + "/anakin").then()
+                .statusCode(200).body(CoreMatchers.is("3"));
+        RestAssured.given().queryParam("items", "leia,luke").when().get("/lettuce/countmin/query/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[12,5]"));
+        // an item never seen has a zero count
+        RestAssured.given().when().get("/lettuce/countmin/query/" + probKey + "/leia").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+    }
+
+    @Test
+    public void countMinMerge() {
+        String key1 = getKey("cms-merge-1");
+        String key2 = getKey("cms-merge-2");
+        String dest = getKey("cms-merge-dest");
+        String weighted = getKey("cms-merge-weighted");
+
+        for (String k : List.of(key1, key2, dest, weighted)) {
+            RestAssured.given().when().post("/lettuce/countmin/init/" + k + "/100/5").then().statusCode(204);
+        }
+        RestAssured.given().when().post("/lettuce/countmin/incrby/" + key1 + "/leia/2").then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().body("leia=2,luke=5,anakin=10").when().post("/lettuce/countmin/incrby/" + key2).then()
+                .statusCode(200);
+
+        // without weights every source counts once
+        RestAssured.given().when().post("/lettuce/countmin/merge/" + dest + "/" + key1 + "/" + key2).then()
+                .statusCode(204);
+        RestAssured.given().queryParam("items", "leia,luke,anakin").when().get("/lettuce/countmin/query/" + dest).then()
+                .statusCode(200).body(CoreMatchers.is("[4,5,10]"));
+
+        // with weights the first source is doubled
+        RestAssured.given().queryParam("weights", "2,1").when()
+                .post("/lettuce/countmin/merge/" + weighted + "/" + key1 + "/" + key2).then()
+                .statusCode(204);
+        RestAssured.given().queryParam("items", "leia,luke,anakin").when().get("/lettuce/countmin/query/" + weighted)
+                .then().statusCode(200).body(CoreMatchers.is("[6,5,10]"));
+    }
+
+    @Test
+    public void countMinReactive() {
+        String key = getKey("cms-reactive");
+
+        RestAssured.given().when().post("/lettuce/countmin/init/" + key + "/100/5").then().statusCode(204);
+        RestAssured.given().when().post("/lettuce/countmin/reactive/incrby/" + key + "/x/4").then()
+                .statusCode(200).body(CoreMatchers.is("4"));
+        RestAssured.given().when().post("/lettuce/countmin/reactive/incrby/" + key + "/x/1").then()
+                .statusCode(200).body(CoreMatchers.is("5"));
+        RestAssured.given().when().get("/lettuce/countmin/reactive/query/" + key + "/x").then()
+                .statusCode(200).body(CoreMatchers.is("5"));
+    }
+
+    @Test
+    public void withTransactionCountMin() {
+        String key = getKey("tx-cms");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/countmin/" + key)
+                .then().statusCode(200).extract().asString();
+        // 3x init -> null (discarded), incrby(a,3) -> 3, incrby(other: a=2,b=4) -> [2, 4] as a raw list like Vert.x,
+        // merge(2*key + 1*other) -> null (discarded), query(merged: a,b) -> [3*2+2, 4]
+        assertEquals("false,7,true,3,[2, 4],true,[8, 4]", body);
+        RestAssured.given().when().get("/lettuce/countmin/query/" + key + "-merged/a").then()
+                .statusCode(200).body(CoreMatchers.is("8"));
+    }
+
 }

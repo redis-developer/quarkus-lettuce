@@ -59,7 +59,6 @@ public class LettuceRecorder {
 
     private static final Logger LOGGER = Logger.getLogger(LettuceRecorder.class);
     private static final Duration POOL_CLOSE_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration DEFAULT_TOPOLOGY_CACHE_TTL = Duration.ofSeconds(1);
     /** The default of {@code master-name}, as documented for the Vert.x client. */
     private static final String DEFAULT_MASTER_NAME = "mymaster";
 
@@ -159,16 +158,31 @@ public class LettuceRecorder {
     /**
      * The Lettuce backend applies the hosts, client-type, timeout, active, password, TLS,
      * {@code tcp.secure-transport-protocols}, {@code max-pool-size} and {@code max-pool-waiting} properties; for a
-     * cluster also {@code replicas} and {@code topology-cache-ttl} (or {@code hash-slot-cache-ttl}); for a Sentinel
-     * client {@code master-name}, {@code role}, {@code auto-failover} (a failover is always followed) and
-     * {@code replicas}; for a replication client {@code topology} and {@code replicas}. A standalone client only uses
-     * the first host. Tell users at startup which other configured properties are not applied, instead of silently
-     * connecting differently than configured. Properties with a default value are reported only when set to
-     * something else.
+     * cluster also {@code replicas} and {@code topology-cache-ttl}, but not the database of a host URI (a cluster
+     * only has database 0); for a Sentinel client {@code master-name}, {@code role}, {@code auto-failover} (a
+     * failover is always followed) and {@code replicas}; for a replication client {@code topology} and
+     * {@code replicas}. A standalone client only uses the first host. Tell users at startup which other configured
+     * properties are not applied, instead of silently connecting differently than configured. Properties with a
+     * default value are reported only when set to something else.
      */
     private static void warnAboutUnsupportedConfiguration(String name, RedisClientConfig config, Set<URI> hosts) {
         List<String> ignored = new ArrayList<>();
         RedisClientType type = config.clientType();
+        if (type == RedisClientType.CLUSTER) {
+            // a cluster only has database 0; Lettuce ignores the database of the seed URIs rather than selecting it
+            for (URI host : hosts) {
+                if (RedisURI.create(host).getDatabase() != 0) {
+                    ignored.add(getPropertyName(name, HOSTS) + " (the database of a URI: a cluster only has database 0)");
+                    break;
+                }
+            }
+        } else {
+            // a Sentinel connection gets the topology from the sentinels, a replication connection keeps the one it
+            // discovered: neither refreshes it periodically
+            if (!LettuceClientSettings.topologyCacheTtl(config).equals(LettuceClientSettings.DEFAULT_TOPOLOGY_CACHE_TTL)) {
+                ignored.add(getPropertyName(name, "topology-cache-ttl"));
+            }
+        }
         if (type == RedisClientType.STANDALONE) {
             if (hosts.size() > 1) {
                 ignored.add(getPropertyName(name, HOSTS) + " (only the first URI is used)");
@@ -177,16 +191,9 @@ public class LettuceRecorder {
                 ignored.add(getPropertyName(name, "replicas"));
             }
         }
-        if (type != RedisClientType.CLUSTER) {
-            // a Sentinel connection gets the topology from the sentinels, a replication connection keeps the one it
-            // discovered: neither refreshes it periodically
-            if (config.topologyCacheTtl().isPresent()
-                    && !config.topologyCacheTtl().get().equals(DEFAULT_TOPOLOGY_CACHE_TTL)) {
-                ignored.add(getPropertyName(name, "topology-cache-ttl"));
-            }
-            if (!config.hashSlotCacheTtl().equals(DEFAULT_TOPOLOGY_CACHE_TTL)) {
-                ignored.add(getPropertyName(name, "hash-slot-cache-ttl"));
-            }
+        // the deprecated alias is applied by neither backend (see LettuceClientSettings.topologyCacheTtl)
+        if (!config.hashSlotCacheTtl().equals(LettuceClientSettings.DEFAULT_TOPOLOGY_CACHE_TTL)) {
+            ignored.add(getPropertyName(name, "hash-slot-cache-ttl") + " (deprecated, use topology-cache-ttl)");
         }
         if (type != RedisClientType.SENTINEL) {
             if (config.masterName().isPresent()) {

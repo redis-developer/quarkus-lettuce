@@ -7,6 +7,8 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -45,6 +47,7 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveCountMinCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveGeoCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveHyperLogLogCommandsImpl;
@@ -59,7 +62,10 @@ import io.smallrye.mutiny.Uni;
 import io.vertx.mutiny.core.Vertx;
 import io.vertx.mutiny.redis.client.Redis;
 import io.vertx.redis.client.Command;
+import io.vertx.redis.client.Request;
 import io.vertx.redis.client.Response;
+import io.vertx.redis.client.impl.CommandMap;
+import io.vertx.redis.client.impl.RequestImpl;
 
 /**
  * Lettuce-backed implementation of {@link ReactiveRedisDataSource}.
@@ -143,30 +149,75 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     @Override
     public Uni<Response> execute(String command, String... args) {
         nonNull(command, "command");
-        return dispatch(resolve(command), args);
+        return dispatch(resolve(command), rawArgs(CommandMap.getKnownCommand(command), args));
     }
 
     @Override
     public Uni<Response> execute(Command command, String... args) {
         nonNull(command, "command");
-        return dispatch(resolve(command.toString()), args);
+        return dispatch(resolve(command.toString()), rawArgs(command, args));
     }
 
-    private Uni<Response> dispatch(ProtocolKeyword type, String... args) {
+    private Uni<Response> dispatch(ProtocolKeyword type, CommandArgs<byte[], byte[]> commandArgs) {
         if (type == CommandType.SELECT) {
             markDatabaseDirty();
         }
         LettuceVertxResponseOutput<byte[], byte[]> output = new LettuceVertxResponseOutput<>(ByteArrayCodec.INSTANCE);
-        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE);
-        if (args != null) {
-            for (String arg : args) {
-                if (arg != null) {
-                    commandArgs.add(arg);
-                }
-            }
-        }
         return LettuceResult.toUni(() -> connection.async().dispatch(type, output, commandArgs))
                 .map(ignored -> output.toVertxResponse());
+    }
+
+    /**
+     * The arguments of a raw command, the keys among them added as keys: a cluster connection routes a command to
+     * the node owning its first key, and would send a command without one to a default node and follow the
+     * {@code MOVED} redirect. Which arguments are keys comes from the Vert.x client's command table, the same
+     * knowledge its cluster connection routes on; a command unknown to it ({@code null}, or one created with
+     * {@code Command.create(...)}) has no key there either. {@code null} arguments are skipped.
+     *
+     * @param command the Vert.x command, {@code null} when unknown
+     */
+    static CommandArgs<byte[], byte[]> rawArgs(Command command, String... args) {
+        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE);
+        if (args == null) {
+            return commandArgs;
+        }
+        List<byte[]> keys = command == null ? List.of() : keysOf(command, args);
+        for (String arg : args) {
+            if (arg == null) {
+                continue;
+            }
+            byte[] bytes = arg.getBytes(StandardCharsets.UTF_8);
+            if (isKey(bytes, keys)) {
+                commandArgs.addKey(bytes);
+            } else {
+                commandArgs.add(bytes);
+            }
+        }
+        return commandArgs;
+    }
+
+    private static List<byte[]> keysOf(Command command, String[] args) {
+        Request request = Request.cmd(command);
+        for (String arg : args) {
+            if (arg != null) {
+                request.arg(arg);
+            }
+        }
+        try {
+            return ((RequestImpl) request).keys();
+        } catch (RuntimeException malformed) {
+            // arguments the key locators cannot make sense of: let the server answer
+            return List.of();
+        }
+    }
+
+    private static boolean isKey(byte[] bytes, List<byte[]> keys) {
+        for (byte[] key : keys) {
+            if (Arrays.equals(key, bytes)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static ProtocolKeyword resolve(String name) {
@@ -539,12 +590,16 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K, V> ReactiveCountMinCommands<K, V> countmin(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("countmin");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        return new LettuceReactiveCountMinCommandsImpl<>(this, connection, redisKeyType, valueType);
     }
 
     @Override
     public <K, V> ReactiveCountMinCommands<K, V> countmin(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("countmin");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        return new LettuceReactiveCountMinCommandsImpl<>(this, connection, redisKeyType.getType(), valueType.getType());
     }
 
     @Override
