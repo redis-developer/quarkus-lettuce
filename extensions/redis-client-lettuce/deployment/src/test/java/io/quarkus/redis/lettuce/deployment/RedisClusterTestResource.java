@@ -51,7 +51,7 @@ public class RedisClusterTestResource implements QuarkusTestResourceLifecycleMan
     private static final class RedisClusterContainer extends GenericContainer<RedisClusterContainer> {
 
         RedisClusterContainer(List<Integer> ports) {
-            super(DockerImageName.parse(System.getProperty("redis.base.image", "redis:7-alpine")));
+            super(DockerImageName.parse(System.getProperty("redis.base.image", "redis:8")));
             for (int port : ports) {
                 addFixedExposedPort(port, port);
             }

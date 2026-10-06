@@ -23,6 +23,7 @@ import io.quarkus.redis.datasource.bitmap.BitMapCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
 import io.quarkus.redis.datasource.bloom.BloomCommands;
 import io.quarkus.redis.datasource.countmin.CountMinCommands;
+import io.quarkus.redis.datasource.countmin.ReactiveCountMinCommands;
 import io.quarkus.redis.datasource.cuckoo.CuckooCommands;
 import io.quarkus.redis.datasource.geo.GeoCommands;
 import io.quarkus.redis.datasource.geo.ReactiveGeoCommands;
@@ -53,6 +54,7 @@ import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.BlockingBitmapCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingCountMinCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingGeoCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHashCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHyperLogLogCommandsImpl;
@@ -473,12 +475,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, V> CountMinCommands<K, V> countmin(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("countmin");
+        ReactiveCountMinCommands<K, V> r = reactive.countmin(redisKeyType, valueType);
+        return new BlockingCountMinCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> CountMinCommands<K, V> countmin(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("countmin");
+        ReactiveCountMinCommands<K, V> r = reactive.countmin(redisKeyType, valueType);
+        return new BlockingCountMinCommandsImpl<>(this, r, timeout);
     }
 
     @Override
