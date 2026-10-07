@@ -16,6 +16,7 @@ import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandType;
 import io.lettuce.core.protocol.RedisCommand;
 import io.lettuce.core.protocol.TransactionalCommand;
+import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import io.lettuce.core.resource.ClientResources;
 
 /**
@@ -111,6 +112,19 @@ public class LettuceConnectionFactory {
      */
     public CompletionStage<StatefulRedisConnection<byte[], byte[]>> connectAsync() {
         return redisClient.connectAsync(ByteArrayCodec.INSTANCE, redisUri);
+    }
+
+    /**
+     * Opens a new Pub/Sub connection to Redis asynchronously using the byte-array codec. Each subscriber
+     * gets its own connection: a connection in subscribed mode cannot run ordinary commands, so Pub/Sub
+     * connections are kept apart from both the shared data source connection and the pool.
+     * <p>
+     * Never blocks the calling thread and is therefore safe to invoke from an event loop.
+     *
+     * @return a {@link CompletionStage} completing with a new {@link StatefulRedisPubSubConnection}
+     */
+    public CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>> connectPubSubAsync() {
+        return redisClient.connectPubSubAsync(ByteArrayCodec.INSTANCE, redisUri);
     }
 
     /**

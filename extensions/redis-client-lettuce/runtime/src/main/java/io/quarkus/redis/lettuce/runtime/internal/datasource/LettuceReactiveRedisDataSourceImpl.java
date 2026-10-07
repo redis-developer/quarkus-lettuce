@@ -7,8 +7,10 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.concurrent.CompletionStage;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
@@ -17,6 +19,7 @@ import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandType;
 import io.lettuce.core.protocol.ProtocolKeyword;
+import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.autosuggest.ReactiveAutoSuggestCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
@@ -51,6 +54,7 @@ import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommand
 import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveHyperLogLogCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.list.LettuceReactiveListCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.pubsub.LettuceReactivePubSubCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSortedSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveValueCommandsImpl;
@@ -76,6 +80,8 @@ import io.vertx.redis.client.Response;
  * this (non-pinned) data source likewise borrow a pooled connection instead of running on the shared
  * one, so they cannot head-of-line-block ordinary traffic; see {@link LettuceReactiveListCommandsImpl}
  * and {@link io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSortedSetCommandsImpl}.
+ * Pub/Sub subscriptions open their own connection through {@code pubSubConnector}: a connection in
+ * subscribed mode cannot run ordinary commands, so it is neither the shared connection nor pooled.
  * {@code getRedis()} throws {@link UnsupportedOperationException}: it returns a Vert.x-specific type
  * that has no Lettuce equivalent.
  */
@@ -84,29 +90,33 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     private final Vertx vertx;
     private final StatefulRedisConnection<byte[], byte[]> connection;
     private final LettuceConnectionPool pool;
+    private final Supplier<CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>>> pubSubConnector;
     private final boolean pinned;
 
     public LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<byte[], byte[]> connection,
-            LettuceConnectionPool pool) {
-        this(vertx, connection, pool, false);
+            LettuceConnectionPool pool,
+            Supplier<CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>>> pubSubConnector) {
+        this(vertx, connection, pool, pubSubConnector, false);
     }
 
     private LettuceReactiveRedisDataSourceImpl(Vertx vertx, StatefulRedisConnection<byte[], byte[]> connection,
-            LettuceConnectionPool pool, boolean pinned) {
+            LettuceConnectionPool pool,
+            Supplier<CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>>> pubSubConnector, boolean pinned) {
         this.vertx = nonNull(vertx, "vertx");
         this.connection = nonNull(connection, "connection");
         this.pool = pool;
+        this.pubSubConnector = nonNull(pubSubConnector, "pubSubConnector");
         this.pinned = pinned;
     }
 
     /**
-     * Creates a data source pinned to {@code connection}, which was borrowed from {@code pool}. The
+     * Creates a data source pinned to {@code conn}, which was borrowed from this data source's pool. The
      * pool is only used to report a {@code SELECT} on the connection; scoped operations reuse the
-     * pinned connection and blocking commands run on it directly.
+     * pinned connection and blocking commands run on it directly. Pub/Sub subscriptions still open
+     * their own connection through the shared connector.
      */
-    static LettuceReactiveRedisDataSourceImpl pinnedTo(Vertx vertx, StatefulRedisConnection<byte[], byte[]> connection,
-            LettuceConnectionPool pool) {
-        return new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool, true);
+    LettuceReactiveRedisDataSourceImpl pinnedTo(StatefulRedisConnection<byte[], byte[]> conn) {
+        return new LettuceReactiveRedisDataSourceImpl(vertx, conn, pool, pubSubConnector, true);
     }
 
     /** The pool blocking commands borrow from: none on a pinned data source. */
@@ -208,7 +218,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         if (pinned) {
             return function.apply(this);
         }
-        return pool.withScoped(conn -> function.apply(pinnedTo(vertx, conn, pool)));
+        return pool.withScoped(conn -> function.apply(pinnedTo(conn)));
     }
 
     @Override
@@ -253,7 +263,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     private Uni<TransactionResult> runTx(StatefulRedisConnection<byte[], byte[]> conn,
             Function<ReactiveTransactionalRedisDataSource, Uni<Void>> tx, String[] watchedKeys) {
-        LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn, pool);
+        LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(conn);
         LettuceTransactionHolder holder = new LettuceTransactionHolder();
         LettuceReactiveTransactionalRedisDataSourceImpl txDs = new LettuceReactiveTransactionalRedisDataSourceImpl(
                 pinnedDs, holder);
@@ -279,7 +289,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     private <I> Uni<OptimisticLockingTransactionResult<I>> runOptimisticTx(StatefulRedisConnection<byte[], byte[]> conn,
             Function<ReactiveRedisDataSource, Uni<I>> preTx,
             BiFunction<I, ReactiveTransactionalRedisDataSource, Uni<Void>> tx, String[] watchedKeys) {
-        LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(vertx, conn, pool);
+        LettuceReactiveRedisDataSourceImpl pinnedDs = pinnedTo(conn);
         LettuceTransactionHolder holder = new LettuceTransactionHolder();
         LettuceReactiveTransactionalRedisDataSourceImpl txDs = new LettuceReactiveTransactionalRedisDataSourceImpl(
                 pinnedDs, holder);
@@ -490,12 +500,14 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <V> ReactivePubSubCommands<V> pubsub(Class<V> messageType) {
-        throw groupNotImplemented("pubsub");
+        nonNull(messageType, "messageType");
+        return new LettuceReactivePubSubCommandsImpl<>(this, connection, pubSubConnector, messageType);
     }
 
     @Override
     public <V> ReactivePubSubCommands<V> pubsub(TypeReference<V> messageType) {
-        throw groupNotImplemented("pubsub");
+        nonNull(messageType, "messageType");
+        return new LettuceReactivePubSubCommandsImpl<>(this, connection, pubSubConnector, messageType.getType());
     }
 
     @Override

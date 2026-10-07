@@ -18,6 +18,7 @@ import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.codec.RedisCodec;
+import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import io.netty.channel.EventLoopGroup;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceBlockingRedisDataSourceImpl;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceReactiveRedisDataSourceImpl;
@@ -99,6 +100,10 @@ public abstract class CommandsTestBase {
         return CommandsTestBase::connectAsync;
     }
 
+    protected static Supplier<CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>>> pubSubConnector() {
+        return () -> redisClient.connectPubSubAsync(codec, redisUri);
+    }
+
     protected static LettuceConnectionPool pool() {
         return pool(MAX_POOL_SIZE, MAX_POOL_WAITING);
     }
@@ -108,7 +113,7 @@ public abstract class CommandsTestBase {
     }
 
     protected static LettuceReactiveRedisDataSourceImpl reactiveDataSource() {
-        return new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool());
+        return new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool(), pubSubConnector());
     }
 
     protected static LettuceBlockingRedisDataSourceImpl blockingDataSource() {

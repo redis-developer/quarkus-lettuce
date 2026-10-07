@@ -107,7 +107,8 @@ class LettuceWithConnectionBlockingIntegrationTest extends CommandsTestBase {
 
     /** A data source whose connection release yields {@code release} instead of returning to the pool. */
     private static RedisDataSource withRelease(Uni<Void> release, Duration timeout) {
-        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool()) {
+        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool(),
+                pubSubConnector()) {
             @Override
             Uni<Void> releaseConnection(StatefulRedisConnection<byte[], byte[]> conn) {
                 return release;
