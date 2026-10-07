@@ -24,7 +24,6 @@ import org.junit.jupiter.api.Test;
 
 import io.lettuce.core.RedisException;
 import io.lettuce.core.RedisURI;
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.Cancellable;
 
@@ -33,12 +32,12 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
     @Test
     void acquireReleaseReusesConnection() {
         LettuceConnectionPool pool = pool(1, 1);
-        StatefulRedisConnection<byte[], byte[]> first = pool.acquireBlocking(TIMEOUT);
-        long firstId = first.sync().clientId();
+        LettuceConnection first = pool.acquireBlocking(TIMEOUT);
+        long firstId = sync(first).clientId();
         pool.release(first).await().atMost(TIMEOUT);
 
-        StatefulRedisConnection<byte[], byte[]> second = pool.acquireBlocking(TIMEOUT);
-        assertThat(second.sync().clientId()).isEqualTo(firstId);
+        LettuceConnection second = pool.acquireBlocking(TIMEOUT);
+        assertThat(sync(second).clientId()).isEqualTo(firstId);
         pool.release(second).await().atMost(TIMEOUT);
     }
 
@@ -47,18 +46,20 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         // A URI naming a database makes every fresh connection start there, so that, not 0, is the
         // state to restore.
         RedisURI uri = RedisURI.Builder.redis(REDIS.getHost(), REDIS.getFirstMappedPort()).withDatabase(2).build();
-        LettuceConnectionPool pool = new LettuceConnectionPool(() -> redisClient.connectAsync(codec, uri), 1, 1, 2);
+        LettuceConnectionPool pool = new LettuceConnectionPool(
+                () -> redisClient.connectAsync(codec, uri).thenApply(LettuceConnection::standalone),
+                1, 1, 2);
         try {
-            StatefulRedisConnection<byte[], byte[]> conn = pool.acquireBlocking(TIMEOUT);
-            assertThat(conn.sync().clientInfo()).contains(" db=2 ");
+            LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
+            assertThat(sync(conn).clientInfo()).contains(" db=2 ");
             pool.markDirty(conn);
-            conn.sync().select(1);
+            sync(conn).select(1);
             pool.release(conn).await().atMost(TIMEOUT);
             assertThat(pool.isDirty(conn)).isFalse();
 
-            StatefulRedisConnection<byte[], byte[]> again = pool.acquireBlocking(TIMEOUT);
+            LettuceConnection again = pool.acquireBlocking(TIMEOUT);
             assertThat(again).isSameAs(conn);
-            assertThat(again.sync().clientInfo()).contains(" db=2 ");
+            assertThat(sync(again).clientInfo()).contains(" db=2 ");
             pool.release(again).await().atMost(TIMEOUT);
         } finally {
             pool.close().await().atMost(TIMEOUT);
@@ -68,13 +69,13 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
     @Test
     void releaseOnlyIssuesSelectForDirtyConnections() {
         LettuceConnectionPool pool = pool(1, 1);
-        StatefulRedisConnection<byte[], byte[]> conn = pool.acquireBlocking(TIMEOUT);
-        long id = conn.sync().clientId();
+        LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
+        long id = sync(conn).clientId();
         pool.release(conn).await().atMost(TIMEOUT);
         assertThat(lastCommandOf(id)).isEqualTo("client|id");
 
         conn = pool.acquireBlocking(TIMEOUT);
-        conn.sync().clientId();
+        sync(conn).clientId();
         pool.markDirty(conn);
         pool.release(conn).await().atMost(TIMEOUT);
         assertThat(lastCommandOf(id)).isEqualTo("select");
@@ -83,7 +84,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
     @Test
     void dirtyConnectionWhoseResetFailsIsNotHandedOutAndStaysMarked() {
         LettuceConnectionPool pool = pool(1, 1);
-        StatefulRedisConnection<byte[], byte[]> conn = pool.acquireBlocking(TIMEOUT);
+        LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
         pool.markDirty(conn);
         conn.close(); // the reset SELECT cannot succeed on a closed connection
         pool.release(conn).await().atMost(TIMEOUT);
@@ -99,7 +100,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
     @Test
     void cancellationDequeuesWaiterFreeingItsWaitingSlot() {
         LettuceConnectionPool pool = pool(1, 1);
-        StatefulRedisConnection<byte[], byte[]> held = pool.acquireBlocking(TIMEOUT);
+        LettuceConnection held = pool.acquireBlocking(TIMEOUT);
 
         Cancellable firstWaiter = pool.withPooled(conn -> Uni.createFrom().voidItem()).subscribe().with(c -> {
         }, t -> {
@@ -205,7 +206,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         assertThat(bodyRan).isFalse();
 
         // With maxTotal=1 this would queue forever had the connection leaked.
-        StatefulRedisConnection<byte[], byte[]> conn = pool.acquireBlocking(TIMEOUT);
+        LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
         pool.release(conn).await().atMost(TIMEOUT);
     }
 
@@ -222,7 +223,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             for (int i = 0; i < 300; i++) {
-                StatefulRedisConnection<byte[], byte[]> held = pool.acquireBlocking(TIMEOUT);
+                LettuceConnection held = pool.acquireBlocking(TIMEOUT);
                 Cancellable waiter = pool.withPooled(conn -> Uni.createFrom().voidItem()).subscribe().with(x -> {
                 }, t -> {
                 });
@@ -262,7 +263,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             for (int i = 0; i < 300; i++) {
-                StatefulRedisConnection<byte[], byte[]> held = pool.acquireBlocking(TIMEOUT);
+                LettuceConnection held = pool.acquireBlocking(TIMEOUT);
 
                 CyclicBarrier barrier = new CyclicBarrier(2);
                 Future<?> release = executor.submit(() -> {
@@ -298,21 +299,21 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         // The connection that finished connecting after the caller gave up goes back to the pool.
         await().atMost(TIMEOUT).until(() -> pool.getIdle() == 1);
 
-        StatefulRedisConnection<byte[], byte[]> conn = pool.acquireBlocking(TIMEOUT);
-        assertThat(conn.sync().ping()).isEqualTo("PONG");
+        LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
+        assertThat(sync(conn).ping()).isEqualTo("PONG");
         pool.release(conn).await().atMost(TIMEOUT);
     }
 
     @Test
     void acquireBlockingQueuesWhenExhaustedAndFailsWhenTooManyWait() {
         LettuceConnectionPool pool = pool(1, 1);
-        StatefulRedisConnection<byte[], byte[]> held = pool.acquireBlocking(TIMEOUT);
+        LettuceConnection held = pool.acquireBlocking(TIMEOUT);
 
         // First extra caller queues (maxWaiting=1) and times out; the slot it held must be freed...
         assertThatThrownBy(() -> pool.acquireBlocking(Duration.ofMillis(200)))
                 .isInstanceOf(io.smallrye.mutiny.TimeoutException.class);
         // ...so this one queues too, instead of being rejected as "too many waiting".
-        AtomicReference<StatefulRedisConnection<byte[], byte[]>> handedOver = new AtomicReference<>();
+        AtomicReference<LettuceConnection> handedOver = new AtomicReference<>();
         Thread waiter = new Thread(() -> handedOver.set(pool.acquireBlocking(TIMEOUT)));
         waiter.start();
         await().atMost(TIMEOUT).until(() -> waiter.getState() == Thread.State.TIMED_WAITING);
@@ -397,7 +398,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         // queues behind the first caller's connect. If that connect fails, nothing is ever released,
         // so unless the queue is re-driven on failure the second caller hangs forever.
         CompletableFuture<Void> gate = new CompletableFuture<>();
-        AtomicReference<Supplier<CompletionStage<StatefulRedisConnection<byte[], byte[]>>>> connector = new AtomicReference<>(
+        AtomicReference<Supplier<CompletionStage<LettuceConnection>>> connector = new AtomicReference<>(
                 () -> gate.thenCompose(v -> connectAsync()));
         LettuceConnectionPool pool = new LettuceConnectionPool(() -> connector.get().get(), 1, 1, 0);
 
@@ -431,8 +432,8 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
 
         // Redis comes back: the pool is unharmed and hands out connections again.
         connector.set(CommandsTestBase::connectAsync);
-        StatefulRedisConnection<byte[], byte[]> conn = pool.acquireBlocking(TIMEOUT);
-        assertThat(conn.sync().ping()).isEqualTo("PONG");
+        LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
+        assertThat(sync(conn).ping()).isEqualTo("PONG");
         pool.release(conn).await().atMost(TIMEOUT);
         assertThat(pool.getIdle()).isEqualTo(1);
     }

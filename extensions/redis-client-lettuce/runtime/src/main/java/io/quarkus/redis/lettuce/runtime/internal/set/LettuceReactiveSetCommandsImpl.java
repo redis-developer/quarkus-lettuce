@@ -10,7 +10,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
 import io.quarkus.redis.datasource.SortArgs;
@@ -19,6 +18,7 @@ import io.quarkus.redis.datasource.set.ReactiveSetCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -36,7 +36,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     private final ReactiveRedisDataSource dataSource;
 
     public LettuceReactiveSetCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type valueType) {
+            LettuceConnection connection, Type keyType, Type valueType) {
         super(connection, keyType, valueType, new Marshaller(keyType, valueType));
         this.dataSource = dataSource;
     }

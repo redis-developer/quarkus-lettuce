@@ -7,12 +7,12 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import java.lang.reflect.Type;
 import java.util.List;
 
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -27,7 +27,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
     private final ReactiveRedisDataSource dataSource;
 
     public LettuceReactiveBitMapCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType) {
+            LettuceConnection connection, Type keyType) {
         super(connection, keyType, keyType, new Marshaller(keyType));
         this.dataSource = dataSource;
     }

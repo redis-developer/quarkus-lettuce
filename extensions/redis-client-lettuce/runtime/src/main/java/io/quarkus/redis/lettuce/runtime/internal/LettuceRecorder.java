@@ -16,7 +16,8 @@ import java.util.function.Supplier;
 
 import org.jboss.logging.Logger;
 
-import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.RedisURI;
+import io.lettuce.core.api.StatefulConnection;
 import io.lettuce.core.codec.StringCodec;
 import io.netty.channel.EventLoopGroup;
 import io.quarkus.arc.ActiveResult;
@@ -38,10 +39,12 @@ import io.vertx.redis.client.RedisClientType;
 /**
  * Quarkus recorder that manages the lifecycle of Lettuce Redis clients.
  * <p>
- * Creates {@link io.lettuce.core.resource.ClientResources} with shared Vert.x event loops,
- * {@link io.lettuce.core.RedisClient} instances configured from the {@code quarkus.redis[.<name>].*} properties the
- * Lettuce backend honours (see {@link LettuceClientSettings}), and {@link StatefulRedisConnection} instances. Also
- * creates, per client, a bounded {@link LettuceConnectionPool} used for blocking commands and scoped connections
+ * Creates {@link io.lettuce.core.resource.ClientResources} with shared Vert.x event loops, a
+ * {@link LettuceConnectionFactory} per client configured from the {@code quarkus.redis[.<name>].*} properties the
+ * Lettuce backend honours (see {@link LettuceClientSettings}): a {@link io.lettuce.core.RedisClient} for a
+ * {@code standalone} client, a {@link io.lettuce.core.cluster.RedisClusterClient} for a {@code cluster} one. Also
+ * creates, per client, the shared {@link LettuceConnection} of the data sources and a bounded
+ * {@link LettuceConnectionPool} used for blocking commands and scoped connections
  * ({@code withConnection}/{@code withTransaction}) so they never occupy the shared connection.
  * <p>
  * Shutdown ordering: connections → pools → clients → resources (before Vert.x event loops).
@@ -57,8 +60,8 @@ public class LettuceRecorder {
     private static volatile LettuceClientResources sharedResources;
     private static volatile io.vertx.mutiny.core.Vertx mutinyVertx;
     private static final Map<String, LettuceConnectionFactory> factories = new ConcurrentHashMap<>();
-    private static final Map<String, StatefulRedisConnection<byte[], byte[]>> connections = new ConcurrentHashMap<>();
-    private static final Map<String, StatefulRedisConnection<String, String>> stringConnections = new ConcurrentHashMap<>();
+    private static final Map<String, LettuceConnection> connections = new ConcurrentHashMap<>();
+    private static final Map<String, StatefulConnection<String, String>> stringConnections = new ConcurrentHashMap<>();
     private static final Map<String, LettuceReactiveRedisDataSourceImpl> reactiveDataSources = new ConcurrentHashMap<>();
     private static final Map<String, LettuceConnectionPool> pools = new ConcurrentHashMap<>();
 
@@ -67,7 +70,7 @@ public class LettuceRecorder {
     }
 
     /**
-     * Initializes shared client resources and creates a Lettuce RedisClient for each requested client name.
+     * Initializes shared client resources and creates a Lettuce client for each requested client name.
      * Only creates clients that pass the {@link #checkActive(String)} check.
      */
     public void initialize(RuntimeValue<Vertx> vertx, Supplier<TlsConfigurationRegistry> tlsRegistry, Set<String> names) {
@@ -81,16 +84,35 @@ public class LettuceRecorder {
                 // checkActive() guarantees at least one host for an active client
                 Set<URI> hosts = clientConfig.hosts().orElseThrow();
                 warnAboutUnsupportedConfiguration(name, clientConfig, hosts);
-                URI redisUri = hosts.iterator().next();
-                LettuceClientSettings settings = LettuceClientSettings.create(name, clientConfig, redisUri, vertx.getValue(),
+                LettuceClientSettings settings = LettuceClientSettings.create(name, clientConfig, hosts, vertx.getValue(),
                         tlsRegistry.get());
                 LettuceConnectionFactory factory = factories.computeIfAbsent(name,
-                        k -> new LettuceConnectionFactory(name, sharedResources.clientResources(), settings.redisUri(),
-                                settings.clientOptions(), clientConfig.timeout()));
+                        k -> createFactory(name, clientConfig, settings));
                 pools.putIfAbsent(name, new LettuceConnectionPool(factory::connectAsync,
                         clientConfig.maxPoolSize(), clientConfig.maxPoolWaiting(), factory.getDatabase()));
             }
         }
+    }
+
+    /**
+     * A cluster client for {@code client-type=cluster}, discovering the topology from all the configured hosts;
+     * a standalone client, connecting to the first configured host, for {@code standalone} and for the client types
+     * the Lettuce backend does not support yet (see {@link #warnAboutUnsupportedConfiguration}).
+     */
+    private static LettuceConnectionFactory createFactory(String name, RedisClientConfig config,
+            LettuceClientSettings settings) {
+        if (isCluster(config)) {
+            return new LettuceConnectionFactory(name, sharedResources.clientResources(), settings.redisUris(),
+                    settings.clientOptions(),
+                    LettuceClientSettings.topologyRefreshOptions(LettuceClientSettings.topologyCacheTtl(config)),
+                    LettuceClientSettings.readFrom(config.replicas()), config.timeout());
+        }
+        return new LettuceConnectionFactory(name, sharedResources.clientResources(), settings.redisUri(),
+                settings.clientOptions(), config.timeout());
+    }
+
+    private static boolean isCluster(RedisClientConfig config) {
+        return config.clientType() == RedisClientType.CLUSTER;
     }
 
     private static boolean hasHosts(RedisClientConfig config) {
@@ -98,18 +120,56 @@ public class LettuceRecorder {
     }
 
     /**
-     * The Lettuce backend applies the hosts (first URI), timeout, active, password, TLS,
-     * {@code tcp.secure-transport-protocols}, {@code max-pool-size} and {@code max-pool-waiting} properties. Tell users
-     * at startup which other configured properties are not applied, instead of silently connecting differently than
-     * configured. Properties with a default value are reported only when set to something else.
+     * The Lettuce backend applies the hosts, timeout, active, password, TLS, {@code tcp.secure-transport-protocols},
+     * {@code max-pool-size} and {@code max-pool-waiting} properties, and {@code client-type} when it is
+     * {@code standalone} or {@code cluster}; for a cluster it also applies {@code replicas} and
+     * {@code topology-cache-ttl}, but not the database of a host URI (a cluster only has database 0). A standalone
+     * client only uses the first host, and the other client types fall back to a standalone client on the first
+     * host. Tell users at startup which other configured properties are not applied, instead of silently connecting
+     * differently than configured. Properties with a default value are reported only when set to something else.
      */
     private static void warnAboutUnsupportedConfiguration(String name, RedisClientConfig config, Set<URI> hosts) {
         List<String> ignored = new ArrayList<>();
-        if (hosts.size() > 1) {
-            ignored.add(getPropertyName(name, HOSTS) + " (only the first URI is used)");
+        if (isCluster(config)) {
+            // a cluster only has database 0; Lettuce ignores the database of the seed URIs rather than selecting it
+            for (URI host : hosts) {
+                if (RedisURI.create(host).getDatabase() != 0) {
+                    ignored.add(getPropertyName(name, HOSTS) + " (the database of a URI: a cluster only has database 0)");
+                    break;
+                }
+            }
+        } else {
+            if (hosts.size() > 1) {
+                ignored.add(getPropertyName(name, HOSTS) + " (only the first URI is used)");
+            }
+            if (config.clientType() != RedisClientType.STANDALONE) {
+                ignored.add(getPropertyName(name, "client-type") + " (only standalone and cluster are supported)");
+            }
+            if (config.replicas().isPresent()) {
+                ignored.add(getPropertyName(name, "replicas"));
+            }
+            if (!LettuceClientSettings.topologyCacheTtl(config).equals(LettuceClientSettings.DEFAULT_TOPOLOGY_CACHE_TTL)) {
+                ignored.add(getPropertyName(name, "topology-cache-ttl"));
+            }
         }
-        if (config.clientType() != RedisClientType.STANDALONE) {
-            ignored.add(getPropertyName(name, "client-type") + " (only standalone is supported)");
+        // the deprecated alias is applied by neither backend (see LettuceClientSettings.topologyCacheTtl)
+        if (!config.hashSlotCacheTtl().equals(LettuceClientSettings.DEFAULT_TOPOLOGY_CACHE_TTL)) {
+            ignored.add(getPropertyName(name, "hash-slot-cache-ttl") + " (deprecated, use topology-cache-ttl)");
+        }
+        if (config.clusterTransactions().isPresent()) {
+            ignored.add(getPropertyName(name, "cluster-transactions"));
+        }
+        if (config.topology().isPresent()) {
+            ignored.add(getPropertyName(name, "topology"));
+        }
+        if (config.masterName().isPresent()) {
+            ignored.add(getPropertyName(name, "master-name"));
+        }
+        if (config.role().isPresent()) {
+            ignored.add(getPropertyName(name, "role"));
+        }
+        if (config.autoFailover()) {
+            ignored.add(getPropertyName(name, "auto-failover"));
         }
         if (config.poolCleanerInterval().isPresent()) {
             ignored.add(getPropertyName(name, "pool-cleaner-interval"));
@@ -200,23 +260,34 @@ public class LettuceRecorder {
         return () -> factories.get(name).getRedisClient();
     }
 
+    public Supplier<Object> getClusterClient(String name) {
+        return () -> factories.get(name).getClusterClient();
+    }
+
+    /**
+     * The {@code StatefulRedisConnection<String, String>} bean of a standalone client, or the
+     * {@code StatefulRedisClusterConnection<String, String>} bean of a cluster client: the bean of the other
+     * topology is inactive (see {@link #checkActiveStandalone} and {@link #checkActiveCluster}), so a client has at
+     * most one such connection.
+     */
     public Supplier<Object> getConnection(String name) {
         return () -> stringConnections.computeIfAbsent(name, k -> {
-            LOGGER.infof("Opening StatefulRedisConnection for client '%s'", k);
-            return factories.get(k).getRedisClient().connect(StringCodec.UTF8);
+            LOGGER.infof("Opening %s for client '%s'", factories.get(k).isCluster() ? "StatefulRedisClusterConnection"
+                    : "StatefulRedisConnection", k);
+            return factories.get(k).connect(StringCodec.UTF8);
         });
     }
 
-    private static StatefulRedisConnection<byte[], byte[]> dataSourceConnection(String name) {
+    private static LettuceConnection dataSourceConnection(String name) {
         return connections.computeIfAbsent(name, k -> {
-            LOGGER.infof("Opening data source StatefulRedisConnection for client '%s'", k);
+            LOGGER.infof("Opening data source connection for client '%s'", k);
             return factories.get(k).connect();
         });
     }
 
     public Supplier<ReactiveRedisDataSource> getReactiveDataSource(String name) {
         return () -> reactiveDataSources.computeIfAbsent(name, k -> {
-            StatefulRedisConnection<byte[], byte[]> conn = dataSourceConnection(k);
+            LettuceConnection conn = dataSourceConnection(k);
             return new LettuceReactiveRedisDataSourceImpl(mutinyVertx, conn, pools.get(k));
         });
     }
@@ -263,6 +334,56 @@ public class LettuceRecorder {
         };
     }
 
+    /**
+     * The activation check of the {@code RedisClient} and {@code StatefulRedisConnection} beans: those of an active
+     * client that is not configured as a cluster.
+     */
+    public Supplier<ActiveResult> checkActiveStandalone(final String name) {
+        return () -> {
+            ActiveResult active = checkActive(name).get();
+            if (!active.value()) {
+                return active;
+            }
+            if (isCluster(runtimeConfig.getValue().clients().get(name))) {
+                return ActiveResult.inactive(String.format(
+                        """
+                                Lettuce Redis Client '%s' is configured as a cluster through the configuration property '%s'. \
+                                Inject io.lettuce.core.cluster.RedisClusterClient and \
+                                io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String> instead of \
+                                io.lettuce.core.RedisClient and io.lettuce.core.api.StatefulRedisConnection<String, String>. \
+                                Refer to https://quarkus.io/guides/redis-reference for guidance.
+                                """,
+                        name, getPropertyName(name, "client-type")));
+            }
+            return ActiveResult.active();
+        };
+    }
+
+    /**
+     * The activation check of the {@code RedisClusterClient} and {@code StatefulRedisClusterConnection} beans: those
+     * of an active client that is configured as a cluster.
+     */
+    public Supplier<ActiveResult> checkActiveCluster(final String name) {
+        return () -> {
+            ActiveResult active = checkActive(name).get();
+            if (!active.value()) {
+                return active;
+            }
+            if (!isCluster(runtimeConfig.getValue().clients().get(name))) {
+                return ActiveResult.inactive(String.format(
+                        """
+                                Lettuce Redis Client '%s' is not configured as a cluster: set the configuration property '%s' to 'cluster', \
+                                or inject io.lettuce.core.RedisClient and io.lettuce.core.api.StatefulRedisConnection<String, String> \
+                                instead of io.lettuce.core.cluster.RedisClusterClient and \
+                                io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>. \
+                                Refer to https://quarkus.io/guides/redis-reference for guidance.
+                                """,
+                        name, getPropertyName(name, "client-type")));
+            }
+            return ActiveResult.active();
+        };
+    }
+
     public void cleanup(ShutdownContext context) {
         context.addShutdownTask(() -> {
             closeConnections(connections);
@@ -282,7 +403,7 @@ public class LettuceRecorder {
                 try {
                     entry.getValue().shutdown();
                 } catch (Exception e) {
-                    LOGGER.warnf(e, "Error shutting down Lettuce RedisClient for '%s'", entry.getKey());
+                    LOGGER.warnf(e, "Error shutting down Lettuce client for '%s'", entry.getKey());
                 }
             }
             factories.clear();
@@ -295,8 +416,8 @@ public class LettuceRecorder {
         });
     }
 
-    private static void closeConnections(Map<String, ? extends StatefulRedisConnection<?, ?>> connectionsByClient) {
-        for (Map.Entry<String, ? extends StatefulRedisConnection<?, ?>> entry : connectionsByClient.entrySet()) {
+    private static void closeConnections(Map<String, ? extends AutoCloseable> connectionsByClient) {
+        for (Map.Entry<String, ? extends AutoCloseable> entry : connectionsByClient.entrySet()) {
             try {
                 entry.getValue().close();
             } catch (Exception e) {

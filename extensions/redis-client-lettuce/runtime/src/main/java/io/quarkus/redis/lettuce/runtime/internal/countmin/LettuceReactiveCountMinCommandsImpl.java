@@ -10,13 +10,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.probabilistic.IncrementPair;
 import io.lettuce.core.probabilistic.MergePair;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.countmin.ReactiveCountMinCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -32,7 +32,7 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
     private final ReactiveRedisDataSource dataSource;
 
     public LettuceReactiveCountMinCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type valueType) {
+            LettuceConnection connection, Type keyType, Type valueType) {
         super(connection, keyType, valueType, new Marshaller(keyType, valueType));
         this.dataSource = dataSource;
     }

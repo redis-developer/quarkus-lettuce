@@ -13,8 +13,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.api.async.RedisAsyncCommands;
+import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.SortArgs;
 import io.quarkus.redis.datasource.list.KeyValue;
@@ -24,6 +23,7 @@ import io.quarkus.redis.datasource.list.ReactiveListCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
@@ -42,7 +42,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
     private final ReactiveRedisDataSource dataSource;
 
     public LettuceReactiveListCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, LettuceConnectionPool pool, Type keyType,
+            LettuceConnection connection, LettuceConnectionPool pool, Type keyType,
             Type valueType) {
         super(connection, keyType, valueType, new Marshaller(keyType, valueType), pool);
         this.dataSource = dataSource;
@@ -63,7 +63,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         return _blmove(async, source, destination, positionInSource, positionInDest, timeout);
     }
 
-    LettuceCommand<byte[], V> _blmove(RedisAsyncCommands<byte[], byte[]> cmds, K source, K destination,
+    LettuceCommand<byte[], V> _blmove(RedisClusterAsyncCommands<byte[], byte[]> cmds, K source, K destination,
             Position positionInSource, Position positionInDest, Duration timeout) {
         nonNull(source, "source");
         nonNull(destination, "destination");
@@ -93,7 +93,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<byte[]>>, KeyValue<K, V>> _blmpop(
-            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, Position position, K... keys) {
+            RedisClusterAsyncCommands<byte[], byte[]> cmds, Duration timeout, Position position, K... keys) {
         nonNull(position, "position");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
@@ -121,7 +121,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], List<byte[]>>, List<KeyValue<K, V>>> _blmpop(
-            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, Position position, int count, K... keys) {
+            RedisClusterAsyncCommands<byte[], byte[]> cmds, Duration timeout, Position position, int count, K... keys) {
         nonNull(position, "position");
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
@@ -149,7 +149,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], byte[]>, KeyValue<K, V>> _blpop(
-            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, K... keys) {
+            RedisClusterAsyncCommands<byte[], byte[]> cmds, Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
@@ -174,7 +174,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     @SafeVarargs
     final LettuceCommand<io.lettuce.core.KeyValue<byte[], byte[]>, KeyValue<K, V>> _brpop(
-            RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, K... keys) {
+            RedisClusterAsyncCommands<byte[], byte[]> cmds, Duration timeout, K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         validateTimeout(timeout, "timeout");
@@ -196,7 +196,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         return _brpoplpush(async, timeout, source, destination);
     }
 
-    LettuceCommand<byte[], V> _brpoplpush(RedisAsyncCommands<byte[], byte[]> cmds, Duration timeout, K source,
+    LettuceCommand<byte[], V> _brpoplpush(RedisClusterAsyncCommands<byte[], byte[]> cmds, Duration timeout, K source,
             K destination) {
         validateTimeout(timeout, "timeout");
         nonNull(source, "source");

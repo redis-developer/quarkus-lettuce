@@ -18,6 +18,9 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.QueryParam;
 
+import io.lettuce.core.cluster.RedisClusterClient;
+import io.lettuce.core.cluster.models.partitions.RedisClusterNode;
+import io.lettuce.core.cluster.models.partitions.RedisClusterNode.NodeFlag;
 import io.quarkus.redis.client.RedisClientName;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
@@ -66,6 +69,8 @@ public class LettuceBackendResource {
     private final RedisDataSource blocking;
     private final ReactiveRedisDataSource reactive;
     private final RedisDataSource secure;
+    private final RedisDataSource cluster;
+    private final RedisClusterClient clusterClient;
     private final ValueCommands<String, String> values;
     private final ReactiveValueCommands<String, String> reactiveValues;
     private final KeyCommands<String> keys;
@@ -89,10 +94,14 @@ public class LettuceBackendResource {
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs,
-            @RedisClientName("secure") RedisDataSource secureDs) {
+            @RedisClientName("secure") RedisDataSource secureDs,
+            @RedisClientName("cluster") RedisDataSource clusterDs,
+            @RedisClientName("cluster") RedisClusterClient clusterClient) {
         this.blocking = ds;
         this.reactive = reactiveDs;
         this.secure = secureDs;
+        this.cluster = clusterDs;
+        this.clusterClient = clusterClient;
         this.values = ds.value(String.class);
         this.reactiveValues = reactiveDs.value(String.class);
         this.keys = ds.key(String.class);
@@ -138,6 +147,74 @@ public class LettuceBackendResource {
     public String securePing() {
         Response response = secure.execute("PING");
         return response.toString();
+    }
+
+    /**
+     * Pings the {@code cluster} client, connected to the six-node Redis cluster ({@code client-type=cluster}).
+     */
+    @GET
+    @Path("/cluster/ping")
+    public String clusterPing() {
+        return cluster.execute("PING").toString();
+    }
+
+    /**
+     * The topology the {@code cluster} client discovered from its three seed nodes: the number of upstream nodes and
+     * of replicas.
+     */
+    @GET
+    @Path("/cluster/topology")
+    public String clusterTopology() {
+        int upstream = 0;
+        int replicas = 0;
+        for (RedisClusterNode node : clusterClient.getPartitions()) {
+            if (node.is(NodeFlag.UPSTREAM)) {
+                upstream++;
+            } else if (node.is(NodeFlag.REPLICA)) {
+                replicas++;
+            }
+        }
+        return upstream + "," + replicas;
+    }
+
+    @POST
+    @Path("/cluster/value/{key}")
+    public void clusterSetValue(@PathParam("key") String key, String value) {
+        cluster.value(String.class).set(key, value);
+    }
+
+    @GET
+    @Path("/cluster/value/{key}")
+    public String clusterGetValue(@PathParam("key") String key) {
+        return cluster.value(String.class).get(key);
+    }
+
+    /**
+     * Scans the keys of every node of the cluster.
+     */
+    @GET
+    @Path("/cluster/key/scan")
+    public Set<String> clusterKeyScan(@QueryParam("match") String match) {
+        KeyScanCursor<String> cursor = cluster.key(String.class).scan(new KeyScanArgs().match(match));
+        Set<String> collected = new HashSet<>();
+        while (cursor.hasNext()) {
+            collected.addAll(cursor.next());
+        }
+        return collected;
+    }
+
+    /**
+     * Transactions are not supported on a cluster: returns the message of the failure.
+     */
+    @POST
+    @Path("/cluster/with-transaction/{key}")
+    public String clusterWithTransaction(@PathParam("key") String key, String value) {
+        try {
+            cluster.withTransaction(tx -> tx.value(String.class, String.class).set(key, value));
+            return "unexpected success";
+        } catch (UnsupportedOperationException e) {
+            return e.getMessage();
+        }
     }
 
     /**
