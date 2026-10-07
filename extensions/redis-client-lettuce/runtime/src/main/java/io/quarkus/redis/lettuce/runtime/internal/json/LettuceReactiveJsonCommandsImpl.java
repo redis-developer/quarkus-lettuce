@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.json.JsonPath;
 import io.lettuce.core.json.JsonType;
 import io.lettuce.core.json.arguments.JsonRangeArgs;
@@ -19,6 +18,7 @@ import io.quarkus.redis.datasource.json.JsonSetArgs;
 import io.quarkus.redis.datasource.json.ReactiveJsonCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.json.Json;
@@ -38,7 +38,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     private final ReactiveRedisDataSource dataSource;
 
     public LettuceReactiveJsonCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType) {
+            LettuceConnection connection, Type keyType) {
         super(connection, keyType, keyType, new Marshaller(keyType));
         this.dataSource = dataSource;
     }
