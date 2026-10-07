@@ -21,7 +21,6 @@ import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
-import io.vertx.core.buffer.Buffer;
 import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -123,8 +122,8 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     <T> LettuceCommand<List<String>, T> _jsonGet(K key, Class<T> clazz) {
         nonNull(key, "key");
         nonNull(clazz, "clazz");
-        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key)), raw -> {
-            JsonObject object = decodeJsonObject(first(raw));
+        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key), JsonPath.ROOT_PATH), raw -> {
+            JsonObject object = decodeRootObject(first(raw));
             return object == null ? null : object.mapTo(clazz);
         });
     }
@@ -136,7 +135,8 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
 
     LettuceCommand<List<String>, JsonObject> _jsonGetObject(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key)), raw -> decodeJsonObject(first(raw)));
+        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key), JsonPath.ROOT_PATH),
+                raw -> decodeRootObject(first(raw)));
     }
 
     @Override
@@ -146,7 +146,8 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
 
     LettuceCommand<List<String>, JsonArray> _jsonGetArray(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key)), raw -> decodeJsonArray(first(raw)));
+        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key), JsonPath.ROOT_PATH),
+                raw -> decodeRootArray(first(raw)));
     }
 
     @Override
@@ -434,27 +435,28 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         if (isJsonNull(raw)) {
             return null;
         }
-        // With Redis 7.2 the response may be a nested array wrapping the object.
-        Buffer buffer = Buffer.buffer(raw, StandardCharsets.UTF_8.name());
-        if (buffer.toJsonValue() instanceof JsonArray array) {
-            if (array.isEmpty()) {
-                return null;
-            }
-            return array.getJsonObject(0);
-        }
-        return buffer.toJsonObject();
+        return new JsonObject(raw);
     }
 
-    static JsonArray decodeJsonArray(String raw) {
+    private static JsonArray rootMatches(String raw) {
         if (isJsonNull(raw)) {
             return null;
         }
-        // With Redis 7.2 the response may be a nested array wrapping the array.
-        JsonArray array = new JsonArray(raw);
-        if (array.size() == 1 && array.getValue(0) instanceof JsonArray nested) {
-            return nested;
+        JsonArray matches = new JsonArray(raw);
+        if (matches.isEmpty() || matches.getValue(0) == null) {
+            return null;
         }
-        return array;
+        return matches;
+    }
+
+    static JsonObject decodeRootObject(String raw) {
+        JsonArray matches = rootMatches(raw);
+        return matches == null ? null : matches.getJsonObject(0);
+    }
+
+    static JsonArray decodeRootArray(String raw) {
+        JsonArray matches = rootMatches(raw);
+        return matches == null ? null : matches.getJsonArray(0);
     }
 
     static JsonArray decodeJsonArrayFromJsonGet(String raw) {
