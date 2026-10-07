@@ -168,7 +168,7 @@
                         <configuration>
                             <images>
                                 <image>
-                                    <name>redis:8</name>
+                                    <name>redis:8-alpine</name>
                                     <alias>quarkus-test-redis</alias>
                                     <run>
                                         <ports>
@@ -188,7 +188,7 @@
                                     </run>
                                 </image>
                                 <image>
-                                    <name>redis:8</name>
+                                    <name>redis:8-alpine</name>
                                     <alias>quarkus-test-redis-tls</alias>
                                     <run>
                                         <ports>
