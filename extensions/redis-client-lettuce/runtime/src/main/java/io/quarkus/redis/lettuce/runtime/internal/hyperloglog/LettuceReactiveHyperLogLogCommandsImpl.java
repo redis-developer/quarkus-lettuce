@@ -6,11 +6,11 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
 
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.hyperloglog.ReactiveHyperLogLogCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -26,7 +26,7 @@ public class LettuceReactiveHyperLogLogCommandsImpl<K, V> extends AbstractLettuc
     private final ReactiveRedisDataSource dataSource;
 
     public LettuceReactiveHyperLogLogCommandsImpl(ReactiveRedisDataSource dataSource,
-            StatefulRedisConnection<byte[], byte[]> connection, Type keyType, Type valueType) {
+            LettuceConnection connection, Type keyType, Type valueType) {
         super(connection, keyType, valueType, new Marshaller(keyType, valueType));
         this.dataSource = dataSource;
     }

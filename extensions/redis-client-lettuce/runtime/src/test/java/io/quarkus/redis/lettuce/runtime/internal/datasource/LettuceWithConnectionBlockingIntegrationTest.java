@@ -12,9 +12,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import io.lettuce.core.api.StatefulRedisConnection;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.smallrye.mutiny.Uni;
 
@@ -107,9 +107,9 @@ class LettuceWithConnectionBlockingIntegrationTest extends CommandsTestBase {
 
     /** A data source whose connection release yields {@code release} instead of returning to the pool. */
     private static RedisDataSource withRelease(Uni<Void> release, Duration timeout) {
-        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, connection, pool()) {
+        LettuceReactiveRedisDataSourceImpl reactive = new LettuceReactiveRedisDataSourceImpl(vertx, lettuceConnection, pool()) {
             @Override
-            Uni<Void> releaseConnection(StatefulRedisConnection<byte[], byte[]> conn) {
+            Uni<Void> releaseConnection(LettuceConnection conn) {
                 return release;
             }
         };

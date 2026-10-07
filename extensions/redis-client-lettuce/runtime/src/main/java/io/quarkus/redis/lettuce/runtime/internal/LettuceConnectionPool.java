@@ -20,8 +20,7 @@ import java.util.function.Supplier;
 
 import org.jboss.logging.Logger;
 
-import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.support.AsyncConnectionPoolSupport;
+import io.lettuce.core.support.AsyncObjectFactory;
 import io.lettuce.core.support.BoundedAsyncPool;
 import io.lettuce.core.support.BoundedPoolConfig;
 import io.smallrye.mutiny.Uni;
@@ -29,9 +28,10 @@ import io.smallrye.mutiny.subscription.Cancellable;
 import io.vertx.core.Context;
 
 /**
- * Bounded pool of {@code StatefulRedisConnection<byte[], byte[]>}, used for blocking commands
- * and scoped connections ({@code withConnection}/{@code withTransaction}) so that they never
- * occupy the shared multiplexed connection used by ordinary commands.
+ * Bounded pool of {@link LettuceConnection}s (to a standalone server or to a cluster, see
+ * {@link LettuceConnectionFactory}), used for blocking commands and scoped connections
+ * ({@code withConnection}/{@code withTransaction}) so that they never occupy the shared multiplexed
+ * connection used by ordinary commands.
  * <p>
  * {@link BoundedAsyncPool#acquire()} fails immediately with a {@link NoSuchElementException}
  * once {@code maxTotal} connections are checked out — it has no waiting queue. This class adds
@@ -39,21 +39,23 @@ import io.vertx.core.Context;
  * <p>
  * Pooled connections must come back in the state a fresh connection has, or the next borrower
  * inherits it. {@code MULTI}/{@code WATCH} are undone by the transaction paths; {@code SELECT} is
- * undone here: a borrower that changes the database calls {@link #markDirty(StatefulRedisConnection)},
- * and {@link #release(StatefulRedisConnection)} issues {@code SELECT <defaultDatabase>} before the
+ * undone here: a borrower that changes the database calls {@link #markDirty(LettuceConnection)},
+ * and {@link #release(LettuceConnection)} issues {@code SELECT <defaultDatabase>} before the
  * connection is handed on. If that reset fails, the connection stays marked and the reset is retried
  * before it is next handed out; a borrower is never given a connection on the wrong database.
+ * A cluster has a single database, so cluster connections are never marked: a {@code SELECT} is
+ * rejected by the server and leaves nothing to reset.
  */
 public final class LettuceConnectionPool {
 
     private static final Logger LOGGER = Logger.getLogger(LettuceConnectionPool.class);
 
-    private final BoundedAsyncPool<StatefulRedisConnection<byte[], byte[]>> pool;
+    private final BoundedAsyncPool<LettuceConnection> pool;
     private final int maxWaiting;
     /** Database a fresh connection is on ({@code RedisURI.getDatabase()}), restored on release. */
     private final int defaultDatabase;
     /** Connections whose selected database may differ from {@link #defaultDatabase}. */
-    private final Set<StatefulRedisConnection<byte[], byte[]>> dirty = ConcurrentHashMap.newKeySet();
+    private final Set<LettuceConnection> dirty = ConcurrentHashMap.newKeySet();
 
     /**
      * Serializes "connection available, else queue me" against "anyone queued, else return the
@@ -76,29 +78,33 @@ public final class LettuceConnectionPool {
      * @param defaultDatabase database of a fresh connection, restored before a connection is reused
      *        after a borrower changed it
      */
-    public LettuceConnectionPool(Supplier<CompletionStage<StatefulRedisConnection<byte[], byte[]>>> connector,
+    public LettuceConnectionPool(Supplier<CompletionStage<LettuceConnection>> connector,
             int maxPoolSize, int maxWaiting, int defaultDatabase) {
         BoundedPoolConfig poolConfig = BoundedPoolConfig.builder()
                 .maxTotal(maxPoolSize)
                 .maxIdle(maxPoolSize)
                 .build();
-        this.pool = AsyncConnectionPoolSupport.createBoundedObjectPool(connector, poolConfig, false);
+        this.pool = new BoundedAsyncPool<>(new PooledConnectionFactory(connector), poolConfig);
         this.maxWaiting = maxWaiting;
         this.defaultDatabase = defaultDatabase;
     }
 
     /**
      * Records that {@code connection} may no longer be on {@link #defaultDatabase}, so that it is
-     * reset before anyone else uses it. Called by a borrower before it issues {@code SELECT}.
+     * reset before anyone else uses it. Called by a borrower before it issues {@code SELECT}. A
+     * cluster connection is never marked: a cluster has a single database, so the {@code SELECT}
+     * the borrower is about to issue is rejected and leaves nothing to reset.
      */
-    public void markDirty(StatefulRedisConnection<byte[], byte[]> connection) {
-        dirty.add(connection);
+    public void markDirty(LettuceConnection connection) {
+        if (!connection.isCluster()) {
+            dirty.add(connection);
+        }
     }
 
     /**
      * Whether {@code connection} is marked as possibly being on the wrong database.
      */
-    public boolean isDirty(StatefulRedisConnection<byte[], byte[]> connection) {
+    public boolean isDirty(LettuceConnection connection) {
         return dirty.contains(connection);
     }
 
@@ -107,7 +113,7 @@ public final class LettuceConnectionPool {
      * the request is withdrawn from the queue and a connection that arrives just as the caller
      * gives up is returned to the pool rather than leaked.
      */
-    public StatefulRedisConnection<byte[], byte[]> acquireBlocking(Duration timeout) {
+    public LettuceConnection acquireBlocking(Duration timeout) {
         if (Context.isOnEventLoopThread()) {
             throw new IllegalStateException("acquireBlocking must not be called from an event loop thread");
         }
@@ -133,11 +139,11 @@ public final class LettuceConnectionPool {
 
     /**
      * Releases a connection back to the pool, handing it straight to the next waiter if any. A
-     * connection marked by {@link #markDirty(StatefulRedisConnection)} is first put back on
+     * connection marked by {@link #markDirty(LettuceConnection)} is first put back on
      * {@link #defaultDatabase}; if that fails it is handed on still marked, and the reset is
      * retried before the next borrower gets it.
      */
-    public Uni<Void> release(StatefulRedisConnection<byte[], byte[]> connection) {
+    public Uni<Void> release(LettuceConnection connection) {
         if (!dirty.contains(connection)) {
             return handOver(connection);
         }
@@ -149,7 +155,7 @@ public final class LettuceConnectionPool {
                 .chain(() -> handOver(connection));
     }
 
-    private Uni<Void> handOver(StatefulRedisConnection<byte[], byte[]> connection) {
+    private Uni<Void> handOver(LettuceConnection connection) {
         while (true) {
             Request waiter;
             synchronized (lock) {
@@ -170,8 +176,8 @@ public final class LettuceConnectionPool {
      * Lettuce records the confirmed database in its connection state, so a later reconnect
      * replays the default database rather than the one the borrower selected.
      */
-    private Uni<Void> resetDatabase(StatefulRedisConnection<byte[], byte[]> connection) {
-        return LettuceResult.toUni(() -> connection.async().select(defaultDatabase))
+    private Uni<Void> resetDatabase(LettuceConnection connection) {
+        return LettuceResult.toUni(() -> connection.select(defaultDatabase))
                 .invoke(() -> dirty.remove(connection))
                 .replaceWithVoid();
     }
@@ -186,14 +192,14 @@ public final class LettuceConnectionPool {
         }
     }
 
-    private Uni<Void> releaseQuietly(StatefulRedisConnection<byte[], byte[]> connection) {
+    private Uni<Void> releaseQuietly(LettuceConnection connection) {
         return release(connection)
                 .onFailure().invoke(failure -> LOGGER.warnf(failure,
                         "Failed to release pooled Redis connection back to the pool"))
                 .onFailure().recoverWithNull();
     }
 
-    private void returnToPool(StatefulRedisConnection<byte[], byte[]> connection) {
+    private void returnToPool(LettuceConnection connection) {
         releaseQuietly(connection).subscribe().with(ignored -> {
         });
     }
@@ -202,7 +208,7 @@ public final class LettuceConnectionPool {
      * Runs {@code body} on a pooled connection, releasing it only once {@code body} truly
      * completes (item or failure) — never merely because the caller stopped waiting.
      */
-    public <T> Uni<T> withPooled(Function<StatefulRedisConnection<byte[], byte[]>, Uni<T>> body) {
+    public <T> Uni<T> withPooled(Function<LettuceConnection, Uni<T>> body) {
         return run(body, false);
     }
 
@@ -212,11 +218,11 @@ public final class LettuceConnectionPool {
      * termination of {@code body} — item, failure or cancellation. This is the shape used by
      * {@code withConnection} and {@code withTransaction}.
      */
-    public <T> Uni<T> withScoped(Function<StatefulRedisConnection<byte[], byte[]>, Uni<T>> body) {
+    public <T> Uni<T> withScoped(Function<LettuceConnection, Uni<T>> body) {
         return run(body, true);
     }
 
-    private <T> Uni<T> run(Function<StatefulRedisConnection<byte[], byte[]>, Uni<T>> body, boolean scoped) {
+    private <T> Uni<T> run(Function<LettuceConnection, Uni<T>> body, boolean scoped) {
         return Uni.createFrom().emitter(emitter -> {
             Request request = new Request();
             AtomicReference<Cancellable> running = new AtomicReference<>();
@@ -268,10 +274,10 @@ public final class LettuceConnectionPool {
         return pool.getIdle();
     }
 
-    private final class Request extends CompletableFuture<StatefulRedisConnection<byte[], byte[]>> {
+    private final class Request extends CompletableFuture<LettuceConnection> {
 
         void start() {
-            CompletableFuture<StatefulRedisConnection<byte[], byte[]>> acquired = null;
+            CompletableFuture<LettuceConnection> acquired = null;
             RuntimeException rejection = null;
             synchronized (lock) {
                 if (isDone()) {
@@ -313,7 +319,7 @@ public final class LettuceConnectionPool {
          * fails and the connection goes back to the pool, still marked, rather than being handed
          * out on the wrong database.
          */
-        boolean deliver(StatefulRedisConnection<byte[], byte[]> conn) {
+        boolean deliver(LettuceConnection conn) {
             if (!dirty.contains(conn)) {
                 return complete(conn);
             }
@@ -350,6 +356,35 @@ public final class LettuceConnectionPool {
             } catch (CompletionException e) {
                 return e.getCause() instanceof NoSuchElementException;
             }
+        }
+
+    }
+
+    /**
+     * Opens, validates and closes the pooled connections: the equivalent of the factory Lettuce's own
+     * {@code AsyncConnectionPoolSupport} uses, for a {@link LettuceConnection} rather than a Lettuce connection.
+     */
+    private static final class PooledConnectionFactory implements AsyncObjectFactory<LettuceConnection> {
+
+        private final Supplier<CompletionStage<LettuceConnection>> connector;
+
+        PooledConnectionFactory(Supplier<CompletionStage<LettuceConnection>> connector) {
+            this.connector = connector;
+        }
+
+        @Override
+        public CompletableFuture<LettuceConnection> create() {
+            return connector.get().toCompletableFuture();
+        }
+
+        @Override
+        public CompletableFuture<Void> destroy(LettuceConnection connection) {
+            return connection.closeAsync();
+        }
+
+        @Override
+        public CompletableFuture<Boolean> validate(LettuceConnection connection) {
+            return CompletableFuture.completedFuture(connection.isOpen());
         }
 
     }

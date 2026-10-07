@@ -51,6 +51,62 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void clusterPing() {
+        RestAssured.given()
+                .when()
+                .get("/lettuce/cluster/ping")
+                .then()
+                .statusCode(200)
+                .body(CoreMatchers.is("PONG"));
+    }
+
+    @Test
+    public void clusterTopologyIsDiscoveredFromTheSeeds() {
+        // three seeds are configured, the three replicas are discovered
+        RestAssured.given()
+                .when()
+                .get("/lettuce/cluster/topology")
+                .then()
+                .statusCode(200)
+                .body(CoreMatchers.is("3,3"));
+    }
+
+    @Test
+    public void clusterValueSetGet() {
+        // keys hashing to different slots, so they live on different nodes
+        for (int i = 0; i < 10; i++) {
+            String key = getKey("cluster-value-" + i);
+            RestAssured.given().body("v" + i).when().post("/lettuce/cluster/value/" + key).then().statusCode(204);
+        }
+        for (int i = 0; i < 10; i++) {
+            String key = getKey("cluster-value-" + i);
+            RestAssured.given().when().get("/lettuce/cluster/value/" + key).then()
+                    .statusCode(200).body(CoreMatchers.is("v" + i));
+        }
+    }
+
+    @Test
+    public void clusterKeyScan() {
+        String prefix = getKey("cluster-scan-");
+        for (int i = 0; i < 5; i++) {
+            RestAssured.given().body("v").when().post("/lettuce/cluster/value/" + prefix + i).then().statusCode(204);
+        }
+        RestAssured.given().queryParam("match", prefix + "*").when().get("/lettuce/cluster/key/scan").then()
+                .statusCode(200)
+                .body("$", CoreMatchers.hasItems(prefix + "0", prefix + "1", prefix + "2", prefix + "3", prefix + "4"))
+                .body("size()", CoreMatchers.is(5));
+    }
+
+    @Test
+    public void clusterRejectsTransactions() {
+        String key = getKey("cluster-tx");
+        RestAssured.given().body("v").when().post("/lettuce/cluster/with-transaction/" + key).then()
+                .statusCode(200)
+                .body(CoreMatchers.containsString("not supported on a Redis cluster"));
+        RestAssured.given().when().get("/lettuce/cluster/value/" + key).then().statusCode(204);
+    }
+
+    @Test
     public void dataSourcesAreServedByLettuce() {
         RestAssured.given()
                 .when()
