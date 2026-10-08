@@ -1106,11 +1106,15 @@ extension to your application:
 Adding the dependency is the only switch: the extension builds on `quarkus-redis-client`, so clients are
 configured with the same `quarkus.redis.*` properties and the Redis Dev Services work unchanged.
 In this initial version the Lettuce data sources apply `quarkus.redis[.<name>].hosts`, `client-type` (`standalone`,
-the default, and `cluster`, see <<lettuce-cluster>>), `password`, `tls.*`, `tls-configuration-name`,
-`tcp.secure-transport-protocols`, `timeout`, `active`, `max-pool-size` and `max-pool-waiting` (see
-<<connection-pooling-and-blocking-commands>>), and for a cluster `replicas` and `topology-cache-ttl`:
+the default, `cluster`, see <<lettuce-cluster>>, `sentinel` and `replication`, see <<lettuce-sentinel>>), `password`,
+`tls.*`, `tls-configuration-name`, `tcp.secure-transport-protocols`, `timeout`, `active`, `max-pool-size` and
+`max-pool-waiting` (see <<connection-pooling-and-blocking-commands>>), for a cluster `replicas` and
+`topology-cache-ttl`, for a Sentinel client `master-name`, `role`, `auto-failover` and `replicas`, and for a
+replication client `topology` and `replicas`:
 
-* A standalone client connects to the first URI of `hosts`; a cluster client discovers the cluster from all of them.
+* A standalone client connects to the first URI of `hosts`; a cluster client discovers the cluster from all of them;
+a Sentinel client takes them as the sentinels; a replication client as the nodes, or discovers the nodes from the
+first one.
 * The credentials are set with `password` or encoded in the URI, for example `redis://user:password@host:6379` or
 `redis://:password@host:6379`.
 The URI is read as the Vert.x Redis client reads it: a password encoded in the URI takes precedence over
@@ -1135,9 +1139,8 @@ the value at a percent-encoded `&`.
 * The `LDAPS` hostname verification algorithm verifies the host name with the `HTTPS` rules, the only ones Lettuce
 supports.
 
-The other client properties (the `replication` and `sentinel` client types and their settings, the remaining pool
-settings, `max-waiting-handlers`, `max-nested-arrays`, `cluster-transactions`, `client-name`, the remaining `tcp.*`
-properties, ...) are not applied yet: the extension logs a warning at startup listing the configured properties it
+The other client properties (the remaining pool settings, `max-waiting-handlers`, `max-nested-arrays`,
+`cluster-transactions`, `client-name`, the remaining `tcp.*` properties, ...) are not applied yet: the extension logs a warning at startup listing the configured properties it
 ignores, and a client configured only through `hosts-provider-name` is deactivated.
 Lettuce and the libraries it needs in native mode (`LatencyUtils`, `HdrHistogram`) are pulled in transitively.
 
@@ -1190,6 +1193,49 @@ The Lettuce beans of a cluster client are `io.lettuce.core.cluster.RedisClusterC
 `io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>` (see below); the `RedisClient` and
 `StatefulRedisConnection<String, String>` beans of such a client are inactive and name the types to inject instead.
 
+[[lettuce-sentinel]]
+=== Redis Sentinel and replication
+
+With `quarkus.redis[.<name>].client-type=sentinel` the data sources connect to the master that the configured hosts,
+the sentinels, monitor under `master-name`; with `client-type=replication` they connect to a master and its replicas
+addressed directly, as described in <<use-the-sentinel-mode>> and <<use-the-replication-mode>>:
+
+[source,properties]
+----
+quarkus.redis.hosts=redis://sentinel1:26379,redis://sentinel2:26379,redis://sentinel3:26379
+quarkus.redis.client-type=sentinel
+quarkus.redis.master-name=mymaster
+----
+
+Both are the same Lettuce feature, a master/replica connection: the writes go to the master, the read-only commands
+to the nodes selected by `replicas`, as for a cluster. The connection behaves like a standalone one otherwise:
+transactions, `WATCH`, `SELECT` and scoped connections work as described above. The Lettuce beans of such a client
+are `io.lettuce.core.RedisClient`, `io.lettuce.core.api.StatefulRedisConnection<String, String>` and, for the same
+connection, `io.lettuce.core.masterreplica.StatefulRedisMasterReplicaConnection<String, String>`.
+
+For a Sentinel client:
+
+* The credentials and the TLS settings apply to the sentinels as well as to the data nodes, as with the Vert.x client.
+* `role=master` (the default) and `role=replica` select the nodes the read-only commands go to; with `role=replica`
+the writes still go to the master, where the Vert.x client sends them to the replica, which rejects them.
+`role=sentinel` connects the Vert.x client to a sentinel node itself; a sentinel has no data commands, so the Lettuce
+backend rejects it at startup.
+* `replicas` is applied, where the Vert.x client ignores it in Sentinel mode: with `replicas=share` or `always`, the
+reads go to the replicas the sentinels report. With `role=replica`, which already sends the reads to the replicas,
+`replicas` is not applied, and the startup warning says so.
+* A failover is always followed: Lettuce subscribes to the sentinel events and switches to the newly elected master
+on its own, whatever `auto-failover` says. There is no mode without it.
+* `topology-cache-ttl` has no equivalent: the topology is pushed by the sentinels.
+
+For a replication client:
+
+* With `topology=discover` (the default), the master and its replicas are discovered through `INFO replication` when
+a connection is opened, from the first host that answers: the hosts are tried in order, as the Vert.x client tries
+its endpoints. With `topology=static`, the hosts are the nodes, and only them; Lettuce asks each for its role rather
+than trusting the configured order, so the master need not be the first host.
+* The topology is discovered when a connection is opened and kept for its lifetime: it is not refreshed
+periodically, and `topology-cache-ttl` has no effect. Use a Sentinel client when the master can change.
+
 The key, value (string), hash, list, set, sorted set, bitmap, hyperloglog, geo and count-min command groups are
 implemented on the Lettuce backend, including their transactional variants. The other groups (stream, pub/sub, JSON,
 bloom, cuckoo, top-k, graph, search, autosuggest and time series) are not implemented yet and throw an
@@ -1224,7 +1270,8 @@ it would without pooling.
 
 The extension also exposes the Lettuce client itself as CDI beans for every client that is injected through a
 Lettuce type (using `@RedisClientName` for named clients): `io.lettuce.core.RedisClient` and
-`io.lettuce.core.api.StatefulRedisConnection<String, String>` for a standalone client,
+`io.lettuce.core.api.StatefulRedisConnection<String, String>` for a standalone, Sentinel or replication client (for
+the last two also as `io.lettuce.core.masterreplica.StatefulRedisMasterReplicaConnection<String, String>`),
 `io.lettuce.core.cluster.RedisClusterClient` and
 `io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>` for a cluster client, and the shared
 `io.lettuce.core.resource.ClientResources` (backed by the Vert.x event loops).

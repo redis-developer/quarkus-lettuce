@@ -332,7 +332,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                     return LettuceResult.toUni(() -> conn.exec())
                             .chain(execResult -> execResult == null || execResult.wasDiscarded()
                                     ? Uni.createFrom().item(TransactionResultImpl.DISCARDED)
-                                    : holder.toResult());
+                                    : Uni.createFrom().item(holder.toResult(execResult)));
                 });
     }
 
@@ -366,7 +366,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                                     .chain(execResult -> execResult == null || execResult.wasDiscarded()
                                             ? Uni.createFrom()
                                                     .item(OptimisticLockingTransactionResultImpl.discarded(input))
-                                            : holder.toOptimisticLockingResult(input));
+                                            : Uni.createFrom().item(holder.toOptimisticLockingResult(input, execResult)));
                         }));
     }
 

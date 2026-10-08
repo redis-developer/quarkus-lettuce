@@ -208,7 +208,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
             if (execResult == null || execResult.wasDiscarded()) {
                 return OptimisticLockingTransactionResultImpl.discarded(input);
             }
-            return holder.toOptimisticLockingResult(input).await().atMost(timeout);
+            return holder.toOptimisticLockingResult(input, execResult);
         });
     }
 
@@ -306,7 +306,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         if (execResult == null || execResult.wasDiscarded()) {
             return TransactionResultImpl.DISCARDED;
         }
-        return holder.toResult().await().atMost(timeout);
+        return holder.toResult(execResult);
     }
 
     @Override
