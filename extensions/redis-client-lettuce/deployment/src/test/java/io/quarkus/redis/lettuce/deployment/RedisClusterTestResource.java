@@ -15,7 +15,7 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 
 /**
  * A Redis cluster of six nodes (three upstream nodes with one replica each) running in a single container, see
- * {@code redis-cluster/start-cluster.sh}, for the cluster tests. Exposes:
+ * {@code redis/start-cluster.sh}, for the cluster tests. Exposes:
  * <ul>
  * <li>{@code redis.cluster.hosts}: the {@code redis://} URIs of the first three nodes, the seeds the clients discover
  * the topology from (a few nodes only, as the other three are to be discovered);</li>
@@ -37,7 +37,7 @@ public class RedisClusterTestResource implements QuarkusTestResourceLifecycleMan
     static final List<Integer> PORTS = TestPorts.free(NODES);
 
     static final GenericContainer<?> CLUSTER = new RedisClusterContainer(PORTS)
-            .withCopyFileToContainer(MountableFile.forClasspathResource("redis-cluster/start-cluster.sh", 0755),
+            .withCopyFileToContainer(MountableFile.forClasspathResource("redis/start-cluster.sh", 0755),
                     "/start-cluster.sh")
             .withCommand(command())
             // the output of redis-cli --cluster create and of the nodes, to diagnose a cluster that does not come up

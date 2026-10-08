@@ -213,7 +213,7 @@
                                 </image>
                                 <!-- Six-node cluster (three upstream nodes with one replica each) in one container, started
                                      by the script the deployment tests use too (extensions/redis-client-lettuce/deployment/
-                                     src/test/resources/redis-cluster/start-cluster.sh): the nodes announce 127.0.0.1 and
+                                     src/test/resources/redis/start-cluster.sh): the nodes announce 127.0.0.1 and
                                      their own port, so every port is published on the same host port -->
                                 <image>
                                     <name>redis:8</name>
@@ -229,10 +229,10 @@
                                         </ports>
                                         <volumes>
                                             <bind>
-                                                <volume>${project.basedir}/../../extensions/redis-client-lettuce/deployment/src/test/resources/redis-cluster:/cluster${volume.access.modifier}</volume>
+                                                <volume>${project.basedir}/../../extensions/redis-client-lettuce/deployment/src/test/resources/redis:/redis${volume.access.modifier}</volume>
                                             </bind>
                                         </volumes>
-                                        <cmd>sh /cluster/start-cluster.sh 6400 6401 6402 6403 6404 6405</cmd>
+                                        <cmd>sh /redis/start-cluster.sh 6400 6401 6402 6403 6404 6405</cmd>
                                         <log>
                                             <prefix>Redis cluster:</prefix>
                                             <date>default</date>
@@ -246,7 +246,7 @@
                                 </image>
                                 <!-- Sentinel deployment (a master, its replica and three sentinels) in one container, started
                                      by the script the deployment tests use too (extensions/redis-client-lettuce/deployment/
-                                     src/test/resources/redis-cluster/start-sentinel.sh): every process announces 127.0.0.1
+                                     src/test/resources/redis/start-sentinel.sh): every process announces 127.0.0.1
                                      and its own port, so every port is published on the same host port -->
                                 <image>
                                     <name>redis:8</name>
@@ -264,10 +264,10 @@
                                         </env>
                                         <volumes>
                                             <bind>
-                                                <volume>${project.basedir}/../../extensions/redis-client-lettuce/deployment/src/test/resources/redis-cluster:/cluster${volume.access.modifier}</volume>
+                                                <volume>${project.basedir}/../../extensions/redis-client-lettuce/deployment/src/test/resources/redis:/redis${volume.access.modifier}</volume>
                                             </bind>
                                         </volumes>
-                                        <cmd>sh /cluster/start-sentinel.sh 6500 6501 6502 6503 6504</cmd>
+                                        <cmd>sh /redis/start-sentinel.sh 6500 6501 6502 6503 6504</cmd>
                                         <log>
                                             <prefix>Redis sentinel:</prefix>
                                             <date>default</date>

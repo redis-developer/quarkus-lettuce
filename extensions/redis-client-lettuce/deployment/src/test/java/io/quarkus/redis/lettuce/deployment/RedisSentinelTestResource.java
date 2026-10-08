@@ -14,7 +14,7 @@ import org.testcontainers.utility.MountableFile;
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 
 /**
- * A Redis Sentinel deployment running in a single container, see {@code redis-cluster/start-sentinel.sh}: one
+ * A Redis Sentinel deployment running in a single container, see {@code redis/start-sentinel.sh}: one
  * master, one replica and three sentinels monitoring the master as {@value #MASTER_NAME}. It doubles as the
  * replication deployment (the master and its replica) of the replication client tests. Exposes:
  * <ul>
@@ -41,7 +41,7 @@ public class RedisSentinelTestResource implements QuarkusTestResourceLifecycleMa
     static final List<Integer> PORTS = TestPorts.free(2 + SENTINELS);
 
     static final GenericContainer<?> SENTINEL = new RedisSentinelContainer(PORTS)
-            .withCopyFileToContainer(MountableFile.forClasspathResource("redis-cluster/start-sentinel.sh", 0755),
+            .withCopyFileToContainer(MountableFile.forClasspathResource("redis/start-sentinel.sh", 0755),
                     "/start-sentinel.sh")
             .withEnv("MASTER_NAME", MASTER_NAME)
             .withCommand(command())
