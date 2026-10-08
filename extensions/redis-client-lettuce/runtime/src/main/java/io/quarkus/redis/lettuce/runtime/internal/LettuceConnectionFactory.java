@@ -295,20 +295,6 @@ public class LettuceConnectionFactory {
     }
 
     /**
-     * Whether this factory connects to a cluster.
-     */
-    public boolean isCluster() {
-        return topology instanceof Cluster;
-    }
-
-    /**
-     * Whether this factory opens master/replica connections (Sentinel or replication client).
-     */
-    public boolean isMasterReplica() {
-        return topology instanceof MasterReplica;
-    }
-
-    /**
      * Returns the underlying Lettuce client: a {@link RedisClient} or a {@link RedisClusterClient}.
      */
     public AbstractRedisClient getClient() {
