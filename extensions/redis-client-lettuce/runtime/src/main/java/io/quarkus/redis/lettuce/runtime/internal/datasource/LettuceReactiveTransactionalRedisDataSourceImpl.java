@@ -29,8 +29,6 @@ import io.quarkus.redis.datasource.value.ReactiveTransactionalValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
-import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveAutoSuggestCommandsImpl;
-import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveTransactionalAutoSuggestCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveTransactionalBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveCountMinCommandsImpl;
@@ -84,7 +82,7 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public Uni<Void> discard() {
-        return LettuceResult.toUni(connection::discard)
+        return LettuceResult.toUni(() -> connection.discard())
                 .invoke(tx::discard)
                 .replaceWithVoid();
     }
@@ -241,10 +239,7 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K> ReactiveTransactionalAutoSuggestCommands<K> autosuggest(Class<K> redisKeyType) {
-        nonNull(redisKeyType, "redisKeyType");
-        LettuceReactiveAutoSuggestCommandsImpl<K> reactiveAutoSuggest = (LettuceReactiveAutoSuggestCommandsImpl<K>) reactive
-                .autosuggest(redisKeyType);
-        return new LettuceReactiveTransactionalAutoSuggestCommandsImpl<>(this, reactiveAutoSuggest, tx);
+        throw groupNotImplemented("autosuggest");
     }
 
     @Override

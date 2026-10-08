@@ -46,7 +46,6 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
-import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveAutoSuggestCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveCountMinCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveGeoCommandsImpl;
@@ -321,7 +320,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
         Uni<Void> watch = watchedKeys == null ? Uni.createFrom().voidItem() : watch(conn, watchedKeys);
         return watch
-                .chain(() -> LettuceResult.toUni(conn::multi).replaceWithVoid())
+                .chain(() -> LettuceResult.toUni(() -> conn.multi()).replaceWithVoid())
                 .chain(() -> Uni.createFrom().deferred(() -> tx.apply(txDs)))
                 .onItemOrFailure().transformToUni((x, failure) -> {
                     if (failure != null) {
@@ -330,7 +329,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                     if (holder.discarded()) {
                         return Uni.createFrom().item(TransactionResultImpl.DISCARDED);
                     }
-                    return LettuceResult.toUni(conn::exec)
+                    return LettuceResult.toUni(() -> conn.exec())
                             .chain(execResult -> execResult == null || execResult.wasDiscarded()
                                     ? Uni.createFrom().item(TransactionResultImpl.DISCARDED)
                                     : holder.toResult());
@@ -347,14 +346,14 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
         return watch(conn, watchedKeys)
                 .chain(() -> Uni.createFrom().deferred(() -> preTx.apply(pinnedDs)))
-                .onFailure().recoverWithUni(failure -> LettuceResult.toUni(conn::unwatch)
+                .onFailure().recoverWithUni(failure -> LettuceResult.toUni(() -> conn.unwatch())
                         .onItemOrFailure().transformToUni((r, f) -> {
                             if (f != null) {
                                 failure.addSuppressed(f);
                             }
                             return Uni.createFrom().failure(failure);
                         }))
-                .chain(input -> LettuceResult.toUni(conn::multi).replaceWithVoid()
+                .chain(input -> LettuceResult.toUni(() -> conn.multi()).replaceWithVoid()
                         .chain(() -> Uni.createFrom().deferred(() -> tx.apply(input, txDs)))
                         .onItemOrFailure().transformToUni((x, failure) -> {
                             if (failure != null) {
@@ -363,7 +362,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                             if (holder.discarded()) {
                                 return Uni.createFrom().item(OptimisticLockingTransactionResultImpl.discarded(input));
                             }
-                            return LettuceResult.toUni(conn::exec)
+                            return LettuceResult.toUni(() -> conn.exec())
                                     .chain(execResult -> execResult == null || execResult.wasDiscarded()
                                             ? Uni.createFrom()
                                                     .item(OptimisticLockingTransactionResultImpl.discarded(input))
@@ -394,7 +393,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         if (holder.discarded()) {
             return Uni.createFrom().failure(failure);
         }
-        return LettuceResult.toUni(conn::discard)
+        return LettuceResult.toUni(() -> conn.discard())
                 .onItemOrFailure().transformToUni((r, f) -> {
                     if (f != null) {
                         failure.addSuppressed(f);
@@ -625,14 +624,12 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K> ReactiveAutoSuggestCommands<K> autosuggest(Class<K> redisKeyType) {
-        nonNull(redisKeyType, "redisKeyType");
-        return new LettuceReactiveAutoSuggestCommandsImpl<>(this, connection, redisKeyType);
+        throw groupNotImplemented("autosuggest");
     }
 
     @Override
     public <K> ReactiveAutoSuggestCommands<K> autosuggest(TypeReference<K> redisKeyType) {
-        nonNull(redisKeyType, "redisKeyType");
-        return new LettuceReactiveAutoSuggestCommandsImpl<>(this, connection, redisKeyType.getType());
+        throw groupNotImplemented("autosuggest");
     }
 
     @Override
