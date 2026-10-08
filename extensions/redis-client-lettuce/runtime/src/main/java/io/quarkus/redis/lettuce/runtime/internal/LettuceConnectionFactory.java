@@ -59,6 +59,19 @@ public class LettuceConnectionFactory {
             CommandType.BLPOP, CommandType.BRPOP, CommandType.BLMOVE, CommandType.BLMPOP, CommandType.BRPOPLPUSH,
             CommandType.BZPOPMIN, CommandType.BZPOPMAX, CommandType.BZMPOP);
 
+    /**
+     * How the master and the replicas of a Sentinel or replication client are found, see
+     * {@link #LettuceConnectionFactory(String, ClientResources, MasterReplicaMode, List, ClientOptions, ReadFrom, Duration)}.
+     */
+    public enum MasterReplicaMode {
+        /** The sentinels of a single sentinel URI report the master and its replicas, and every failover. */
+        SENTINEL,
+        /** The master and its replicas are discovered from a Redis URI ({@code INFO replication}). */
+        DISCOVER,
+        /** The Redis URIs are the nodes, each asked for its role. */
+        STATIC
+    }
+
     private final Topology topology;
 
     /**
@@ -120,47 +133,56 @@ public class LettuceConnectionFactory {
 
     /**
      * Creates a Lettuce {@link RedisClient} whose connections are master/replica connections built by
-     * {@link io.lettuce.core.masterreplica.MasterReplica}:
+     * {@link io.lettuce.core.masterreplica.MasterReplica}, the nodes found as {@code mode} says:
      * <ul>
-     * <li>{@code nodes} is a single URI with sentinels (see {@link LettuceClientSettings#sentinelUri}): the
-     * connections follow the master the sentinels monitor, and the replicas they report; Lettuce subscribes to the
-     * sentinel events, so a failover is followed without any reconnection by the caller;</li>
-     * <li>{@code nodes} is a single Redis URI: the master and its replicas are discovered from that node
-     * ({@code INFO replication}) when a connection is opened;</li>
-     * <li>{@code nodes} are several Redis URIs: they are the nodes, each asked for its role when a connection is
-     * opened.</li>
+     * <li>{@link MasterReplicaMode#SENTINEL}: {@code nodes} is a single URI with sentinels (see
+     * {@link LettuceClientSettings#sentinelUri}); the connections follow the master the sentinels monitor, and the
+     * replicas they report; Lettuce subscribes to the sentinel events, so a failover is followed without any
+     * reconnection by the caller;</li>
+     * <li>{@link MasterReplicaMode#DISCOVER}: the master and its replicas are discovered from the first of the Redis
+     * URIs in {@code nodes} ({@code INFO replication}) when a connection is opened;</li>
+     * <li>{@link MasterReplicaMode#STATIC}: the Redis URIs in {@code nodes} are the nodes, however many, each asked
+     * for its role when a connection is opened.</li>
      * </ul>
      * The last two keep the topology they discovered for the life of the connection. All write to the master and
      * read from the nodes {@code readFrom} selects.
      *
      * @param clientName the Quarkus Redis client name, used for logging
      * @param clientResources shared client resources (with Vert.x event loops)
+     * @param mode how the nodes are found
      * @param nodes the sentinel URI, or the Redis URI(s), as described above
      * @param clientOptions the client options, carrying the TLS material (see {@link LettuceClientSettings}); the
      *        command timeout options are added to them
      * @param readFrom the nodes read-only commands are sent to (see {@link LettuceClientSettings#readFrom})
      * @param timeout the {@code quarkus.redis.timeout} applied to non-blocking commands
      */
-    public LettuceConnectionFactory(String clientName, ClientResources clientResources, List<RedisURI> nodes,
-            ClientOptions clientOptions, ReadFrom readFrom, Duration timeout) {
+    public LettuceConnectionFactory(String clientName, ClientResources clientResources, MasterReplicaMode mode,
+            List<RedisURI> nodes, ClientOptions clientOptions, ReadFrom readFrom, Duration timeout) {
+        nonNull(mode, "mode");
         nonNull(nodes, "nodes");
         nonNull(readFrom, "readFrom");
         if (nodes.isEmpty()) {
             throw new IllegalArgumentException("At least one node is required for the Redis client " + clientName);
         }
         RedisURI first = nodes.get(0);
-        if (nodes.size() == 1 && !first.getSentinels().isEmpty()) {
-            LOGGER.infof(
+        if (mode == MasterReplicaMode.SENTINEL && (nodes.size() != 1 || first.getSentinels().isEmpty())) {
+            throw new IllegalArgumentException("A single URI naming the sentinels is required for the Sentinel Redis client "
+                    + clientName);
+        }
+        String tls = first.isSsl() ? " (TLS)" : "";
+        switch (mode) {
+            case SENTINEL -> LOGGER.infof(
                     "Creating Lettuce RedisClient '%s' for the master '%s' monitored by the sentinels %s%s, reading from %s",
-                    clientName, first.getSentinelMasterId(), describe(first.getSentinels()), first.isSsl() ? " (TLS)" : "",
-                    describe(readFrom));
-        } else {
-            LOGGER.infof("Creating Lettuce RedisClient '%s' for the replication nodes %s%s, reading from %s", clientName,
-                    describe(nodes), first.isSsl() ? " (TLS)" : "", describe(readFrom));
+                    clientName, first.getSentinelMasterId(), describe(first.getSentinels()), tls, describe(readFrom));
+            case DISCOVER -> LOGGER.infof(
+                    "Creating Lettuce RedisClient '%s' discovering the replication topology from %s%s, reading from %s",
+                    clientName, describe(nodes), tls, describe(readFrom));
+            case STATIC -> LOGGER.infof("Creating Lettuce RedisClient '%s' for the replication nodes %s%s, reading from %s",
+                    clientName, describe(nodes), tls, describe(readFrom));
         }
         RedisClient client = RedisClient.create(clientResources);
         client.setOptions(withCommandTimeout(clientOptions, timeout));
-        this.topology = new MasterReplica(client, List.copyOf(nodes), readFrom);
+        this.topology = new MasterReplica(client, mode, List.copyOf(nodes), readFrom);
     }
 
     /**
@@ -408,12 +430,16 @@ public class LettuceConnectionFactory {
     /**
      * A master and its replicas, managed by Redis Sentinel or addressed directly: master/replica connections built by
      * Lettuce's {@code io.lettuce.core.masterreplica.MasterReplica} (named in full, as this record takes its name)
-     * from a single sentinel URI, a single Redis URI to discover the topology from, or the Redis URIs of the nodes,
-     * writing to the master and reading from the nodes {@code readFrom} selects. The connections are
-     * {@link io.lettuce.core.api.StatefulRedisConnection}s, so they take the standalone path of
+     * from the single sentinel URI, from the Redis URI to discover the topology from, or from the Redis URIs of the
+     * nodes, as {@code mode} says (Lettuce decides between its sentinel, autodiscovery and static connectors by the
+     * shape of what it is given: a single Redis URI means autodiscovery to it, so the mode, not the number of nodes,
+     * picks the overload). The connections write to the master and read from the nodes {@code readFrom} selects.
+     * They are {@link io.lettuce.core.api.StatefulRedisConnection}s, so they take the standalone path of
      * {@link LettuceConnection}. The database is the one of the first node.
      */
-    private record MasterReplica(RedisClient client, List<RedisURI> nodes, ReadFrom readFrom) implements Topology {
+    private record MasterReplica(RedisClient client, MasterReplicaMode mode, List<RedisURI> nodes, ReadFrom readFrom)
+            implements
+                Topology {
 
         @Override
         public LettuceConnection connect() {
@@ -436,18 +462,21 @@ public class LettuceConnectionFactory {
         }
 
         private <K, V> StatefulRedisMasterReplicaConnection<K, V> connectMasterReplica(RedisCodec<K, V> codec) {
-            StatefulRedisMasterReplicaConnection<K, V> connection = nodes.size() == 1
-                    ? io.lettuce.core.masterreplica.MasterReplica.connect(client, codec, nodes.get(0))
-                    : io.lettuce.core.masterreplica.MasterReplica.connect(client, codec, nodes);
+            StatefulRedisMasterReplicaConnection<K, V> connection = switch (mode) {
+                case SENTINEL, DISCOVER -> io.lettuce.core.masterreplica.MasterReplica.connect(client, codec, nodes.get(0));
+                case STATIC -> io.lettuce.core.masterreplica.MasterReplica.connect(client, codec, nodes);
+            };
             connection.setReadFrom(readFrom);
             return connection;
         }
 
         private <K, V> CompletionStage<StatefulRedisMasterReplicaConnection<K, V>> connectMasterReplicaAsync(
                 RedisCodec<K, V> codec) {
-            CompletionStage<StatefulRedisMasterReplicaConnection<K, V>> connecting = nodes.size() == 1
-                    ? io.lettuce.core.masterreplica.MasterReplica.connectAsync(client, codec, nodes.get(0))
-                    : io.lettuce.core.masterreplica.MasterReplica.connectAsync(client, codec, nodes);
+            CompletionStage<StatefulRedisMasterReplicaConnection<K, V>> connecting = switch (mode) {
+                case SENTINEL, DISCOVER -> io.lettuce.core.masterreplica.MasterReplica.connectAsync(client, codec,
+                        nodes.get(0));
+                case STATIC -> io.lettuce.core.masterreplica.MasterReplica.connectAsync(client, codec, nodes);
+            };
             return connecting.thenApply(connection -> {
                 connection.setReadFrom(readFrom);
                 return connection;

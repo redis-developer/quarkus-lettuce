@@ -23,7 +23,8 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
  * <li>{@code redis.replication.hosts}: the URIs of the master and the replica, in that order at startup (a
  * failover test may swap their roles; the clients ask the nodes for their roles);</li>
  * <li>{@code redis.replication.reversed-hosts}: the same two URIs, replica first;</li>
- * <li>{@code redis.replication.master}: the URI of the node that is the master at startup.</li>
+ * <li>{@code redis.replication.master}: the URI of the node that is the master at startup;</li>
+ * <li>{@code redis.replication.replica}: the URI of the node that is the replica at startup.</li>
  * </ul>
  * Like the cluster, every process announces {@code 127.0.0.1} and a port that is the same inside the container and
  * on the host, as the sentinels hand those addresses to the clients and the replica uses them too. The ports are
@@ -77,7 +78,8 @@ public class RedisSentinelTestResource implements QuarkusTestResourceLifecycleMa
                 "redis.sentinel.master-name", MASTER_NAME,
                 "redis.replication.hosts", hosts(PORTS.subList(0, 2)),
                 "redis.replication.reversed-hosts", hosts(List.of(PORTS.get(1), PORTS.get(0))),
-                "redis.replication.master", hosts(PORTS.subList(0, 1)));
+                "redis.replication.master", hosts(PORTS.subList(0, 1)),
+                "redis.replication.replica", hosts(PORTS.subList(1, 2)));
     }
 
     @Override

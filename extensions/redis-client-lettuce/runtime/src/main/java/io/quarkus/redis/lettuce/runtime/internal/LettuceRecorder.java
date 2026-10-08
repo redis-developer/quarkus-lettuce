@@ -24,6 +24,7 @@ import io.netty.channel.EventLoopGroup;
 import io.quarkus.arc.ActiveResult;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionFactory.MasterReplicaMode;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceBlockingRedisDataSourceImpl;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceReactiveRedisDataSourceImpl;
 import io.quarkus.redis.runtime.client.config.NetConfig;
@@ -128,14 +129,16 @@ public class LettuceRecorder {
                             name, getPropertyName(name, "role")));
                 }
                 RedisURI master = settings.sentinelUri(config.masterName().orElse(DEFAULT_MASTER_NAME));
-                yield new LettuceConnectionFactory(name, resources, List.of(master), settings.clientOptions(),
-                        LettuceClientSettings.readFrom(config.role(), config.replicas()), config.timeout());
+                yield new LettuceConnectionFactory(name, resources, MasterReplicaMode.SENTINEL, List.of(master),
+                        settings.clientOptions(), LettuceClientSettings.readFrom(config.role(), config.replicas()),
+                        config.timeout());
             }
             case REPLICATION -> {
-                List<RedisURI> nodes = config.topology().orElse(RedisTopology.DISCOVER) == RedisTopology.STATIC
-                        ? settings.redisUris()
-                        : List.of(settings.redisUri());
-                yield new LettuceConnectionFactory(name, resources, nodes, settings.clientOptions(),
+                MasterReplicaMode mode = config.topology().orElse(RedisTopology.DISCOVER) == RedisTopology.STATIC
+                        ? MasterReplicaMode.STATIC
+                        : MasterReplicaMode.DISCOVER;
+                List<RedisURI> nodes = mode == MasterReplicaMode.STATIC ? settings.redisUris() : List.of(settings.redisUri());
+                yield new LettuceConnectionFactory(name, resources, mode, nodes, settings.clientOptions(),
                         LettuceClientSettings.readFrom(config.replicas()), config.timeout());
             }
             case STANDALONE -> new LettuceConnectionFactory(name, resources, settings.redisUri(), settings.clientOptions(),
