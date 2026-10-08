@@ -105,8 +105,8 @@ public class LettuceRecorder {
     /**
      * The client of the configured {@code client-type}: a cluster client discovering the topology from all the
      * configured hosts; a Sentinel client following the master the configured hosts (the sentinels) monitor under
-     * {@code master-name}; a replication client discovering the master and its replicas from the first host
-     * ({@code topology=discover}, the default, as the Vert.x client discovers from its first reachable host) or
+     * {@code master-name}; a replication client discovering the master and its replicas from the first host that
+     * answers, the hosts being tried in order ({@code topology=discover}, the default, as the Vert.x client does) or
      * taking all the hosts as the nodes and asking each for its role ({@code topology=static}; unlike the Vert.x
      * client, the configured order is not trusted); a standalone client connecting to the first host.
      *
@@ -137,8 +137,7 @@ public class LettuceRecorder {
                 MasterReplicaMode mode = config.topology().orElse(RedisTopology.DISCOVER) == RedisTopology.STATIC
                         ? MasterReplicaMode.STATIC
                         : MasterReplicaMode.DISCOVER;
-                List<RedisURI> nodes = mode == MasterReplicaMode.STATIC ? settings.redisUris() : List.of(settings.redisUri());
-                yield new LettuceConnectionFactory(name, resources, mode, nodes, settings.clientOptions(),
+                yield new LettuceConnectionFactory(name, resources, mode, settings.redisUris(), settings.clientOptions(),
                         LettuceClientSettings.readFrom(config.replicas()), config.timeout());
             }
             case STANDALONE -> new LettuceConnectionFactory(name, resources, settings.redisUri(), settings.clientOptions(),

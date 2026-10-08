@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 
 import org.jboss.logging.Logger;
@@ -15,6 +16,7 @@ import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.ReadFrom;
 import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisException;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.TimeoutOptions;
 import io.lettuce.core.api.StatefulConnection;
@@ -66,7 +68,10 @@ public class LettuceConnectionFactory {
     public enum MasterReplicaMode {
         /** The sentinels of a single sentinel URI report the master and its replicas, and every failover. */
         SENTINEL,
-        /** The master and its replicas are discovered from a Redis URI ({@code INFO replication}). */
+        /**
+         * The master and its replicas are discovered ({@code INFO replication}) from the first Redis URI that answers,
+         * the URIs being tried in order.
+         */
         DISCOVER,
         /** The Redis URIs are the nodes, each asked for its role. */
         STATIC
@@ -139,8 +144,9 @@ public class LettuceConnectionFactory {
      * {@link LettuceClientSettings#sentinelUri}); the connections follow the master the sentinels monitor, and the
      * replicas they report; Lettuce subscribes to the sentinel events, so a failover is followed without any
      * reconnection by the caller;</li>
-     * <li>{@link MasterReplicaMode#DISCOVER}: the master and its replicas are discovered from the first of the Redis
-     * URIs in {@code nodes} ({@code INFO replication}) when a connection is opened;</li>
+     * <li>{@link MasterReplicaMode#DISCOVER}: the master and its replicas are discovered ({@code INFO replication})
+     * when a connection is opened, from the first of the Redis URIs in {@code nodes} that answers, the URIs being
+     * tried in order as the Vert.x replication client tries its endpoints;</li>
      * <li>{@link MasterReplicaMode#STATIC}: the Redis URIs in {@code nodes} are the nodes, however many, each asked
      * for its role when a connection is opened.</li>
      * </ul>
@@ -463,7 +469,8 @@ public class LettuceConnectionFactory {
 
         private <K, V> StatefulRedisMasterReplicaConnection<K, V> connectMasterReplica(RedisCodec<K, V> codec) {
             StatefulRedisMasterReplicaConnection<K, V> connection = switch (mode) {
-                case SENTINEL, DISCOVER -> io.lettuce.core.masterreplica.MasterReplica.connect(client, codec, nodes.get(0));
+                case SENTINEL -> io.lettuce.core.masterreplica.MasterReplica.connect(client, codec, nodes.get(0));
+                case DISCOVER -> discover(codec);
                 case STATIC -> io.lettuce.core.masterreplica.MasterReplica.connect(client, codec, nodes);
             };
             connection.setReadFrom(readFrom);
@@ -473,14 +480,68 @@ public class LettuceConnectionFactory {
         private <K, V> CompletionStage<StatefulRedisMasterReplicaConnection<K, V>> connectMasterReplicaAsync(
                 RedisCodec<K, V> codec) {
             CompletionStage<StatefulRedisMasterReplicaConnection<K, V>> connecting = switch (mode) {
-                case SENTINEL, DISCOVER -> io.lettuce.core.masterreplica.MasterReplica.connectAsync(client, codec,
-                        nodes.get(0));
+                case SENTINEL -> io.lettuce.core.masterreplica.MasterReplica.connectAsync(client, codec, nodes.get(0));
+                case DISCOVER -> discoverAsync(codec, 0);
                 case STATIC -> io.lettuce.core.masterreplica.MasterReplica.connectAsync(client, codec, nodes);
             };
             return connecting.thenApply(connection -> {
                 connection.setReadFrom(readFrom);
                 return connection;
             });
+        }
+
+        /**
+         * Discovers the topology from the first node that answers, trying the nodes in order as the Vert.x client
+         * does (Lettuce's autodiscovery connector takes a single node). The failure of the last attempt is thrown,
+         * the earlier ones suppressed on it.
+         */
+        private <K, V> StatefulRedisMasterReplicaConnection<K, V> discover(RedisCodec<K, V> codec) {
+            RedisException failure = null;
+            for (int i = 0; i < nodes.size(); i++) {
+                try {
+                    return io.lettuce.core.masterreplica.MasterReplica.connect(client, codec, nodes.get(i));
+                } catch (RedisException e) {
+                    if (failure != null) {
+                        e.addSuppressed(failure);
+                    }
+                    failure = e;
+                    if (i < nodes.size() - 1) {
+                        logNextNode(nodes.get(i), e);
+                    }
+                }
+            }
+            throw failure;
+        }
+
+        /**
+         * The asynchronous {@link #discover}: the attempt on {@code nodes[index]}, falling back to the next node when
+         * it fails.
+         */
+        private <K, V> CompletionStage<StatefulRedisMasterReplicaConnection<K, V>> discoverAsync(RedisCodec<K, V> codec,
+                int index) {
+            RedisURI node = nodes.get(index);
+            CompletionStage<StatefulRedisMasterReplicaConnection<K, V>> attempt = io.lettuce.core.masterreplica.MasterReplica
+                    .connectAsync(client, codec, node);
+            if (index == nodes.size() - 1) {
+                return attempt;
+            }
+            return attempt.exceptionallyCompose(failure -> {
+                logNextNode(node, failure);
+                return discoverAsync(codec, index + 1).whenComplete((connection, next) -> {
+                    if (next != null) {
+                        unwrap(next).addSuppressed(unwrap(failure));
+                    }
+                });
+            });
+        }
+
+        private static void logNextNode(RedisURI node, Throwable failure) {
+            LOGGER.warnf("Unable to discover the replication topology from %s:%d (%s), trying the next host", node.getHost(),
+                    node.getPort(), unwrap(failure).getMessage());
+        }
+
+        private static Throwable unwrap(Throwable failure) {
+            return failure instanceof CompletionException && failure.getCause() != null ? failure.getCause() : failure;
         }
 
     }
