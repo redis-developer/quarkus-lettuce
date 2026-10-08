@@ -1221,7 +1221,8 @@ the writes still go to the master, where the Vert.x client sends them to the rep
 `role=sentinel` connects the Vert.x client to a sentinel node itself; a sentinel has no data commands, so the Lettuce
 backend rejects it at startup.
 * `replicas` is applied, where the Vert.x client ignores it in Sentinel mode: with `replicas=share` or `always`, the
-reads go to the replicas the sentinels report.
+reads go to the replicas the sentinels report. With `role=replica`, which already sends the reads to the replicas,
+`replicas` is not applied, and the startup warning says so.
 * A failover is always followed: Lettuce subscribes to the sentinel events and switches to the newly elected master
 on its own, whatever `auto-failover` says. There is no mode without it.
 * `topology-cache-ttl` has no equivalent: the topology is pushed by the sentinels.

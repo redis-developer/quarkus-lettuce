@@ -162,10 +162,10 @@ public class LettuceRecorder {
      * {@code tcp.secure-transport-protocols}, {@code max-pool-size} and {@code max-pool-waiting} properties; for a
      * cluster also {@code replicas} and {@code topology-cache-ttl}, but not the database of a host URI (a cluster
      * only has database 0); for a Sentinel client {@code master-name}, {@code role}, {@code auto-failover} (a
-     * failover is always followed) and {@code replicas}; for a replication client {@code topology} and
-     * {@code replicas}. A standalone client only uses the first host. Tell users at startup which other configured
-     * properties are not applied, instead of silently connecting differently than configured. Properties with a
-     * default value are reported only when set to something else.
+     * failover is always followed) and {@code replicas}, unless {@code role=replica} already decides where the reads
+     * go; for a replication client {@code topology} and {@code replicas}. A standalone client only uses the first
+     * host. Tell users at startup which other configured properties are not applied, instead of silently connecting
+     * differently than configured. Properties with a default value are reported only when set to something else.
      */
     private static void warnAboutUnsupportedConfiguration(String name, RedisClientConfig config, Set<URI> hosts) {
         List<String> ignored = new ArrayList<>();
@@ -192,6 +192,11 @@ public class LettuceRecorder {
             if (config.replicas().isPresent()) {
                 ignored.add(getPropertyName(name, "replicas"));
             }
+        }
+        // role=replica sends the reads to the replicas whatever replicas says (see LettuceClientSettings.readFrom)
+        if (type == RedisClientType.SENTINEL && config.role().orElse(RedisRole.MASTER) == RedisRole.REPLICA
+                && config.replicas().isPresent()) {
+            ignored.add(getPropertyName(name, "replicas") + " (role=replica reads from the replicas)");
         }
         // the deprecated alias is applied by neither backend (see LettuceClientSettings.topologyCacheTtl)
         if (!config.hashSlotCacheTtl().equals(LettuceClientSettings.DEFAULT_TOPOLOGY_CACHE_TTL)) {
