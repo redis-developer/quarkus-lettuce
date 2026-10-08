@@ -163,10 +163,12 @@ public final class LettuceClientSettings {
 
     /**
      * The URI of the master monitored by Redis Sentinel under {@code masterName}, the configured hosts being the
-     * sentinels. The credentials and the TLS settings of the client apply to the data nodes and to every sentinel
-     * alike (Lettuce authenticates a sentinel with the settings of its own URI, and does not copy them from the
-     * master URI), as with the Vert.x client, which uses the same options for both. The database is the one of the
-     * first host.
+     * sentinels. The credentials, the TLS settings, the timeout and the client and library names of the hosts apply
+     * to the data nodes (the master URI takes them from the first host) and to every sentinel alike (each sentinel
+     * URI is a copy of its host URI: Lettuce authenticates a sentinel with the settings of its own URI, does not copy
+     * them from the master URI, and runs the {@code SENTINEL} queries with the timeout of the sentinel URI), as with
+     * the Vert.x client, which uses the same options for both. The database is the one of the first host; a sentinel
+     * has no databases.
      */
     public RedisURI sentinelUri(String masterName) {
         return sentinelUri(redisUris, masterName);
@@ -176,22 +178,21 @@ public final class LettuceClientSettings {
         RedisURI first = sentinels.get(0);
         RedisURI.Builder master = RedisURI.builder()
                 .withSentinelMasterId(masterName)
-                .withDatabase(first.getDatabase())
-                .withSsl(first.isSsl())
-                .withVerifyPeer(first.getVerifyMode());
-        if (first.getCredentialsProvider() != null) {
-            master.withAuthentication(first.getCredentialsProvider());
+                .withSsl(first)
+                .withAuthentication(first)
+                .withTimeout(first.getTimeout())
+                .withDatabase(first.getDatabase());
+        if (first.getClientName() != null) {
+            master.withClientName(first.getClientName());
+        }
+        if (first.getLibraryName() != null) {
+            master.withLibraryName(first.getLibraryName());
+        }
+        if (first.getLibraryVersion() != null) {
+            master.withLibraryVersion(first.getLibraryVersion());
         }
         for (RedisURI host : sentinels) {
-            RedisURI.Builder sentinel = RedisURI.builder()
-                    .withHost(host.getHost())
-                    .withPort(host.getPort())
-                    .withSsl(host.isSsl())
-                    .withVerifyPeer(host.getVerifyMode());
-            if (host.getCredentialsProvider() != null) {
-                sentinel.withAuthentication(host.getCredentialsProvider());
-            }
-            master.withSentinel(sentinel.build());
+            master.withSentinel(RedisURI.builder(host).withDatabase(0).build());
         }
         return master.build();
     }
