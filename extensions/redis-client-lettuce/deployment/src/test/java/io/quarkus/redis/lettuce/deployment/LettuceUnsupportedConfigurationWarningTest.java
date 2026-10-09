@@ -38,8 +38,7 @@ public class LettuceUnsupportedConfigurationWarningTest {
             .overrideConfigKey("quarkus.redis.tls.key-certificate-pem", "true")
             .overrideConfigKey("quarkus.redis.tls.key-certificate-pem.certs", CERTS + "-client.crt")
             .overrideConfigKey("quarkus.redis.tls.key-certificate-pem.keys", CERTS + "-client.key")
-            // the client types the Lettuce backend does not support yet fall back to a standalone client
-            .overrideConfigKey("quarkus.redis.client-type", "replication")
+            // replicas only applies to the cluster, Sentinel and replication client types
             .overrideConfigKey("quarkus.redis.replicas", "share")
             .overrideConfigKey("quarkus.redis.topology-cache-ttl", "2s")
             .overrideConfigKey("quarkus.redis.max-pool-size", "10")
@@ -54,7 +53,6 @@ public class LettuceUnsupportedConfigurationWarningTest {
                     .singleElement().asString()
                     .contains("Lettuce Redis client '<default>'")
                     .contains("quarkus.redis.hosts (only the first URI is used)")
-                    .contains("quarkus.redis.client-type (only standalone and cluster are supported)")
                     .contains("quarkus.redis.replicas")
                     .contains("quarkus.redis.topology-cache-ttl")
                     .contains("quarkus.redis.max-waiting-handlers")

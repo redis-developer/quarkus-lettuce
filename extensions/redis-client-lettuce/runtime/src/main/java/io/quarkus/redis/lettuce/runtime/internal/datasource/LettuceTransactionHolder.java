@@ -2,12 +2,9 @@ package io.quarkus.redis.lettuce.runtime.internal.datasource;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.function.Function;
 
-import io.lettuce.core.RedisFuture;
+import io.lettuce.core.RedisException;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
@@ -18,39 +15,38 @@ import io.smallrye.mutiny.Uni;
 /**
  * Lettuce equivalent of {@link io.quarkus.redis.runtime.datasource.TransactionHolder}.
  * <p>
- * Unlike the Vert.x backend — which receives a {@code QUEUED} reply per command issued
- * between {@code MULTI} and {@code EXEC} — Lettuce does not complete a command's
- * {@link RedisFuture} until {@code EXEC} runs. So instead of awaiting each command, this
- * holder captures the per-command {@link RedisFuture} (in enqueue order) together with a
- * result mapper, and reconstructs the typed {@link TransactionResult} once {@code EXEC} has
- * completed and all captured futures have settled.
+ * Unlike the Vert.x backend — which receives a {@code QUEUED} reply per command issued between {@code MULTI} and
+ * {@code EXEC} — Lettuce does not complete the future of a queued command before {@code EXEC}, and on a
+ * master/replica connection (Sentinel and replication clients) it does not complete it at all. So instead of
+ * awaiting the commands, this holder records the result mapper of each command, in enqueue order, and reconstructs
+ * the typed {@link TransactionResult} from the {@code EXEC} reply: Lettuce decodes every element of that reply with
+ * the output of the queued command it answers, so the elements are exactly what the commands' futures would carry,
+ * or a {@link RedisException} for a command the server rejected.
  * <p>
- * Each entry is a {@link LettuceCommand} carrying the same mapper the non-transactional
- * implementation applies via {@link LettuceCommand#toUni()}, so
- * {@code TransactionResult.get(index)} returns the same Java type the Vert.x backend produces.
+ * Each entry is a {@link LettuceCommand} carrying the same mapper the non-transactional implementation applies via
+ * {@link LettuceCommand#toUni()}, so {@code TransactionResult.get(index)} returns the same Java type the Vert.x
+ * backend produces.
  */
 public class LettuceTransactionHolder {
 
-    private final List<RedisFuture<?>> futures = new ArrayList<>();
     private final List<Function<Object, Object>> mappers = new ArrayList<>();
     private volatile boolean discarded = false;
 
     /**
-     * Issues a command into the open {@code MULTI} block and records it for later assembly.
+     * Issues a command into the open {@code MULTI} block and records its mapper for later assembly.
      * <p>
-     * The command's {@link LettuceCommand#call() call} supplier is invoked eagerly so the command
-     * is enqueued on the pinned connection in call order, which matches the order of the
-     * {@code EXEC} reply. A supplier that throws instead of issuing a command — the command
-     * implementations defer some argument validations that way — fails the returned {@link Uni}
-     * rather than the call, as the Vert.x backend and the non-transactional path do, and records
-     * no entry. The command's {@link LettuceCommand#mapper() mapper} is applied to the raw
-     * {@code EXEC} reply when the {@link TransactionResult} is assembled.
+     * The command's {@link LettuceCommand#call() call} supplier is invoked eagerly so the command is enqueued on
+     * the pinned connection in call order, which matches the order of the {@code EXEC} reply. A supplier that
+     * throws instead of issuing a command — the command implementations defer some argument validations that way —
+     * fails the returned {@link Uni} rather than the call, as the Vert.x backend and the non-transactional path do,
+     * and records no entry. The command's {@link LettuceCommand#mapper() mapper} is applied to the matching element
+     * of the {@code EXEC} reply when the {@link TransactionResult} is assembled.
      * <p>
-     * Once {@link #discard()} has been called, {@code DISCARD} has already been sent on the pinned
-     * connection, and it is no longer inside {@code MULTI}; issuing the command's call at that point
-     * would run it for real instead of queuing it. So a call arriving after {@link #discard()} is
-     * rejected outright, without invoking {@code call()}, matching the {@code IllegalStateException}
-     * the Vert.x backend raises when a queued command doesn't come back {@code QUEUED}.
+     * Once {@link #discard()} has been called, {@code DISCARD} has already been sent on the pinned connection, and
+     * it is no longer inside {@code MULTI}; issuing the command's call at that point would run it for real instead
+     * of queuing it. So a call arriving after {@link #discard()} is rejected outright, without invoking
+     * {@code call()}, matching the {@code IllegalStateException} the Vert.x backend raises when a queued command
+     * doesn't come back {@code QUEUED}.
      *
      * @param command the command to issue, carrying its call and result mapper
      * @param <T> the raw Lettuce result type
@@ -62,13 +58,11 @@ public class LettuceTransactionHolder {
         if (discarded) {
             return Uni.createFrom().failure(new IllegalStateException("Unable to add command to the current transaction"));
         }
-        RedisFuture<T> future;
         try {
-            future = command.call().get();
+            command.call().get();
         } catch (RuntimeException e) {
             return Uni.createFrom().failure(e);
         }
-        futures.add(future);
         mappers.add((Function<Object, Object>) command.mapper());
         return Uni.createFrom().voidItem();
     }
@@ -82,58 +76,44 @@ public class LettuceTransactionHolder {
     }
 
     public int size() {
-        return futures.size();
+        return mappers.size();
     }
 
     /**
-     * Builds a {@link TransactionResult} once {@code EXEC} has completed. Awaits all captured
-     * futures (they settle when {@code EXEC} runs) before decoding each entry.
+     * Builds the {@link TransactionResult} from the reply of a committed {@code EXEC}.
+     *
+     * @param exec the {@code EXEC} reply, one element per queued command, not discarded
      */
-    public Uni<TransactionResult> toResult() {
-        return awaitAll().map(ignored -> {
-            boolean[] hasErrors = { false };
-            List<Object> results = collect(hasErrors);
-            return new TransactionResultImpl(discarded, hasErrors[0], results);
-        });
+    public TransactionResult toResult(io.lettuce.core.TransactionResult exec) {
+        boolean[] hasErrors = { false };
+        List<Object> results = collect(exec, hasErrors);
+        return new TransactionResultImpl(discarded, hasErrors[0], results);
     }
 
     /**
-     * Builds an {@link OptimisticLockingTransactionResult}, attaching the pre-transaction result.
+     * Builds an {@link OptimisticLockingTransactionResult} from the reply of a committed {@code EXEC}, attaching
+     * the pre-transaction result.
      */
-    public <I> Uni<OptimisticLockingTransactionResult<I>> toOptimisticLockingResult(I input) {
-        return awaitAll().map(ignored -> {
-            boolean[] hasErrors = { false };
-            List<Object> results = collect(hasErrors);
-            return new OptimisticLockingTransactionResultImpl<>(discarded, hasErrors[0], input, results);
-        });
+    public <I> OptimisticLockingTransactionResult<I> toOptimisticLockingResult(I input,
+            io.lettuce.core.TransactionResult exec) {
+        boolean[] hasErrors = { false };
+        List<Object> results = collect(exec, hasErrors);
+        return new OptimisticLockingTransactionResultImpl<>(discarded, hasErrors[0], input, results);
     }
 
-    private Uni<Void> awaitAll() {
-        if (futures.isEmpty()) {
-            return Uni.createFrom().voidItem();
+    private List<Object> collect(io.lettuce.core.TransactionResult exec, boolean[] hasErrors) {
+        if (exec.size() != mappers.size()) {
+            throw new IllegalStateException("The EXEC reply carries " + exec.size() + " results for " + mappers.size()
+                    + " queued commands");
         }
-        CompletableFuture<?>[] settled = new CompletableFuture<?>[futures.size()];
-        for (int i = 0; i < futures.size(); i++) {
-            // handle() yields an already-resolvable stage regardless of success/failure, so
-            // allOf waits for every command to settle without short-circuiting on the first error.
-            settled[i] = futures.get(i).toCompletableFuture().handle((v, t) -> null);
-        }
-        return Uni.createFrom().completionStage(CompletableFuture.allOf(settled)).replaceWithVoid();
-    }
-
-    private List<Object> collect(boolean[] hasErrors) {
-        List<Object> results = new ArrayList<>(futures.size());
-        for (int i = 0; i < futures.size(); i++) {
-            CompletableFuture<?> future = futures.get(i).toCompletableFuture();
-            try {
-                Object raw = future.getNow(null);
+        List<Object> results = new ArrayList<>(mappers.size());
+        for (int i = 0; i < mappers.size(); i++) {
+            Object raw = exec.get(i);
+            if (raw instanceof RedisException failure) {
+                hasErrors[0] = true;
+                results.add(failure);
+            } else {
                 results.add(mappers.get(i).apply(raw));
-            } catch (CompletionException e) {
-                hasErrors[0] = true;
-                results.add(e.getCause() != null ? e.getCause() : e);
-            } catch (CancellationException e) {
-                hasErrors[0] = true;
-                results.add(e);
             }
         }
         return results;
