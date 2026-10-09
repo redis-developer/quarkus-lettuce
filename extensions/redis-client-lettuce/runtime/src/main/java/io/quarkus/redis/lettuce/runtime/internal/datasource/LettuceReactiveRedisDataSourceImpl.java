@@ -51,6 +51,7 @@ import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveCountMi
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveGeoCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveHyperLogLogCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.json.LettuceReactiveJsonCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.list.LettuceReactiveListCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveSetCommandsImpl;
@@ -560,12 +561,14 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K> ReactiveJsonCommands<K> json(Class<K> redisKeyType) {
-        throw groupNotImplemented("json");
+        nonNull(redisKeyType, "redisKeyType");
+        return new LettuceReactiveJsonCommandsImpl<>(this, connection, redisKeyType);
     }
 
     @Override
     public <K> ReactiveJsonCommands<K> json(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("json");
+        nonNull(redisKeyType, "redisKeyType");
+        return new LettuceReactiveJsonCommandsImpl<>(this, connection, redisKeyType.getType());
     }
 
     @Override
