@@ -55,7 +55,6 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
-import io.quarkus.redis.runtime.datasource.*;
 import io.quarkus.redis.runtime.datasource.BlockingAutoSuggestCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingBitmapCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingCountMinCommandsImpl;
