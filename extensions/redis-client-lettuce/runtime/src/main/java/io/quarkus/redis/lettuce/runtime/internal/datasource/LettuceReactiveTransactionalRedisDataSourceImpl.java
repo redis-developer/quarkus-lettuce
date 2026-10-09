@@ -41,6 +41,8 @@ import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommand
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveTransactionalHashCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveHyperLogLogCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hyperloglog.LettuceReactiveTransactionalHyperLogLogCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.json.LettuceReactiveJsonCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.json.LettuceReactiveTransactionalJsonCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveTransactionalKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.list.LettuceReactiveListCommandsImpl;
@@ -202,7 +204,10 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K> ReactiveTransactionalJsonCommands<K> json(Class<K> redisKeyType) {
-        throw groupNotImplemented("json");
+        nonNull(redisKeyType, "redisKeyType");
+        LettuceReactiveJsonCommandsImpl<K> reactiveJson = (LettuceReactiveJsonCommandsImpl<K>) reactive
+                .json(redisKeyType);
+        return new LettuceReactiveTransactionalJsonCommandsImpl<>(this, reactiveJson, tx);
     }
 
     @Override

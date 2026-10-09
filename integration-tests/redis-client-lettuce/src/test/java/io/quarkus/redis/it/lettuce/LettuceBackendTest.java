@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
+import io.vertx.core.json.JsonObject;
 
 @QuarkusTest
 class LettuceBackendTest {
@@ -897,6 +898,183 @@ class LettuceBackendTest {
         assertEquals("false,5,true,true,166,2,true,Palermo,Catania", body);
         RestAssured.given().when().get("/lettuce/sortedset/card/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("2"));
+    }
+
+    private static String jsonSet(String key, String document) {
+        return RestAssured.given().body(document).when().post("/lettuce/json/" + key)
+                .then().statusCode(200).extract().asString();
+    }
+
+    @Test
+    public void jsonSetGet() {
+        String key = getKey("json-doc");
+        String document = "{\"a\":2,\"b\":3,\"nested\":{\"a\":4,\"b\":null}}";
+
+        RestAssured.given().when().get("/lettuce/json/" + key).then().statusCode(204);
+
+        assertEquals("[" + document + "]", jsonSet(key, document));
+        RestAssured.given().when().get("/lettuce/json/" + key).then()
+                .statusCode(200).body(CoreMatchers.is(document));
+        RestAssured.given().queryParam("path", "$..b").when().get("/lettuce/json/path/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[3,null]"));
+
+        String multi = RestAssured.given().queryParam("path", "$..a").queryParam("path", "$..b")
+                .when().get("/lettuce/json/paths/" + key).then().statusCode(200).extract().asString();
+        assertEquals(new JsonObject("{\"$..a\":[2,4],\"$..b\":[3,null]}"), new JsonObject(multi));
+    }
+
+    @Test
+    public void jsonSetNxXx() {
+        String key = getKey("json-nxxx");
+        jsonSet(key, "{\"name\":\"luke\"}");
+
+        // NX creates the path, a second NX on the same path is a no-op
+        RestAssured.given().queryParam("path", "$.friends").queryParam("nx", true).body("[\"Obiwan\",\"Han\"]")
+                .when().post("/lettuce/json/" + key).then().statusCode(200);
+        RestAssured.given().queryParam("path", "$.friends").queryParam("nx", true).body("[\"Leia\"]")
+                .when().post("/lettuce/json/" + key).then().statusCode(200);
+        RestAssured.given().queryParam("path", "$.friends").when().get("/lettuce/json/path/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[[\"Obiwan\",\"Han\"]]"));
+
+        // XX only updates an existing path
+        RestAssured.given().queryParam("path", "$.missing").queryParam("xx", true).body("\"nope\"")
+                .when().post("/lettuce/json/" + key).then().statusCode(200);
+        RestAssured.given().queryParam("path", "$.missing").when().get("/lettuce/json/path/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[]"));
+        RestAssured.given().queryParam("path", "$.name").queryParam("xx", true).body("\"leia\"")
+                .when().post("/lettuce/json/" + key).then().statusCode(200);
+        RestAssured.given().queryParam("path", "$.name").when().get("/lettuce/json/path/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[\"leia\"]"));
+    }
+
+    @Test
+    public void jsonTypedRoundTrip() {
+        String key = getKey("json-person");
+        RestAssured.given().body("luke,20").when().post("/lettuce/json/person/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("luke,20,true"));
+        RestAssured.given().when().get("/lettuce/json/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("{\"name\":\"luke\",\"age\":20}"));
+    }
+
+    @Test
+    public void jsonArrays() {
+        String key = getKey("json-arr");
+        jsonSet(key, "{\"arr\":[1,2],\"nums\":[5,6,7]}");
+
+        RestAssured.given().queryParam("path", "$.arr").body("a,b").when().post("/lettuce/json/arrappend/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[4]"));
+        RestAssured.given().queryParam("path", "$.arr").when().get("/lettuce/json/arrlen/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[4]"));
+        RestAssured.given().queryParam("path", "$.arr").when().get("/lettuce/json/path/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[[1,2,\"a\",\"b\"]]"));
+        RestAssured.given().queryParam("path", "$.nums").when().post("/lettuce/json/arrpop/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[7]"));
+        RestAssured.given().queryParam("path", "$.arr").when().get("/lettuce/json/type/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[\"array\"]"));
+
+        // root-level array
+        String rootArray = getKey("json-root-arr");
+        jsonSet(rootArray, "[\"a\",\"b\"]");
+        RestAssured.given().when().get("/lettuce/json/array/" + rootArray)
+                .then().statusCode(200).body(CoreMatchers.is("[\"a\",\"b\"]"));
+        RestAssured.given().when().get("/lettuce/json/arrlen/" + rootArray)
+                .then().statusCode(200).body(CoreMatchers.is("[2]"));
+    }
+
+    @Test
+    public void jsonNumbersStringsBooleans() {
+        String key = getKey("json-scalars");
+        jsonSet(key, "{\"a\":1,\"n\":{\"a\":2},\"s\":\"foo\",\"t\":true}");
+
+        RestAssured.given().queryParam("path", "$..a").body("2").when().post("/lettuce/json/numincrby/" + key)
+                // NUMINCRBY takes a double, so the incremented values come back as floats
+                .then().statusCode(200).body(CoreMatchers.is("[3.0,4.0]"));
+        RestAssured.given().queryParam("path", "$.s").body("bar").when().post("/lettuce/json/strappend/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[6]"));
+        RestAssured.given().queryParam("path", "$.s").when().get("/lettuce/json/strlen/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[6]"));
+        RestAssured.given().queryParam("path", "$.t").when().post("/lettuce/json/toggle/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[false]"));
+        RestAssured.given().queryParam("path", "$.t").when().post("/lettuce/json/toggle/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[true]"));
+        RestAssured.given().queryParam("path", "$..a").when().get("/lettuce/json/type/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[\"number\",\"number\"]"));
+    }
+
+    @Test
+    public void jsonObjects() {
+        String key = getKey("json-obj");
+        jsonSet(key, "{\"a\":1,\"b\":2}");
+
+        RestAssured.given().when().get("/lettuce/json/objkeys/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[\"a\",\"b\"]"));
+        RestAssured.given().when().get("/lettuce/json/objlen/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().when().get("/lettuce/json/objlen/" + getKey("json-obj-missing"))
+                .then().statusCode(204);
+    }
+
+    @Test
+    public void jsonMget() {
+        String doc1 = getKey("json-mget-1");
+        String doc2 = getKey("json-mget-2");
+        jsonSet(doc1, "{\"a\":1,\"nested\":{\"a\":3}}");
+        jsonSet(doc2, "{\"a\":4,\"nested\":{\"a\":6}}");
+
+        RestAssured.given().queryParam("path", "$..a")
+                .queryParam("key", doc1).queryParam("key", doc2).queryParam("key", getKey("json-mget-missing"))
+                .when().get("/lettuce/json/mget")
+                .then().statusCode(200)
+                .body("size()", CoreMatchers.is(3))
+                .body("[0]", CoreMatchers.is("[1,3]"))
+                .body("[1]", CoreMatchers.is("[4,6]"))
+                .body("[2]", CoreMatchers.nullValue());
+    }
+
+    @Test
+    public void jsonClearDel() {
+        String key = getKey("json-clear");
+        jsonSet(key, "{\"obj\":{\"a\":1},\"arr\":[1,2],\"s\":\"x\"}");
+
+        // JSON.CLEAR empties containers and zeroes numbers, strings are left alone
+        RestAssured.given().queryParam("path", "$.*").when().post("/lettuce/json/clear/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().queryParam("path", "$.s").when().delete("/lettuce/json/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().when().get("/lettuce/json/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("{\"obj\":{},\"arr\":[]}"));
+
+        RestAssured.given().when().delete("/lettuce/json/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().when().get("/lettuce/json/" + key).then().statusCode(204);
+        RestAssured.given().when().delete("/lettuce/json/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("0"));
+    }
+
+    @Test
+    public void jsonReactive() {
+        String key = getKey("json-reactive");
+        RestAssured.given().body("{\"a\":1,\"b\":\"two\"}").when().post("/lettuce/json/reactive/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("{\"a\":1,\"b\":\"two\"}"));
+        RestAssured.given().queryParam("path", "$.b").when().get("/lettuce/json/reactive/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("[\"two\"]"));
+    }
+
+    @Test
+    public void withTransactionJson() {
+        String key = getKey("tx-json");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/json/" + key)
+                .then().statusCode(200).extract().asString();
+        // jsonSet -> null, arrappend -> [2], arrlen -> [2], numincrby -> null, strappend -> [14] ("luke skywalker"),
+        // type -> [number] (NUMINCRBY takes a double, so age became a float), then the document, del of $.tags -> 1,
+        // objkeys of $ -> [[name, age]]
+        String prefix = "false,9,true,[2],[2],true,[14],[number],";
+        String suffix = ",1,[[name, age]]";
+        assertTrue(body.startsWith(prefix), body);
+        assertTrue(body.endsWith(suffix), body);
+        JsonObject document = new JsonObject(body.substring(prefix.length(), body.length() - suffix.length()));
+        assertEquals(new JsonObject("{\"name\":\"luke skywalker\",\"tags\":[\"jedi\",\"pilot\"],\"age\":22.0}"),
+                document);
     }
 
     @Test
