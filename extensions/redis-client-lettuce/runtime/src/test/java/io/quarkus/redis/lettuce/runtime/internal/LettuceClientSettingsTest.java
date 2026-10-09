@@ -2,8 +2,11 @@ package io.quarkus.redis.lettuce.runtime.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -11,18 +14,32 @@ import org.junit.jupiter.api.Test;
 import io.lettuce.core.ReadFrom;
 import io.lettuce.core.RedisCredentials;
 import io.lettuce.core.RedisURI;
+import io.lettuce.core.SocketOptions;
 import io.lettuce.core.SslVerifyMode;
 import io.lettuce.core.StaticCredentialsProvider;
 import io.lettuce.core.cluster.ClusterTopologyRefreshOptions;
 import io.lettuce.core.cluster.ClusterTopologyRefreshOptions.RefreshTrigger;
+import io.lettuce.core.protocol.ProtocolVersion;
+import io.lettuce.core.resource.Delay;
+import io.lettuce.core.resource.NettyCustomizer;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.channel.ChannelOption;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceClientSettings.UserInfo;
+import io.quarkus.redis.runtime.client.config.RedisClientConfig;
+import io.quarkus.redis.runtime.client.config.RedisConfig;
+import io.quarkus.runtime.configuration.DurationConverter;
+import io.quarkus.tls.TlsConfiguration;
+import io.quarkus.tls.TlsConfigurationRegistry;
+import io.smallrye.config.PropertiesConfigSource;
+import io.smallrye.config.SmallRyeConfig;
+import io.smallrye.config.SmallRyeConfigBuilder;
 import io.vertx.core.net.NetClientOptions;
 import io.vertx.redis.client.RedisReplicas;
 import io.vertx.redis.client.RedisRole;
 
 /**
- * Unit tests for the URI credential parsing, the password precedence and the peer verification mapping of
- * {@link LettuceClientSettings}, all of which must match the Vert.x Redis client.
+ * Unit tests for the URI credential parsing, the password precedence, the peer verification mapping and the
+ * client option mappings of {@link LettuceClientSettings}, all of which must match the Vert.x Redis client.
  */
 class LettuceClientSettingsTest {
 
@@ -171,5 +188,187 @@ class LettuceClientSettingsTest {
         assertThat(master.getSentinels().get(0).getPort()).isEqualTo(26379);
         assertThat(master.getSentinels().get(1).getHost()).isEqualTo("s2");
         assertThat(master.getSentinels().get(1).getPort()).isEqualTo(26380);
+    }
+
+    @Test
+    void leavesTheSentinelUriUnnamedWithoutAClientName() {
+        // no client name on the hosts, none on the master and the sentinels (Lettuce rejects a null name)
+        RedisURI master = LettuceClientSettings.sentinelUri(List.of(RedisURI.create(URI.create("redis://s1:26379"))),
+                "mymaster");
+
+        assertThat(master.getClientName()).isNull();
+        assertThat(master.getSentinels().get(0).getClientName()).isNull();
+    }
+
+    @Test
+    void mapsTheProtocolNegotiationOntoTheProtocolVersion() {
+        // negotiation on without a preference, or RESP3 preferred: Lettuce negotiates the newest version the
+        // server supports and falls back to RESP2, as the Vert.x client does
+        assertThat(LettuceClientSettings.protocolVersion(config(Map.of()))).isEmpty();
+        assertThat(LettuceClientSettings.protocolVersion(config(Map.of(
+                "quarkus.redis.preferred-protocol-version", "resp3")))).isEmpty();
+        // RESP2 preferred, or negotiation off: RESP2 without HELLO
+        assertThat(LettuceClientSettings.protocolVersion(config(Map.of(
+                "quarkus.redis.preferred-protocol-version", "resp2")))).contains(ProtocolVersion.RESP2);
+        assertThat(LettuceClientSettings.protocolVersion(config(Map.of(
+                "quarkus.redis.protocol-negotiation", "false")))).contains(ProtocolVersion.RESP2);
+        assertThat(LettuceClientSettings.protocolVersion(config(Map.of(
+                "quarkus.redis.protocol-negotiation", "false",
+                "quarkus.redis.preferred-protocol-version", "resp3")))).contains(ProtocolVersion.RESP2);
+    }
+
+    @Test
+    void namesTheConnectionLikeVertx() {
+        URI host = URI.create("redis://localhost:6379");
+        // client-name alone is not applied, as with the Vert.x client
+        assertThat(clientName(config(Map.of("quarkus.redis.client-name", "my-app")), host)).isNull();
+        assertThat(clientName(config(Map.of()), host)).isNull();
+        assertThat(clientName(config(Map.of(
+                "quarkus.redis.configure-client-name", "true",
+                "quarkus.redis.client-name", "my-app")), host)).isEqualTo("my-app");
+        // without client-name, the Quarkus client name
+        assertThat(clientName(config(Map.of("quarkus.redis.configure-client-name", "true")), host))
+                .isEqualTo(RedisConfig.DEFAULT_CLIENT_NAME);
+        // the client query parameter of the URI always applies and wins over the properties
+        URI named = URI.create("redis://localhost:6379?client=from-uri");
+        assertThat(clientName(config(Map.of()), named)).isEqualTo("from-uri");
+        assertThat(clientName(config(Map.of(
+                "quarkus.redis.configure-client-name", "true",
+                "quarkus.redis.client-name", "my-app")), named)).isEqualTo("from-uri");
+    }
+
+    private static String clientName(RedisClientConfig config, URI host) {
+        return LettuceClientSettings.clientName(RedisConfig.DEFAULT_CLIENT_NAME, config, host);
+    }
+
+    @Test
+    void mapsTheTcpPropertiesOntoTheSocketOptions() {
+        assertThat(LettuceClientSettings.socketOptions(config(Map.of()).tcp())).isEmpty();
+
+        SocketOptions socket = LettuceClientSettings.socketOptions(config(Map.of(
+                "quarkus.redis.tcp.connection-timeout", "3s",
+                "quarkus.redis.tcp.keep-alive", "false",
+                "quarkus.redis.tcp.no-delay", "false")).tcp()).orElseThrow();
+        assertThat(socket.getConnectTimeout()).isEqualTo(Duration.ofSeconds(3));
+        assertThat(socket.isKeepAlive()).isFalse();
+        assertThat(socket.isTcpNoDelay()).isFalse();
+
+        // only the set properties are applied: the Lettuce defaults hold for the others, not the Vert.x ones
+        socket = LettuceClientSettings.socketOptions(config(Map.of("quarkus.redis.tcp.connection-timeout", "3s")).tcp())
+                .orElseThrow();
+        assertThat(socket.isKeepAlive()).isTrue();
+        assertThat(socket.isTcpNoDelay()).isTrue();
+    }
+
+    @Test
+    void mapsTheReconnectIntervalOntoAConstantDelay() {
+        // the default interval cannot be told from an unset property: Lettuce keeps its exponential backoff
+        assertThat(LettuceClientSettings.reconnectDelay(config(Map.of()))).isEmpty();
+        assertThat(LettuceClientSettings.reconnectDelay(config(Map.of("quarkus.redis.reconnect-interval", "1s")))).isEmpty();
+
+        Delay delay = LettuceClientSettings.reconnectDelay(config(Map.of("quarkus.redis.reconnect-interval", "2s")))
+                .orElseThrow();
+        assertThat(delay.createDelay(1)).isEqualTo(Duration.ofSeconds(2));
+        assertThat(delay.createDelay(10)).isEqualTo(Duration.ofSeconds(2));
+
+        // tcp.reconnect-interval overrides the client-level property, as with the Vert.x client
+        delay = LettuceClientSettings.reconnectDelay(config(Map.of(
+                "quarkus.redis.reconnect-interval", "2s",
+                "quarkus.redis.tcp.reconnect-interval", "500ms"))).orElseThrow();
+        assertThat(delay.createDelay(1)).isEqualTo(Duration.ofMillis(500));
+        // ... unless it has its default, which the default client always sees (see reconnectDelay)
+        delay = LettuceClientSettings.reconnectDelay(config(Map.of(
+                "quarkus.redis.reconnect-interval", "2s",
+                "quarkus.redis.tcp.reconnect-interval", "1s"))).orElseThrow();
+        assertThat(delay.createDelay(1)).isEqualTo(Duration.ofSeconds(2));
+    }
+
+    @Test
+    void mapsTheSocketPropertiesOntoChannelOptions() {
+        assertThat(LettuceClientSettings.nettyCustomizer(config(Map.of()).tcp())).isEmpty();
+
+        NettyCustomizer customizer = LettuceClientSettings.nettyCustomizer(config(Map.of(
+                "quarkus.redis.tcp.receive-buffer-size", "65536",
+                "quarkus.redis.tcp.send-buffer-size", "32768",
+                "quarkus.redis.tcp.so-linger", "5s",
+                "quarkus.redis.tcp.traffic-class", "16",
+                "quarkus.redis.tcp.reuse-address", "true",
+                "quarkus.redis.tcp.local-address", "127.0.0.1")).tcp()).orElseThrow();
+        Bootstrap bootstrap = new Bootstrap();
+        customizer.afterBootstrapInitialized(bootstrap);
+        assertThat(bootstrap.config().options())
+                .containsEntry(ChannelOption.SO_RCVBUF, 65536)
+                .containsEntry(ChannelOption.SO_SNDBUF, 32768)
+                // SO_LINGER is in seconds
+                .containsEntry(ChannelOption.SO_LINGER, 5)
+                .containsEntry(ChannelOption.IP_TOS, 16)
+                .containsEntry(ChannelOption.SO_REUSEADDR, true);
+        assertThat(bootstrap.config().localAddress()).isEqualTo(new InetSocketAddress("127.0.0.1", 0));
+
+        // a single property is enough, and the local address alone too
+        customizer = LettuceClientSettings.nettyCustomizer(config(Map.of("quarkus.redis.tcp.local-address", "127.0.0.1"))
+                .tcp()).orElseThrow();
+        bootstrap = new Bootstrap();
+        customizer.afterBootstrapInitialized(bootstrap);
+        assertThat(bootstrap.config().options()).isEmpty();
+        assertThat(bootstrap.config().localAddress()).isEqualTo(new InetSocketAddress("127.0.0.1", 0));
+    }
+
+    @Test
+    void appliesTheClientPropertiesToTheOptionsAndTheUri() {
+        List<URI> hosts = List.of(URI.create("redis://localhost:6379"));
+        LettuceClientSettings settings = LettuceClientSettings.create(RedisConfig.DEFAULT_CLIENT_NAME, config(Map.of(
+                "quarkus.redis.max-waiting-handlers", "100",
+                "quarkus.redis.preferred-protocol-version", "resp2",
+                "quarkus.redis.configure-client-name", "true",
+                "quarkus.redis.client-name", "my-app",
+                "quarkus.redis.tcp.connection-timeout", "3s",
+                "quarkus.redis.tcp.receive-buffer-size", "65536",
+                "quarkus.redis.reconnect-interval", "2s")), hosts, null, NO_TLS);
+        assertThat(settings.clientOptions().getRequestQueueSize()).isEqualTo(100);
+        assertThat(settings.clientOptions().getConfiguredProtocolVersion()).isEqualTo(ProtocolVersion.RESP2);
+        assertThat(settings.clientOptions().getSocketOptions().getConnectTimeout()).isEqualTo(Duration.ofSeconds(3));
+        assertThat(settings.redisUri().getClientName()).isEqualTo("my-app");
+        assertThat(settings.reconnectDelay()).isPresent();
+        assertThat(settings.nettyCustomizer()).isPresent();
+
+        // the defaults: the Vert.x queue bound of 2048 commands, the Lettuce protocol negotiation, no name
+        settings = LettuceClientSettings.create(RedisConfig.DEFAULT_CLIENT_NAME, config(Map.of()), hosts, null, NO_TLS);
+        assertThat(settings.clientOptions().getRequestQueueSize()).isEqualTo(2048);
+        assertThat(settings.clientOptions().getConfiguredProtocolVersion()).isNull();
+        assertThat(settings.redisUri().getClientName()).isNull();
+        assertThat(settings.reconnectDelay()).isEmpty();
+        assertThat(settings.nettyCustomizer()).isEmpty();
+    }
+
+    /** A TLS registry without any configuration: the TLS settings are not under test here. */
+    private static final TlsConfigurationRegistry NO_TLS = new TlsConfigurationRegistry() {
+        @Override
+        public Optional<TlsConfiguration> get(String name) {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<TlsConfiguration> getDefault() {
+            return Optional.empty();
+        }
+
+        @Override
+        public void register(String name, TlsConfiguration configuration) {
+        }
+    };
+
+    /**
+     * The configuration of the default client, mapped from the given {@code quarkus.redis.*} properties the way the
+     * application configuration is (with the Quarkus duration format, {@code 10s}, which SmallRye Config alone does
+     * not read).
+     */
+    private static RedisClientConfig config(Map<String, String> properties) {
+        SmallRyeConfig config = new SmallRyeConfigBuilder()
+                .withConverter(Duration.class, 100, new DurationConverter())
+                .withMapping(RedisConfig.class)
+                .withSources(new PropertiesConfigSource(properties, "test", 100))
+                .build();
+        return config.getConfigMapping(RedisConfig.class).clients().get(RedisConfig.DEFAULT_CLIENT_NAME);
     }
 }

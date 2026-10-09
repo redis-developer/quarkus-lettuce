@@ -7,6 +7,8 @@ import static io.quarkus.vertx.core.runtime.SSLConfigHelper.configurePemTrustOpt
 import static io.quarkus.vertx.core.runtime.SSLConfigHelper.configurePfxKeyCertOptions;
 import static io.quarkus.vertx.core.runtime.SSLConfigHelper.configurePfxTrustOptions;
 
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +17,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -29,10 +32,17 @@ import io.lettuce.core.ClientOptions;
 import io.lettuce.core.ReadFrom;
 import io.lettuce.core.RedisCredentialsProvider;
 import io.lettuce.core.RedisURI;
+import io.lettuce.core.SocketOptions;
 import io.lettuce.core.SslOptions;
 import io.lettuce.core.SslVerifyMode;
 import io.lettuce.core.StaticCredentialsProvider;
 import io.lettuce.core.cluster.ClusterTopologyRefreshOptions;
+import io.lettuce.core.protocol.ProtocolVersion;
+import io.lettuce.core.resource.Delay;
+import io.lettuce.core.resource.NettyCustomizer;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.channel.ChannelOption;
+import io.quarkus.redis.runtime.client.config.NetConfig;
 import io.quarkus.redis.runtime.client.config.RedisClientConfig;
 import io.quarkus.tls.TlsConfiguration;
 import io.quarkus.tls.TlsConfigurationRegistry;
@@ -45,8 +55,12 @@ import io.vertx.redis.client.RedisRole;
 
 /**
  * The Lettuce {@link RedisURI}s and {@link ClientOptions} derived from a {@code quarkus.redis[.<name>].*} client
- * configuration: the hosts, the credentials and the TLS settings, plus the cluster, Sentinel and replication
- * settings ({@link #readFrom}, {@link #topologyRefreshOptions} and {@link #sentinelUri}).
+ * configuration: the hosts, the credentials, the client name and the TLS settings, the protocol version, the
+ * command queue bound and the TCP socket options, plus the cluster, Sentinel and replication settings
+ * ({@link #readFrom}, {@link #topologyRefreshOptions} and {@link #sentinelUri}). The settings Lettuce only takes
+ * from its {@link io.lettuce.core.resource.ClientResources}, the reconnect delay and the Netty channel options,
+ * are exposed separately ({@link #reconnectDelay()} and {@link #nettyCustomizer()}) for
+ * {@link LettuceClientResources#clientResources} to apply.
  * <p>
  * The credentials and TLS properties are interpreted like the Vert.x Redis client interprets them, except for the
  * differences documented below:
@@ -75,6 +89,12 @@ public final class LettuceClientSettings {
     /** The default of {@code topology-cache-ttl} and of its deprecated alias {@code hash-slot-cache-ttl}. */
     public static final Duration DEFAULT_TOPOLOGY_CACHE_TTL = Duration.ofSeconds(1);
 
+    /** The default of {@code reconnect-interval} and of {@code tcp.reconnect-interval}. */
+    public static final Duration DEFAULT_RECONNECT_INTERVAL = Duration.ofSeconds(1);
+
+    /** The Vert.x query parameter naming the connection ({@code redis://host?client=name}). */
+    static final String CLIENT_QUERY_PARAMETER = "client";
+
     /**
      * Accepts every certificate chain, like the Vert.x trust-all option. It is deliberately a plain (not extended)
      * {@link X509TrustManager}: the JDK wraps it and keeps performing the endpoint identification when a hostname
@@ -98,10 +118,15 @@ public final class LettuceClientSettings {
 
     private final List<RedisURI> redisUris;
     private final ClientOptions clientOptions;
+    private final Optional<Delay> reconnectDelay;
+    private final Optional<NettyCustomizer> nettyCustomizer;
 
-    private LettuceClientSettings(List<RedisURI> redisUris, ClientOptions clientOptions) {
+    private LettuceClientSettings(List<RedisURI> redisUris, ClientOptions clientOptions, Optional<Delay> reconnectDelay,
+            Optional<NettyCustomizer> nettyCustomizer) {
         this.redisUris = redisUris;
         this.clientOptions = clientOptions;
+        this.reconnectDelay = reconnectDelay;
+        this.nettyCustomizer = nettyCustomizer;
     }
 
     /**
@@ -125,7 +150,17 @@ public final class LettuceClientSettings {
         NetClientOptions net = new NetClientOptions();
         configureTls(name, config, tlsRegistry, net, hosts);
 
-        ClientOptions.Builder options = ClientOptions.builder();
+        ClientOptions.Builder options = ClientOptions.builder()
+                // the Vert.x client always bounds the commands queued on a connection with max-waiting-handlers
+                .requestQueueSize(config.maxWaitingHandlers());
+        Optional<ProtocolVersion> protocolVersion = protocolVersion(config);
+        if (protocolVersion.isPresent()) {
+            options.protocolVersion(protocolVersion.get());
+        }
+        Optional<SocketOptions> socketOptions = socketOptions(config.tcp());
+        if (socketOptions.isPresent()) {
+            options.socketOptions(socketOptions.get());
+        }
         if (net.isSsl()) {
             options.sslOptions(sslOptions(name, net, vertx));
         }
@@ -142,9 +177,14 @@ public final class LettuceClientSettings {
             if (net.isSsl()) {
                 redisUri.setVerifyPeer(verifyMode(net));
             }
+            String clientName = clientName(name, config, host);
+            if (clientName != null) {
+                redisUri.setClientName(clientName);
+            }
             redisUris.add(redisUri);
         }
-        return new LettuceClientSettings(List.copyOf(redisUris), options.build());
+        return new LettuceClientSettings(List.copyOf(redisUris), options.build(), reconnectDelay(config),
+                nettyCustomizer(config.tcp()));
     }
 
     /**
@@ -199,6 +239,186 @@ public final class LettuceClientSettings {
 
     public ClientOptions clientOptions() {
         return clientOptions;
+    }
+
+    /**
+     * The delay between the attempts to reconnect a lost connection, when {@code reconnect-interval} is set (see
+     * {@link #reconnectDelay(RedisClientConfig)}); a setting of the client resources, not of the client.
+     */
+    public Optional<Delay> reconnectDelay() {
+        return reconnectDelay;
+    }
+
+    /**
+     * The Netty channel options of the connections, when any of the {@code tcp.*} socket properties they come from
+     * is set (see {@link #nettyCustomizer(NetConfig)}); a setting of the client resources, not of the client.
+     */
+    public Optional<NettyCustomizer> nettyCustomizer() {
+        return nettyCustomizer;
+    }
+
+    /**
+     * Maps {@code protocol-negotiation} and {@code preferred-protocol-version} onto the protocol version Lettuce
+     * requests in its handshake. With the negotiation on (the default) and no preferred version, or RESP3 preferred,
+     * the version is left to Lettuce, which sends {@code HELLO 3} and falls back to RESP2 when the server does not
+     * know {@code HELLO}, as the Vert.x client does with its preferred version. RESP2 preferred, or the negotiation
+     * off (the Vert.x client then skips {@code HELLO}), selects RESP2: Lettuce does not send {@code HELLO} either and
+     * authenticates with {@code AUTH}.
+     *
+     * @return the protocol version to request, empty to let Lettuce negotiate the newest one the server supports
+     */
+    static Optional<ProtocolVersion> protocolVersion(RedisClientConfig config) {
+        // the Vert.x and the Lettuce enumerations share their simple name; the configuration holds the Vert.x one
+        boolean resp2Preferred = config.preferredProtocolVersion().isPresent()
+                && config.preferredProtocolVersion().get() == io.vertx.redis.client.ProtocolVersion.RESP2;
+        if (!config.protocolNegotiation() || resp2Preferred) {
+            return Optional.of(ProtocolVersion.RESP2);
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * The name a connection to {@code host} registers with the server ({@code CLIENT SETNAME}, or {@code SETNAME} of
+     * {@code HELLO} with RESP3), as the Vert.x client sets it: the {@code client} query parameter of the URI when it
+     * carries one, otherwise, only when {@code configure-client-name} is set, {@code client-name} or, without it, the
+     * Quarkus client name. As with the Vert.x client, {@code client-name} alone is not applied (the recorder reports
+     * it). Lettuce applied its own {@code clientName} query parameter when it parsed the URI, so that one works too.
+     * A cluster client names the connections to the nodes it discovers after the first seed, and a Sentinel or
+     * replication client those to the master and the replicas after the first host.
+     *
+     * @return the client name, {@code null} when none is configured
+     */
+    static String clientName(String name, RedisClientConfig config, URI host) {
+        String fromUri = UserInfo.queryParameters(host).get(CLIENT_QUERY_PARAMETER);
+        if (fromUri != null && !fromUri.isEmpty()) {
+            if (config.configureClientName()) {
+                LOGGER.warnf("Your host already has a client name. The client name %s will be disregarded.",
+                        config.clientName().orElse(name));
+            }
+            return fromUri;
+        }
+        if (config.configureClientName()) {
+            return config.clientName().orElse(name);
+        }
+        return null;
+    }
+
+    /**
+     * Maps {@code tcp.connection-timeout}, {@code tcp.keep-alive} and {@code tcp.no-delay} onto the Lettuce
+     * {@link SocketOptions}. Only the set properties are applied: the Lettuce defaults (a ten seconds connect timeout,
+     * keep-alive and no-delay on) hold otherwise, not the Vert.x ones.
+     *
+     * @return the socket options, empty when none of the three properties is set
+     */
+    static Optional<SocketOptions> socketOptions(NetConfig tcp) {
+        if (tcp.connectionTimeout().isEmpty() && tcp.keepAlive().isEmpty() && tcp.noDelay().isEmpty()) {
+            return Optional.empty();
+        }
+        SocketOptions.Builder socket = SocketOptions.builder();
+        if (tcp.connectionTimeout().isPresent()) {
+            socket.connectTimeout(tcp.connectionTimeout().get());
+        }
+        if (tcp.keepAlive().isPresent()) {
+            socket.keepAlive(tcp.keepAlive().get());
+        }
+        if (tcp.noDelay().isPresent()) {
+            socket.tcpNoDelay(tcp.noDelay().get());
+        }
+        return Optional.of(socket.build());
+    }
+
+    /**
+     * Maps {@code reconnect-interval}, overridden by {@code tcp.reconnect-interval} as with the Vert.x client, onto
+     * the delay between the attempts Lettuce makes to reconnect a lost connection. Lettuce reconnects until it
+     * succeeds and does not retry the initial connection, so {@code reconnect-attempts} has no equivalent (the
+     * recorder reports it). The configuration cannot tell the default interval (one second) from an unset property,
+     * so the interval is applied when set to anything else: by default, Lettuce backs off exponentially, from 100
+     * milliseconds up to 30 seconds, instead of retrying every second. For the same reason the {@code tcp} property
+     * only overrides the client-level one when it differs from the default (the default of
+     * {@code quarkus.redis.*.reconnect-interval} is registered for every client and also matches
+     * {@code quarkus.redis.tcp.reconnect-interval}, so the default client always sees the {@code tcp} property).
+     *
+     * @return the constant delay, empty when the interval has its default
+     */
+    static Optional<Delay> reconnectDelay(RedisClientConfig config) {
+        Duration interval = config.reconnectInterval();
+        Optional<Duration> tcpInterval = config.tcp().reconnectInterval();
+        if (tcpInterval.isPresent() && !tcpInterval.get().equals(DEFAULT_RECONNECT_INTERVAL)) {
+            interval = tcpInterval.get();
+        }
+        if (interval.equals(DEFAULT_RECONNECT_INTERVAL)) {
+            return Optional.empty();
+        }
+        return Optional.of(Delay.constant(interval));
+    }
+
+    /**
+     * Maps the {@code tcp.*} socket properties Lettuce has no option of its own for onto the Netty channel options
+     * of the connections, set on the bootstrap the client connects with: {@code receive-buffer-size},
+     * {@code send-buffer-size}, {@code so-linger} (in seconds, the unit of the socket option), {@code traffic-class},
+     * {@code reuse-address} and {@code local-address}.
+     *
+     * @return the customizer, empty when none of the properties is set
+     */
+    static Optional<NettyCustomizer> nettyCustomizer(NetConfig tcp) {
+        Map<ChannelOption<?>, Object> options = new LinkedHashMap<>();
+        if (tcp.receiveBufferSize().isPresent()) {
+            options.put(ChannelOption.SO_RCVBUF, tcp.receiveBufferSize().getAsInt());
+        }
+        if (tcp.sendBufferSize().isPresent()) {
+            options.put(ChannelOption.SO_SNDBUF, tcp.sendBufferSize().getAsInt());
+        }
+        if (tcp.soLinger().isPresent()) {
+            options.put(ChannelOption.SO_LINGER, (int) tcp.soLinger().get().toSeconds());
+        }
+        if (tcp.trafficClass().isPresent()) {
+            options.put(ChannelOption.IP_TOS, tcp.trafficClass().getAsInt());
+        }
+        if (tcp.reuseAddress().isPresent()) {
+            options.put(ChannelOption.SO_REUSEADDR, tcp.reuseAddress().get());
+        }
+        SocketAddress localAddress = null;
+        if (tcp.localAddress().isPresent()) {
+            localAddress = new InetSocketAddress(tcp.localAddress().get(), 0);
+        }
+        if (options.isEmpty() && localAddress == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new ChannelCustomizer(options, localAddress));
+    }
+
+    /**
+     * Sets the channel options and the local address derived from the {@code tcp.*} properties on the bootstrap
+     * Lettuce opens its connections with (see {@link #nettyCustomizer(NetConfig)}).
+     */
+    static final class ChannelCustomizer implements NettyCustomizer {
+
+        private final Map<ChannelOption<?>, Object> options;
+        private final SocketAddress localAddress;
+
+        ChannelCustomizer(Map<ChannelOption<?>, Object> options, SocketAddress localAddress) {
+            this.options = Map.copyOf(options);
+            this.localAddress = localAddress;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void afterBootstrapInitialized(Bootstrap bootstrap) {
+            for (Map.Entry<ChannelOption<?>, Object> option : options.entrySet()) {
+                bootstrap.option((ChannelOption<Object>) option.getKey(), option.getValue());
+            }
+            if (localAddress != null) {
+                bootstrap.localAddress(localAddress);
+            }
+        }
+
+        Map<ChannelOption<?>, Object> options() {
+            return options;
+        }
+
+        SocketAddress localAddress() {
+            return localAddress;
+        }
     }
 
     /**
