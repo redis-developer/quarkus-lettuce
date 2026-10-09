@@ -26,6 +26,10 @@ import io.lettuce.core.cluster.models.partitions.RedisClusterNode.NodeFlag;
 import io.quarkus.redis.client.RedisClientName;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.autosuggest.AutoSuggestCommands;
+import io.quarkus.redis.datasource.autosuggest.GetArgs;
+import io.quarkus.redis.datasource.autosuggest.ReactiveAutoSuggestCommands;
+import io.quarkus.redis.datasource.autosuggest.Suggestion;
 import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
 import io.quarkus.redis.datasource.bitmap.BitMapCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
@@ -104,6 +108,8 @@ public class LettuceBackendResource {
     private final ReactiveJsonCommands<String> reactiveJson;
     private final CountMinCommands<String, String> countmin;
     private final ReactiveCountMinCommands<String, String> reactiveCountMin;
+    private final AutoSuggestCommands<String> autosuggest;
+    private final ReactiveAutoSuggestCommands<String> reactiveAutoSuggest;
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs,
@@ -141,6 +147,8 @@ public class LettuceBackendResource {
         this.reactiveJson = reactiveDs.json();
         this.countmin = ds.countmin(String.class);
         this.reactiveCountMin = reactiveDs.countmin(String.class);
+        this.autosuggest = ds.autosuggest(String.class);
+        this.reactiveAutoSuggest = reactiveDs.autosuggest(String.class);
     }
 
     @GET
@@ -703,6 +711,72 @@ public class LettuceBackendResource {
     }
 
     @POST
+    @Path("/autosuggest/add/{key}/{score}")
+    public long autoSuggestAdd(@PathParam("key") String key, @PathParam("score") double score,
+            @QueryParam("incr") boolean incr, String string) {
+        return autosuggest.ftSugAdd(key, string, score, incr);
+    }
+
+    @DELETE
+    @Path("/autosuggest/{key}/{string}")
+    public boolean autoSuggestDel(@PathParam("key") String key, @PathParam("string") String string) {
+        return autosuggest.ftSugDel(key, string);
+    }
+
+    @GET
+    @Path("/autosuggest/len/{key}")
+    public long autoSuggestLen(@PathParam("key") String key) {
+        return autosuggest.ftSugLen(key);
+    }
+
+    @GET
+    @Path("/autosuggest/get/{key}/{prefix}")
+    public List<String> autoSuggestGet(@PathParam("key") String key, @PathParam("prefix") String prefix,
+            @QueryParam("fuzzy") boolean fuzzy, @QueryParam("max") int max,
+            @QueryParam("withScores") boolean withScores) {
+        List<Suggestion> suggestions = fuzzy || max > 0 || withScores
+                ? autosuggest.ftSugGet(key, prefix, getArgs(fuzzy, max, withScores))
+                : autosuggest.ftSugGet(key, prefix);
+        return formatSuggestions(suggestions, withScores);
+    }
+
+    @POST
+    @Path("/autosuggest/reactive/add/{key}/{score}")
+    public Uni<Long> autoSuggestAddReactive(@PathParam("key") String key, @PathParam("score") double score,
+            @QueryParam("incr") boolean incr, String string) {
+        return reactiveAutoSuggest.ftSugAdd(key, string, score, incr);
+    }
+
+    @GET
+    @Path("/autosuggest/reactive/get/{key}/{prefix}")
+    public Uni<List<String>> autoSuggestGetReactive(@PathParam("key") String key, @PathParam("prefix") String prefix,
+            @QueryParam("fuzzy") boolean fuzzy, @QueryParam("max") int max,
+            @QueryParam("withScores") boolean withScores) {
+        return reactiveAutoSuggest.ftSugGet(key, prefix, getArgs(fuzzy, max, withScores))
+                .map(suggestions -> formatSuggestions(suggestions, withScores));
+    }
+
+    private static GetArgs getArgs(boolean fuzzy, int max, boolean withScores) {
+        GetArgs args = new GetArgs();
+        if (fuzzy) {
+            args.fuzzy();
+        }
+        if (max > 0) {
+            args.max(max);
+        }
+        if (withScores) {
+            args.withScores();
+        }
+        return args;
+    }
+
+    private static List<String> formatSuggestions(List<Suggestion> suggestions, boolean withScores) {
+        return suggestions.stream()
+                .map(s -> withScores ? s.suggestion() + ":" + s.score() : s.suggestion())
+                .toList();
+    }
+
+    @POST
     @Path("/geo/add/{key}/{longitude}/{latitude}")
     public boolean geoAdd(@PathParam("key") String key, @PathParam("longitude") double longitude,
             @PathParam("latitude") double latitude, String member) {
@@ -1183,6 +1257,30 @@ public class LettuceBackendResource {
         List<Long> queried = result.get(6);
         return result.discarded() + "," + result.size() + "," + (init == null) + "," + incremented + "," + counts + ","
                 + (mergeResult == null) + "," + queried;
+    }
+
+    @POST
+    @Path("/with-transaction/autosuggest/{key}")
+    public String withTransactionAutoSuggest(@PathParam("key") String key) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var a = tx.autosuggest(String.class);
+            a.ftSugAdd(key, "abc", 1.0);
+            a.ftSugAdd(key, "abcd", 1.0);
+            a.ftSugAdd(key, "abcde", 2.0);
+            a.ftSugAdd(key, "boo", 20);
+            a.ftSugDel(key, "boo");
+            a.ftSugLen(key);
+            a.ftSugget(key, "abcd");
+            a.ftSugget(key, "ab", new GetArgs().max(1).withScores());
+        });
+        long first = result.get(0);
+        long last = result.get(3);
+        boolean deleted = result.get(4);
+        long len = result.get(5);
+        List<Suggestion> plain = result.get(6);
+        List<Suggestion> scored = result.get(7);
+        return result.discarded() + "," + result.size() + "," + first + "," + last + "," + deleted + "," + len + ","
+                + plain.stream().map(Suggestion::suggestion).sorted().toList() + "," + formatSuggestions(scored, true);
     }
 
 }
