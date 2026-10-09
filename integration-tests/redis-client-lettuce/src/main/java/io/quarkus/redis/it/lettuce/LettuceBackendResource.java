@@ -80,6 +80,8 @@ public class LettuceBackendResource {
     private final RedisDataSource secure;
     private final RedisDataSource cluster;
     private final RedisClusterClient clusterClient;
+    private final RedisDataSource sentinel;
+    private final RedisDataSource replication;
     private final ValueCommands<String, String> values;
     private final ReactiveValueCommands<String, String> reactiveValues;
     private final KeyCommands<String> keys;
@@ -107,12 +109,16 @@ public class LettuceBackendResource {
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs,
             @RedisClientName("secure") RedisDataSource secureDs,
             @RedisClientName("cluster") RedisDataSource clusterDs,
-            @RedisClientName("cluster") RedisClusterClient clusterClient) {
+            @RedisClientName("cluster") RedisClusterClient clusterClient,
+            @RedisClientName("sentinel") RedisDataSource sentinelDs,
+            @RedisClientName("replication") RedisDataSource replicationDs) {
         this.blocking = ds;
         this.reactive = reactiveDs;
         this.secure = secureDs;
         this.cluster = clusterDs;
         this.clusterClient = clusterClient;
+        this.sentinel = sentinelDs;
+        this.replication = replicationDs;
         this.values = ds.value(String.class);
         this.reactiveValues = reactiveDs.value(String.class);
         this.keys = ds.key(String.class);
@@ -228,6 +234,75 @@ public class LettuceBackendResource {
         } catch (UnsupportedOperationException e) {
             return e.getMessage();
         }
+    }
+
+    /**
+     * Pings the {@code sentinel} client, connected through the sentinels to the master they monitor
+     * ({@code client-type=sentinel}).
+     */
+    @GET
+    @Path("/sentinel/ping")
+    public String sentinelPing() {
+        return sentinel.execute("PING").toString();
+    }
+
+    /**
+     * The role of the node the {@code sentinel} client talks to, from {@code INFO replication}: {@code master}.
+     */
+    @GET
+    @Path("/sentinel/role")
+    public String sentinelRole() {
+        return role(sentinel);
+    }
+
+    @POST
+    @Path("/sentinel/value/{key}")
+    public void sentinelSetValue(@PathParam("key") String key, String value) {
+        sentinel.value(String.class).set(key, value);
+    }
+
+    @GET
+    @Path("/sentinel/value/{key}")
+    public String sentinelGetValue(@PathParam("key") String key) {
+        return sentinel.value(String.class).get(key);
+    }
+
+    /**
+     * Pings the {@code replication} client, which discovered the master and its replica from the configured hosts
+     * ({@code client-type=replication}).
+     */
+    @GET
+    @Path("/replication/ping")
+    public String replicationPing() {
+        return replication.execute("PING").toString();
+    }
+
+    @GET
+    @Path("/replication/role")
+    public String replicationRole() {
+        return role(replication);
+    }
+
+    @POST
+    @Path("/replication/value/{key}")
+    public void replicationSetValue(@PathParam("key") String key, String value) {
+        replication.value(String.class).set(key, value);
+    }
+
+    @GET
+    @Path("/replication/value/{key}")
+    public String replicationGetValue(@PathParam("key") String key) {
+        return replication.value(String.class).get(key);
+    }
+
+    private static String role(RedisDataSource ds) {
+        String info = ds.execute("INFO", "replication").toString();
+        for (String line : info.split("\r?\n")) {
+            if (line.startsWith("role:")) {
+                return line.substring("role:".length()).trim();
+            }
+        }
+        return "unknown";
     }
 
     /**

@@ -107,6 +107,42 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void sentinelPing() {
+        RestAssured.given().when().get("/lettuce/sentinel/ping").then()
+                .statusCode(200).body(CoreMatchers.is("PONG"));
+    }
+
+    @Test
+    public void sentinelConnectsToTheMaster() {
+        RestAssured.given().when().get("/lettuce/sentinel/role").then()
+                .statusCode(200).body(CoreMatchers.is("master"));
+    }
+
+    @Test
+    public void sentinelValueSetGet() {
+        String key = getKey("sentinel-value");
+        RestAssured.given().body("s1").when().post("/lettuce/sentinel/value/" + key).then().statusCode(204);
+        RestAssured.given().when().get("/lettuce/sentinel/value/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("s1"));
+    }
+
+    @Test
+    public void replicationPing() {
+        RestAssured.given().when().get("/lettuce/replication/ping").then()
+                .statusCode(200).body(CoreMatchers.is("PONG"));
+    }
+
+    @Test
+    public void replicationWritesToTheMaster() {
+        String key = getKey("replication-value");
+        RestAssured.given().when().get("/lettuce/replication/role").then()
+                .statusCode(200).body(CoreMatchers.is("master"));
+        RestAssured.given().body("r1").when().post("/lettuce/replication/value/" + key).then().statusCode(204);
+        RestAssured.given().when().get("/lettuce/replication/value/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("r1"));
+    }
+
+    @Test
     public void dataSourcesAreServedByLettuce() {
         RestAssured.given()
                 .when()

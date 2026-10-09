@@ -1,12 +1,9 @@
 package io.quarkus.redis.lettuce.deployment;
 
-import java.io.IOException;
-import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.stream.Collectors;
 
 import org.testcontainers.containers.GenericContainer;
@@ -18,7 +15,7 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 
 /**
  * A Redis cluster of six nodes (three upstream nodes with one replica each) running in a single container, see
- * {@code redis-cluster/start-cluster.sh}, for the cluster tests. Exposes:
+ * {@code redis/start-cluster.sh}, for the cluster tests. Exposes:
  * <ul>
  * <li>{@code redis.cluster.hosts}: the {@code redis://} URIs of the first three nodes, the seeds the clients discover
  * the topology from (a few nodes only, as the other three are to be discovered);</li>
@@ -37,10 +34,10 @@ public class RedisClusterTestResource implements QuarkusTestResourceLifecycleMan
     public static final int NODES = 6;
     public static final int SEEDS = 3;
 
-    static final List<Integer> PORTS = freePorts(NODES);
+    static final List<Integer> PORTS = TestPorts.free(NODES);
 
     static final GenericContainer<?> CLUSTER = new RedisClusterContainer(PORTS)
-            .withCopyFileToContainer(MountableFile.forClasspathResource("redis-cluster/start-cluster.sh", 0755),
+            .withCopyFileToContainer(MountableFile.forClasspathResource("redis/start-cluster.sh", 0755),
                     "/start-cluster.sh")
             .withCommand(command())
             // the output of redis-cli --cluster create and of the nodes, to diagnose a cluster that does not come up
@@ -66,37 +63,6 @@ public class RedisClusterTestResource implements QuarkusTestResourceLifecycleMan
             command.add(Integer.toString(port));
         }
         return command.toArray(String[]::new);
-    }
-
-    /**
-     * Picks {@code count} free ports below 55536, as the cluster bus of a node listens on its port plus 10000. The
-     * bus ports only have to be free inside the container.
-     */
-    private static List<Integer> freePorts(int count) {
-        Random random = new Random();
-        List<ServerSocket> sockets = new ArrayList<>();
-        List<Integer> ports = new ArrayList<>();
-        try {
-            // keep every socket open until all the ports are picked, so the same port is not picked twice
-            while (ports.size() < count) {
-                int candidate = 20000 + random.nextInt(35000);
-                try {
-                    ServerSocket socket = new ServerSocket(candidate);
-                    sockets.add(socket);
-                    ports.add(candidate);
-                } catch (IOException taken) {
-                    // try another one
-                }
-            }
-        } finally {
-            for (ServerSocket socket : sockets) {
-                try {
-                    socket.close();
-                } catch (IOException ignored) {
-                }
-            }
-        }
-        return List.copyOf(ports);
     }
 
     @Override

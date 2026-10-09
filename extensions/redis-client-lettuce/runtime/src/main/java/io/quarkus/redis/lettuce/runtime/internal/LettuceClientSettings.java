@@ -41,11 +41,12 @@ import io.vertx.core.Vertx;
 import io.vertx.core.net.NetClientOptions;
 import io.vertx.core.net.TrustOptions;
 import io.vertx.redis.client.RedisReplicas;
+import io.vertx.redis.client.RedisRole;
 
 /**
  * The Lettuce {@link RedisURI}s and {@link ClientOptions} derived from a {@code quarkus.redis[.<name>].*} client
- * configuration: the hosts, the credentials and the TLS settings, plus the cluster settings ({@link #readFrom} and
- * {@link #topologyRefreshOptions}).
+ * configuration: the hosts, the credentials and the TLS settings, plus the cluster, Sentinel and replication
+ * settings ({@link #readFrom}, {@link #topologyRefreshOptions} and {@link #sentinelUri}).
  * <p>
  * The credentials and TLS properties are interpreted like the Vert.x Redis client interprets them, except for the
  * differences documented below:
@@ -160,6 +161,42 @@ public final class LettuceClientSettings {
         return redisUris;
     }
 
+    /**
+     * The URI of the master monitored by Redis Sentinel under {@code masterName}, the configured hosts being the
+     * sentinels. The credentials, the TLS settings, the timeout and the client and library names of the hosts apply
+     * to the data nodes (the master URI takes them from the first host) and to every sentinel alike (each sentinel
+     * URI is a copy of its host URI: Lettuce authenticates a sentinel with the settings of its own URI, does not copy
+     * them from the master URI, and runs the {@code SENTINEL} queries with the timeout of the sentinel URI), as with
+     * the Vert.x client, which uses the same options for both. The database is the one of the first host; a sentinel
+     * has no databases.
+     */
+    public RedisURI sentinelUri(String masterName) {
+        return sentinelUri(redisUris, masterName);
+    }
+
+    static RedisURI sentinelUri(List<RedisURI> sentinels, String masterName) {
+        RedisURI first = sentinels.get(0);
+        RedisURI.Builder master = RedisURI.builder()
+                .withSentinelMasterId(masterName)
+                .withSsl(first)
+                .withAuthentication(first)
+                .withTimeout(first.getTimeout())
+                .withDatabase(first.getDatabase());
+        if (first.getClientName() != null) {
+            master.withClientName(first.getClientName());
+        }
+        if (first.getLibraryName() != null) {
+            master.withLibraryName(first.getLibraryName());
+        }
+        if (first.getLibraryVersion() != null) {
+            master.withLibraryVersion(first.getLibraryVersion());
+        }
+        for (RedisURI host : sentinels) {
+            master.withSentinel(RedisURI.builder(host).withDatabase(0).build());
+        }
+        return master.build();
+    }
+
     public ClientOptions clientOptions() {
         return clientOptions;
     }
@@ -177,6 +214,20 @@ public final class LettuceClientSettings {
             case SHARE -> ReadFrom.ANY;
             case ALWAYS -> ReadFrom.REPLICA_PREFERRED;
         };
+    }
+
+    /**
+     * The nodes a Sentinel-managed connection reads from. {@code role=replica} reads from the replicas (falling back
+     * to the master when none is usable); the writes keep going to the master, whereas the Vert.x client sends every
+     * command of such a client to a replica and lets the writes fail there. Otherwise {@code replicas} decides, as
+     * for a cluster ({@link #readFrom(Optional)}); the Vert.x client ignores {@code replicas} in Sentinel mode.
+     * {@code role=sentinel} is rejected before this is called: a sentinel has no data commands.
+     */
+    public static ReadFrom readFrom(Optional<RedisRole> role, Optional<RedisReplicas> replicas) {
+        if (role.orElse(RedisRole.MASTER) == RedisRole.REPLICA) {
+            return ReadFrom.REPLICA_PREFERRED;
+        }
+        return readFrom(replicas);
     }
 
     /**

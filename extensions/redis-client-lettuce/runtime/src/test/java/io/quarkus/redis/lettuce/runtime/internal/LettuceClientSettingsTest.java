@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import io.lettuce.core.ReadFrom;
 import io.lettuce.core.RedisCredentials;
+import io.lettuce.core.RedisURI;
 import io.lettuce.core.SslVerifyMode;
 import io.lettuce.core.StaticCredentialsProvider;
 import io.lettuce.core.cluster.ClusterTopologyRefreshOptions;
@@ -17,6 +18,7 @@ import io.lettuce.core.cluster.ClusterTopologyRefreshOptions.RefreshTrigger;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceClientSettings.UserInfo;
 import io.vertx.core.net.NetClientOptions;
 import io.vertx.redis.client.RedisReplicas;
+import io.vertx.redis.client.RedisRole;
 
 /**
  * Unit tests for the URI credential parsing, the password precedence and the peer verification mapping of
@@ -120,5 +122,54 @@ class LettuceClientSettingsTest {
         ClusterTopologyRefreshOptions uncached = LettuceClientSettings.topologyRefreshOptions(Duration.ZERO);
         assertThat(uncached.isPeriodicRefreshEnabled()).isFalse();
         assertThat(uncached.getAdaptiveRefreshTriggers()).containsExactlyInAnyOrder(RefreshTrigger.values());
+    }
+
+    @Test
+    void mapsTheSentinelRoleOntoReadFrom() {
+        // role=replica reads from the replicas whatever replicas says; otherwise replicas decides as for a cluster
+        assertThat(LettuceClientSettings.readFrom(Optional.of(RedisRole.REPLICA), Optional.empty()))
+                .isEqualTo(ReadFrom.REPLICA_PREFERRED);
+        assertThat(LettuceClientSettings.readFrom(Optional.of(RedisRole.REPLICA), Optional.of(RedisReplicas.NEVER)))
+                .isEqualTo(ReadFrom.REPLICA_PREFERRED);
+        assertThat(LettuceClientSettings.readFrom(Optional.empty(), Optional.empty())).isEqualTo(ReadFrom.UPSTREAM);
+        assertThat(LettuceClientSettings.readFrom(Optional.of(RedisRole.MASTER), Optional.of(RedisReplicas.SHARE)))
+                .isEqualTo(ReadFrom.ANY);
+    }
+
+    @Test
+    void buildsTheSentinelUriFromTheHosts() {
+        RedisURI first = RedisURI.create(URI.create("rediss://s1:26379/2?timeout=7s&clientName=app"));
+        first.setCredentialsProvider(new StaticCredentialsProvider("user", "secret".toCharArray()));
+        first.setVerifyPeer(SslVerifyMode.CA);
+        RedisURI second = RedisURI.create(URI.create("rediss://s2:26380?timeout=7s&clientName=app"));
+        second.setCredentialsProvider(first.getCredentialsProvider());
+        second.setVerifyPeer(SslVerifyMode.CA);
+
+        RedisURI master = LettuceClientSettings.sentinelUri(java.util.List.of(first, second), "mymaster");
+
+        assertThat(master.getSentinelMasterId()).isEqualTo("mymaster");
+        assertThat(master.getDatabase()).isEqualTo(2);
+        assertThat(master.isSsl()).isTrue();
+        assertThat(master.getVerifyMode()).isEqualTo(SslVerifyMode.CA);
+        assertThat(((StaticCredentialsProvider) master.getCredentialsProvider()).resolveCredentialsNow().getUsername())
+                .isEqualTo("user");
+        // the timeout bounds the connection and the SENTINEL queries, the client name is set on every connection
+        assertThat(master.getTimeout()).isEqualTo(Duration.ofSeconds(7));
+        assertThat(master.getClientName()).isEqualTo("app");
+        // every sentinel carries the host's credentials, TLS settings, timeout and client name: Lettuce does not copy
+        // them from the master; a sentinel has no databases
+        assertThat(master.getSentinels()).hasSize(2).allSatisfy(sentinel -> {
+            assertThat(sentinel.isSsl()).isTrue();
+            assertThat(sentinel.getVerifyMode()).isEqualTo(SslVerifyMode.CA);
+            assertThat(((StaticCredentialsProvider) sentinel.getCredentialsProvider()).resolveCredentialsNow()
+                    .getPassword()).containsExactly("secret".toCharArray());
+            assertThat(sentinel.getTimeout()).isEqualTo(Duration.ofSeconds(7));
+            assertThat(sentinel.getClientName()).isEqualTo("app");
+            assertThat(sentinel.getDatabase()).isZero();
+        });
+        assertThat(master.getSentinels().get(0).getHost()).isEqualTo("s1");
+        assertThat(master.getSentinels().get(0).getPort()).isEqualTo(26379);
+        assertThat(master.getSentinels().get(1).getHost()).isEqualTo("s2");
+        assertThat(master.getSentinels().get(1).getPort()).isEqualTo(26380);
     }
 }

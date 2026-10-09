@@ -50,7 +50,10 @@ import io.quarkus.vertx.deployment.VertxBuildItem;
  * Additionally, for every client injected through a Lettuce type, the following beans are produced:
  * <ul>
  * <li>{@code io.lettuce.core.RedisClient} and {@code io.lettuce.core.api.StatefulRedisConnection<String, String>},
- * active when the client is configured as a standalone server;</li>
+ * active when the client is not configured as a cluster;</li>
+ * <li>{@code io.lettuce.core.masterreplica.StatefulRedisMasterReplicaConnection<String, String>}, active when the
+ * client is configured as a Sentinel or replication client ({@code client-type=sentinel} or {@code replication});
+ * it is the same connection as the {@code StatefulRedisConnection} bean;</li>
  * <li>{@code io.lettuce.core.cluster.RedisClusterClient} and
  * {@code io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>}, active when the client is
  * configured as a cluster ({@code client-type=cluster}).</li>
@@ -70,16 +73,21 @@ public class LettuceProcessor {
             .createSimple("io.lettuce.core.cluster.RedisClusterClient");
     private static final DotName LETTUCE_STATEFUL_CLUSTER_CONNECTION = DotName
             .createSimple("io.lettuce.core.cluster.api.StatefulRedisClusterConnection");
+    private static final DotName LETTUCE_STATEFUL_MASTER_REPLICA_CONNECTION = DotName
+            .createSimple("io.lettuce.core.masterreplica.StatefulRedisMasterReplicaConnection");
     private static final DotName LETTUCE_CLIENT_RESOURCES = DotName.createSimple("io.lettuce.core.resource.ClientResources");
 
     private static final Type STATEFUL_CONNECTION_STRING_STRING = stringString(LETTUCE_STATEFUL_CONNECTION);
     private static final Type STATEFUL_CLUSTER_CONNECTION_STRING_STRING = stringString(LETTUCE_STATEFUL_CLUSTER_CONNECTION);
+    private static final Type STATEFUL_MASTER_REPLICA_CONNECTION_STRING_STRING = stringString(
+            LETTUCE_STATEFUL_MASTER_REPLICA_CONNECTION);
 
     private static final List<DotName> LETTUCE_INJECTION_TYPES = List.of(
             LETTUCE_REDIS_CLIENT,
             LETTUCE_STATEFUL_CONNECTION,
             LETTUCE_REDIS_CLUSTER_CLIENT,
             LETTUCE_STATEFUL_CLUSTER_CONNECTION,
+            LETTUCE_STATEFUL_MASTER_REPLICA_CONNECTION,
             LETTUCE_CLIENT_RESOURCES);
 
     private static Type stringString(DotName connectionType) {
@@ -183,10 +191,12 @@ public class LettuceProcessor {
         recorder.initialize(vertxBuildItem.getVertx(), tlsRegistryBuildItem.registry(), names);
 
         for (String name : lettuceNames) {
-            // The client type is runtime configuration: both the standalone and the cluster beans are registered,
-            // and the ones of the other topology are inactive, with a message naming the types to inject instead.
+            // The client type is runtime configuration: the standalone, cluster and master/replica beans are all
+            // registered, and the ones of the other topologies are inactive, with a message naming the types to inject
+            // instead.
             Supplier<ActiveResult> checkActiveStandalone = recorder.checkActiveStandalone(name);
             Supplier<ActiveResult> checkActiveCluster = recorder.checkActiveCluster(name);
+            Supplier<ActiveResult> checkActiveMasterReplica = recorder.checkActiveMasterReplica(name);
 
             syntheticBeans.produce(
                     createLettuceBean(name, LETTUCE_REDIS_CLIENT, ClassType.create(LETTUCE_REDIS_CLIENT),
@@ -204,6 +214,10 @@ public class LettuceProcessor {
             syntheticBeans.produce(
                     createLettuceBean(name, LETTUCE_STATEFUL_CLUSTER_CONNECTION, STATEFUL_CLUSTER_CONNECTION_STRING_STRING,
                             checkActiveCluster, recorder.getConnection(name)));
+            syntheticBeans.produce(
+                    createLettuceBean(name, LETTUCE_STATEFUL_MASTER_REPLICA_CONNECTION,
+                            STATEFUL_MASTER_REPLICA_CONNECTION_STRING_STRING, checkActiveMasterReplica,
+                            recorder.getConnection(name)));
         }
 
         for (String name : dataSourceNames) {
