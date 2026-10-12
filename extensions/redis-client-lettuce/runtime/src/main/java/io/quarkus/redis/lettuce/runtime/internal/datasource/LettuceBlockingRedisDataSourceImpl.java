@@ -44,6 +44,7 @@ import io.quarkus.redis.datasource.set.ReactiveSetCommands;
 import io.quarkus.redis.datasource.set.SetCommands;
 import io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands;
 import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
+import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
 import io.quarkus.redis.datasource.stream.StreamCommands;
 import io.quarkus.redis.datasource.string.StringCommands;
 import io.quarkus.redis.datasource.timeseries.TimeSeriesCommands;
@@ -66,6 +67,7 @@ import io.quarkus.redis.runtime.datasource.BlockingKeyCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingListCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingSetCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingSortedSetCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingStreamCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingStringCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingTransactionalRedisDataSourceImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
@@ -428,13 +430,15 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, F, V> StreamCommands<K, F, V> stream(Class<K> redisKeyType, Class<F> fieldType, Class<V> valueType) {
-        throw groupNotImplemented("stream");
+        ReactiveStreamCommands<K, F, V> r = reactive.stream(redisKeyType, fieldType, valueType);
+        return new BlockingStreamCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, F, V> StreamCommands<K, F, V> stream(TypeReference<K> redisKeyType, TypeReference<F> fieldType,
             TypeReference<V> valueType) {
-        throw groupNotImplemented("stream");
+        ReactiveStreamCommands<K, F, V> r = reactive.stream(redisKeyType, fieldType, valueType);
+        return new BlockingStreamCommandsImpl<>(this, r, timeout);
     }
 
     @Override

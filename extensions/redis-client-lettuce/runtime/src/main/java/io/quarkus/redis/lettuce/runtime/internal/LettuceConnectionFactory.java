@@ -55,11 +55,13 @@ public class LettuceConnectionFactory {
      * Blocking command families. Their timeout is the explicit {@code Duration} argument the caller
      * passes to Redis, not the shared {@code quarkus.redis.timeout} — so the client-side command
      * timeout is disabled for them and left to the caller's own argument plus the pooled connection
-     * bound (see {@code lettuce-blocking-connection-pool-proposal.md}).
+     * bound (see {@code lettuce-blocking-connection-pool-proposal.md}). {@code XREAD} and
+     * {@code XREADGROUP} only block with {@code BLOCK}, whose duration then bounds them; the command
+     * type is all this source sees, so the non-blocking form is exempted as well.
      */
     private static final Set<CommandType> BLOCKING_COMMANDS = Set.of(
             CommandType.BLPOP, CommandType.BRPOP, CommandType.BLMOVE, CommandType.BLMPOP, CommandType.BRPOPLPUSH,
-            CommandType.BZPOPMIN, CommandType.BZPOPMAX, CommandType.BZMPOP);
+            CommandType.BZPOPMIN, CommandType.BZPOPMAX, CommandType.BZMPOP, CommandType.XREAD, CommandType.XREADGROUP);
 
     /**
      * How the master and the replicas of a Sentinel or replication client are found, see

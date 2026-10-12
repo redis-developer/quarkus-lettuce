@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.hamcrest.CoreMatchers;
 import org.junit.jupiter.api.Test;
@@ -1234,6 +1235,398 @@ class LettuceBackendTest {
         assertEquals("false,8,1,4,true,3,[abcd, abcde],[abcde:1.0]", body);
         RestAssured.given().when().get("/lettuce/autosuggest/len/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("3"));
+    }
+
+    @Test
+    public void streamAddLenRangeDel() {
+        String key = getKey("stream-basic");
+        RestAssured.given().when().delete("/lettuce/key/" + key).then().statusCode(200);
+
+        RestAssured.given().queryParam("id", "1-0").body("b=2,a=1").when().post("/lettuce/stream/add/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("1-0"));
+        RestAssured.given().queryParam("id", "2-0").body("a=3").when().post("/lettuce/stream/add/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2-0"));
+        // auto-generated id: <millis>-<sequence>
+        String generated = RestAssured.given().body("a=4").when().post("/lettuce/stream/add/" + key).then()
+                .statusCode(200).extract().asString();
+        assertTrue(generated.matches("\\d+-\\d+"), generated);
+
+        RestAssured.given().when().get("/lettuce/stream/len/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("3"));
+
+        RestAssured.given().when().get("/lettuce/stream/range/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(3))
+                .body("[0]", CoreMatchers.is(key + ":1-0:a=1,b=2"))
+                .body("[1]", CoreMatchers.is(key + ":2-0:a=3"))
+                .body("[2]", CoreMatchers.is(key + ":" + generated + ":a=4"));
+        RestAssured.given().queryParam("from", "2-0").when().get("/lettuce/stream/range/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("[0]", CoreMatchers.is(key + ":2-0:a=3"));
+        RestAssured.given().queryParam("count", 1).when().get("/lettuce/stream/range/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is(key + ":1-0:a=1,b=2"));
+        // XREVRANGE takes the bounds from the highest to the lowest
+        RestAssured.given().queryParam("rev", true).queryParam("from", "2-0").queryParam("to", "1-0").when()
+                .get("/lettuce/stream/range/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("[0]", CoreMatchers.is(key + ":2-0:a=3"))
+                .body("[1]", CoreMatchers.is(key + ":1-0:a=1,b=2"));
+        RestAssured.given().queryParam("rev", true).queryParam("from", "+").queryParam("to", "-").queryParam("count", 1)
+                .when().get("/lettuce/stream/range/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is(key + ":" + generated + ":a=4"));
+
+        // XDEL counts only the ids that existed
+        RestAssured.given().queryParam("id", "1-0").queryParam("id", "9-0").when().delete("/lettuce/stream/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().when().get("/lettuce/stream/len/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+
+        // MAXLEN trims the stream down to the newest entries
+        RestAssured.given().queryParam("maxlen", 1).body("a=5").when().post("/lettuce/stream/add/" + key).then()
+                .statusCode(200);
+        RestAssured.given().when().get("/lettuce/stream/range/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.endsWith(":a=5"));
+
+        // NOMKSTREAM does not create a missing stream: no id is returned
+        String missing = getKey("stream-basic-missing");
+        RestAssured.given().when().delete("/lettuce/key/" + missing).then().statusCode(200);
+        RestAssured.given().queryParam("nomkstream", true).body("a=1").when().post("/lettuce/stream/add/" + missing)
+                .then().statusCode(204);
+        RestAssured.given().when().get("/lettuce/key/exists/" + missing).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+    }
+
+    @Test
+    public void streamTrim() {
+        String key = getKey("stream-trim");
+        RestAssured.given().when().delete("/lettuce/key/" + key).then().statusCode(200);
+        for (int i = 1; i <= 5; i++) {
+            RestAssured.given().queryParam("id", i + "-0").body("a=" + i).when().post("/lettuce/stream/add/" + key)
+                    .then().statusCode(200);
+        }
+        RestAssured.given().queryParam("maxlen", 3).when().post("/lettuce/stream/trim/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().when().get("/lettuce/stream/range/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(3))
+                .body("[0]", CoreMatchers.is(key + ":3-0:a=3"));
+        // the plain threshold is a MINID: entries with a lower id are removed
+        RestAssured.given().queryParam("minid", "5-0").when().post("/lettuce/stream/trim/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().when().get("/lettuce/stream/range/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is(key + ":5-0:a=5"));
+    }
+
+    @Test
+    public void streamRead() {
+        String key1 = getKey("stream-read-1");
+        String key2 = getKey("stream-read-2");
+        String empty = getKey("stream-read-empty");
+        for (String key : List.of(key1, key2, empty)) {
+            RestAssured.given().when().delete("/lettuce/key/" + key).then().statusCode(200);
+        }
+        RestAssured.given().queryParam("id", "1-0").body("a=1").when().post("/lettuce/stream/add/" + key1).then()
+                .statusCode(200);
+        RestAssured.given().queryParam("id", "2-0").body("a=2").when().post("/lettuce/stream/add/" + key1).then()
+                .statusCode(200);
+        RestAssured.given().queryParam("id", "1-0").body("b=1").when().post("/lettuce/stream/add/" + key2).then()
+                .statusCode(200);
+
+        RestAssured.given().when().get("/lettuce/stream/read/" + key1).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("[0]", CoreMatchers.is(key1 + ":1-0:a=1"))
+                .body("[1]", CoreMatchers.is(key1 + ":2-0:a=2"));
+        // only the entries after the given id
+        RestAssured.given().queryParam("id", "1-0").when().get("/lettuce/stream/read/" + key1).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is(key1 + ":2-0:a=2"));
+        RestAssured.given().queryParam("count", 1).when().get("/lettuce/stream/read/" + key1).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is(key1 + ":1-0:a=1"));
+        // nothing after the last id
+        RestAssured.given().queryParam("id", "2-0").when().get("/lettuce/stream/read/" + key1).then()
+                .statusCode(200).body("size()", CoreMatchers.is(0));
+
+        // several streams at once, COUNT applying per stream
+        RestAssured.given().queryParam("stream", key1 + ":0-0").queryParam("stream", key2 + ":0-0").when()
+                .get("/lettuce/stream/read").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(3))
+                .body("$", CoreMatchers.hasItems(key1 + ":1-0:a=1", key1 + ":2-0:a=2", key2 + ":1-0:b=1"));
+        RestAssured.given().queryParam("stream", key1 + ":0-0").queryParam("stream", key2 + ":0-0")
+                .queryParam("count", 1).when().get("/lettuce/stream/read").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("$", CoreMatchers.hasItems(key1 + ":1-0:a=1", key2 + ":1-0:b=1"));
+
+        // a blocking read on a stream with no new entries times out with an empty result
+        long start = System.nanoTime();
+        RestAssured.given().queryParam("id", "$").queryParam("block", 200).when()
+                .get("/lettuce/stream/read/" + empty).then()
+                .statusCode(200).body("size()", CoreMatchers.is(0));
+        assertTrue(System.nanoTime() - start >= TimeUnit.MILLISECONDS.toNanos(150));
+    }
+
+    @Test
+    public void streamReadBlockingIsServedWhileTheSharedConnectionStaysFree() {
+        String key = getKey("stream-read-blocking");
+        RestAssured.given().when().delete("/lettuce/key/" + key).then().statusCode(200);
+        // the XADD goes through while the XREAD blocks on a pooled connection, which then completes with the message
+        RestAssured.given().body("a=1").when().post("/lettuce/stream/read/blocking/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.startsWith(key + ":"))
+                .body("[0]", CoreMatchers.endsWith(":a=1"));
+    }
+
+    @Test
+    public void streamConsumerGroups() {
+        String key = getKey("stream-groups");
+        RestAssured.given().when().delete("/lettuce/key/" + key).then().statusCode(200);
+
+        // MKSTREAM creates the stream along with the group; the second group then needs no MKSTREAM
+        RestAssured.given().queryParam("mkstream", true).when().post("/lettuce/stream/group/" + key + "/g1").then()
+                .statusCode(204);
+        RestAssured.given().queryParam("from", "0").when().post("/lettuce/stream/group/" + key + "/g2").then()
+                .statusCode(204);
+        RestAssured.given().when().get("/lettuce/key/type/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("STREAM"));
+        for (int i = 1; i <= 3; i++) {
+            RestAssured.given().queryParam("id", i + "-0").body("a=" + i).when().post("/lettuce/stream/add/" + key)
+                    .then().statusCode(200);
+        }
+
+        RestAssured.given().queryParam("count", 1).when().get("/lettuce/stream/readgroup/" + key + "/g1/c1").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is(key + ":1-0:a=1"));
+        RestAssured.given().when().get("/lettuce/stream/readgroup/" + key + "/g1/c2").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("[0]", CoreMatchers.is(key + ":2-0:a=2"))
+                .body("[1]", CoreMatchers.is(key + ":3-0:a=3"));
+        // nothing new is left for the group
+        RestAssured.given().when().get("/lettuce/stream/readgroup/" + key + "/g1/c2").then()
+                .statusCode(200).body("size()", CoreMatchers.is(0));
+
+        RestAssured.given().when().get("/lettuce/stream/pending/" + key + "/g1").then()
+                .statusCode(200).body(CoreMatchers.is("3,1-0,3-0,{c1=1, c2=2}"));
+        RestAssured.given().when().get("/lettuce/stream/pending/" + key + "/g1/range").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(3))
+                .body("[0]", CoreMatchers.is("1-0:c1:1"))
+                .body("[1]", CoreMatchers.is("2-0:c2:1"))
+                .body("[2]", CoreMatchers.is("3-0:c2:1"));
+        RestAssured.given().queryParam("consumer", "c2").queryParam("count", 1).when()
+                .get("/lettuce/stream/pending/" + key + "/g1/range").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is("2-0:c2:1"));
+        // nothing has been idle for an hour
+        RestAssured.given().queryParam("idle", 3_600_000).when().get("/lettuce/stream/pending/" + key + "/g1/range")
+                .then().statusCode(200).body("size()", CoreMatchers.is(0));
+
+        // reading the history (an explicit id instead of ">") returns the consumer's own pending entries
+        RestAssured.given().queryParam("id", "0-0").when().get("/lettuce/stream/readgroup/" + key + "/g1/c2").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("[0]", CoreMatchers.is(key + ":2-0:a=2"));
+
+        RestAssured.given().body("2-0,3-0").when().post("/lettuce/stream/ack/" + key + "/g1").then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().body("2-0,3-0").when().post("/lettuce/stream/ack/" + key + "/g1").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+        RestAssured.given().when().get("/lettuce/stream/pending/" + key + "/g1").then()
+                .statusCode(200).body(CoreMatchers.is("1,1-0,1-0,{c1=1}"));
+        RestAssured.given().queryParam("id", "0-0").when().get("/lettuce/stream/readgroup/" + key + "/g1/c2").then()
+                .statusCode(200).body("size()", CoreMatchers.is(0));
+
+        // NOACK: delivered without being added to the pending list
+        RestAssured.given().queryParam("noack", true).when().get("/lettuce/stream/readgroup/" + key + "/g2/c1").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(3))
+                .body("[0]", CoreMatchers.is(key + ":1-0:a=1"));
+        RestAssured.given().when().get("/lettuce/stream/pending/" + key + "/g2").then()
+                .statusCode(200).body(CoreMatchers.is("0,null,null,{}"));
+
+        // consumers: created once, deleting one returns its number of pending entries
+        RestAssured.given().when().post("/lettuce/stream/group/" + key + "/g1/consumer/c3").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().post("/lettuce/stream/group/" + key + "/g1/consumer/c3").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().when().delete("/lettuce/stream/group/" + key + "/g1/consumer/c1").then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().when().get("/lettuce/stream/pending/" + key + "/g1").then()
+                .statusCode(200).body(CoreMatchers.is("0,null,null,{}"));
+
+        // SETID rewinds the group: everything is delivered again
+        RestAssured.given().queryParam("from", "0").when().post("/lettuce/stream/group/" + key + "/g1/setid").then()
+                .statusCode(204);
+        RestAssured.given().when().get("/lettuce/stream/readgroup/" + key + "/g1/c3").then()
+                .statusCode(200).body("size()", CoreMatchers.is(3));
+
+        RestAssured.given().when().delete("/lettuce/stream/group/" + key + "/g2").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().delete("/lettuce/stream/group/" + key + "/g2").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+    }
+
+    @Test
+    public void streamReadGroupMultipleStreams() {
+        String key1 = getKey("stream-groups-multi-1");
+        String key2 = getKey("stream-groups-multi-2");
+        for (String key : List.of(key1, key2)) {
+            RestAssured.given().when().delete("/lettuce/key/" + key).then().statusCode(200);
+            RestAssured.given().queryParam("mkstream", true).queryParam("from", "0").when()
+                    .post("/lettuce/stream/group/" + key + "/g").then().statusCode(204);
+            RestAssured.given().queryParam("id", "1-0").body("a=1").when().post("/lettuce/stream/add/" + key).then()
+                    .statusCode(200);
+            RestAssured.given().queryParam("id", "2-0").body("a=2").when().post("/lettuce/stream/add/" + key).then()
+                    .statusCode(200);
+        }
+        RestAssured.given().queryParam("stream", key1 + ":>").queryParam("stream", key2 + ":>").queryParam("count", 1)
+                .when().get("/lettuce/stream/readgroup/g/c").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("$", CoreMatchers.hasItems(key1 + ":1-0:a=1", key2 + ":1-0:a=1"));
+        RestAssured.given().queryParam("stream", key1 + ":>").queryParam("stream", key2 + ":>").when()
+                .get("/lettuce/stream/readgroup/g/c").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("$", CoreMatchers.hasItems(key1 + ":2-0:a=2", key2 + ":2-0:a=2"));
+        // a blocking read with nothing new times out with an empty result
+        RestAssured.given().queryParam("stream", key1 + ":>").queryParam("stream", key2 + ":>")
+                .queryParam("block", 200).when().get("/lettuce/stream/readgroup/g/c").then()
+                .statusCode(200).body("size()", CoreMatchers.is(0));
+    }
+
+    @Test
+    public void streamClaim() {
+        String key = getKey("stream-claim");
+        RestAssured.given().when().delete("/lettuce/key/" + key).then().statusCode(200);
+        RestAssured.given().queryParam("mkstream", true).queryParam("from", "0").when()
+                .post("/lettuce/stream/group/" + key + "/g1").then().statusCode(204);
+        for (int i = 1; i <= 3; i++) {
+            RestAssured.given().queryParam("id", i + "-0").body("a=" + i).when().post("/lettuce/stream/add/" + key)
+                    .then().statusCode(200);
+        }
+        RestAssured.given().when().get("/lettuce/stream/readgroup/" + key + "/g1/c1").then()
+                .statusCode(200).body("size()", CoreMatchers.is(3));
+
+        // XCLAIM moves the entry to the new consumer and counts another delivery; JUSTID returns no payload and
+        // does not count a delivery
+        RestAssured.given().queryParam("minIdle", 0).body("1-0").when().post("/lettuce/stream/claim/" + key + "/g1/c2")
+                .then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is(key + ":1-0:a=1"));
+        RestAssured.given().queryParam("minIdle", 0).queryParam("justId", true).body("2-0").when()
+                .post("/lettuce/stream/claim/" + key + "/g1/c2").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is(key + ":2-0:"));
+        // an id that is not pending is skipped
+        RestAssured.given().queryParam("minIdle", 0).body("9-0").when().post("/lettuce/stream/claim/" + key + "/g1/c2")
+                .then().statusCode(200).body("size()", CoreMatchers.is(0));
+        RestAssured.given().when().get("/lettuce/stream/pending/" + key + "/g1/range").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(3))
+                .body("[0]", CoreMatchers.is("1-0:c2:2"))
+                .body("[1]", CoreMatchers.is("2-0:c2:1"))
+                .body("[2]", CoreMatchers.is("3-0:c1:1"));
+
+        // XAUTOCLAIM scans the pending entries from the start id: the first element is where to continue from
+        RestAssured.given().queryParam("minIdle", 0).queryParam("count", 2).when()
+                .post("/lettuce/stream/autoclaim/" + key + "/g1/c3").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(3))
+                .body("[0]", CoreMatchers.is("3-0"))
+                .body("[1]", CoreMatchers.is(key + ":1-0:a=1"))
+                .body("[2]", CoreMatchers.is(key + ":2-0:a=2"));
+        RestAssured.given().queryParam("minIdle", 0).queryParam("start", "3-0").queryParam("count", 10)
+                .queryParam("justId", true).when().post("/lettuce/stream/autoclaim/" + key + "/g1/c3").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("[0]", CoreMatchers.is("0-0"))
+                .body("[1]", CoreMatchers.is(key + ":3-0:"));
+        RestAssured.given().when().get("/lettuce/stream/pending/" + key + "/g1").then()
+                .statusCode(200).body(CoreMatchers.is("3,1-0,3-0,{c3=3}"));
+        // nothing has been idle for an hour: nothing to claim
+        RestAssured.given().queryParam("minIdle", 3_600_000).when()
+                .post("/lettuce/stream/autoclaim/" + key + "/g1/c1").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is("0-0"));
+    }
+
+    @Test
+    public void streamReactive() {
+        String key = getKey("stream-reactive");
+        RestAssured.given().when().delete("/lettuce/key/" + key).then().statusCode(200);
+
+        RestAssured.given().queryParam("id", "1-0").body("a=1").when().post("/lettuce/stream/reactive/add/" + key)
+                .then().statusCode(200).body(CoreMatchers.is("1-0"));
+        String generated = RestAssured.given().body("a=2").when().post("/lettuce/stream/reactive/add/" + key).then()
+                .statusCode(200).extract().asString();
+        assertTrue(generated.matches("\\d+-\\d+"), generated);
+        RestAssured.given().when().get("/lettuce/stream/reactive/len/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().when().get("/lettuce/stream/reactive/range/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("[0]", CoreMatchers.is(key + ":1-0:a=1"))
+                .body("[1]", CoreMatchers.is(key + ":" + generated + ":a=2"));
+        RestAssured.given().queryParam("id", "1-0").when().get("/lettuce/stream/reactive/read/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is(key + ":" + generated + ":a=2"));
+        // a blocking read with nothing new times out with an empty result
+        RestAssured.given().queryParam("id", "$").queryParam("block", 200).when()
+                .get("/lettuce/stream/reactive/read/" + key).then()
+                .statusCode(200).body("size()", CoreMatchers.is(0));
+
+        RestAssured.given().queryParam("from", "0").when().post("/lettuce/stream/group/" + key + "/g1").then()
+                .statusCode(204);
+        RestAssured.given().when().get("/lettuce/stream/reactive/readgroup/" + key + "/g1/c1").then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(2))
+                .body("[0]", CoreMatchers.is(key + ":1-0:a=1"));
+        RestAssured.given().when().get("/lettuce/stream/reactive/pending/" + key + "/g1").then()
+                .statusCode(200).body(CoreMatchers.is("2,1-0," + generated + ",{c1=2}"));
+        RestAssured.given().body("1-0").when().post("/lettuce/stream/reactive/ack/" + key + "/g1").then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().when().get("/lettuce/stream/reactive/pending/" + key + "/g1").then()
+                .statusCode(200).body(CoreMatchers.is("1," + generated + "," + generated + ",{c1=1}"));
+    }
+
+    @Test
+    public void withTransactionStream() {
+        String key = getKey("tx-stream");
+        RestAssured.given().when().delete("/lettuce/key/" + key).then().statusCode(200);
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/stream/" + key)
+                .then().statusCode(200).extract().asString();
+        // group create -> null, 2x add -> the ids, len -> 2, range / read (BLOCK is ignored inside MULTI) /
+        // readgroup -> both entries, pending -> 2 for c1, ack(1-0) -> 1, del of a missing id -> 0, trim MAXLEN 1 -> 1
+        String entries = "[" + key + ":1-0:a=1, " + key + ":2-0:a=1]";
+        assertEquals("false,11,true,1-0,2-0,2," + entries + "," + entries + "," + entries + ",2,1-0,2-0,{c1=2},1,0,1",
+                body);
+        RestAssured.given().when().get("/lettuce/stream/range/" + key).then()
+                .statusCode(200)
+                .body("size()", CoreMatchers.is(1))
+                .body("[0]", CoreMatchers.is(key + ":2-0:a=1"));
     }
 
 }

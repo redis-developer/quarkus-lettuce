@@ -1,5 +1,7 @@
 package io.quarkus.redis.it.lettuce;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -10,10 +12,14 @@ import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -63,6 +69,20 @@ import io.quarkus.redis.datasource.sortedset.ScoreRange;
 import io.quarkus.redis.datasource.sortedset.ScoredValue;
 import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
+import io.quarkus.redis.datasource.stream.ClaimedMessages;
+import io.quarkus.redis.datasource.stream.PendingMessage;
+import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
+import io.quarkus.redis.datasource.stream.StreamCommands;
+import io.quarkus.redis.datasource.stream.StreamMessage;
+import io.quarkus.redis.datasource.stream.StreamRange;
+import io.quarkus.redis.datasource.stream.XAddArgs;
+import io.quarkus.redis.datasource.stream.XClaimArgs;
+import io.quarkus.redis.datasource.stream.XGroupCreateArgs;
+import io.quarkus.redis.datasource.stream.XPendingArgs;
+import io.quarkus.redis.datasource.stream.XPendingSummary;
+import io.quarkus.redis.datasource.stream.XReadArgs;
+import io.quarkus.redis.datasource.stream.XReadGroupArgs;
+import io.quarkus.redis.datasource.stream.XTrimArgs;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
@@ -104,6 +124,8 @@ public class LettuceBackendResource {
     private final ReactiveHyperLogLogCommands<String, String> reactiveHyperLogLog;
     private final GeoCommands<String, String> geo;
     private final ReactiveGeoCommands<String, String> reactiveGeo;
+    private final StreamCommands<String, String, String> stream;
+    private final ReactiveStreamCommands<String, String, String> reactiveStream;
     private final JsonCommands<String> json;
     private final ReactiveJsonCommands<String> reactiveJson;
     private final CountMinCommands<String, String> countmin;
@@ -143,6 +165,8 @@ public class LettuceBackendResource {
         this.reactiveHyperLogLog = reactiveDs.hyperloglog(String.class);
         this.geo = ds.geo(String.class);
         this.reactiveGeo = reactiveDs.geo(String.class);
+        this.stream = ds.stream(String.class);
+        this.reactiveStream = reactiveDs.stream(String.class);
         this.json = ds.json();
         this.reactiveJson = reactiveDs.json();
         this.countmin = ds.countmin(String.class);
@@ -1281,6 +1305,385 @@ public class LettuceBackendResource {
         List<Suggestion> scored = result.get(7);
         return result.discarded() + "," + result.size() + "," + first + "," + last + "," + deleted + "," + len + ","
                 + plain.stream().map(Suggestion::suggestion).sorted().toList() + "," + formatSuggestions(scored, true);
+    }
+
+    private static Map<String, String> parsePayload(String body) {
+        Map<String, String> payload = new LinkedHashMap<>();
+        for (String pair : body.split(",")) {
+            String[] fieldAndValue = pair.split("=", 2);
+            payload.put(fieldAndValue[0], fieldAndValue[1]);
+        }
+        return payload;
+    }
+
+    private static Map<String, String> parseLastIds(List<String> streams) {
+        Map<String, String> lastIds = new LinkedHashMap<>();
+        for (String s : streams) {
+            String[] keyAndId = s.split(":", 2);
+            lastIds.put(keyAndId[0], keyAndId[1]);
+        }
+        return lastIds;
+    }
+
+    /**
+     * {@code key:id:field=value,field=value}, the fields sorted, so that the tests can assert on the whole message.
+     */
+    private static String formatMessage(StreamMessage<String, String, String> message) {
+        Map<String, String> payload = message.payload() == null ? Map.of() : new TreeMap<>(message.payload());
+        return message.key() + ":" + message.id() + ":" + payload.entrySet().stream()
+                .map(e -> e.getKey() + "=" + e.getValue())
+                .collect(Collectors.joining(","));
+    }
+
+    private static List<String> formatMessages(List<StreamMessage<String, String, String>> messages) {
+        return messages.stream().map(LettuceBackendResource::formatMessage).toList();
+    }
+
+    private static List<String> formatPending(List<PendingMessage> pending) {
+        return pending.stream()
+                .map(p -> p.getMessageId() + ":" + p.getConsumer() + ":" + p.getDeliveryCount())
+                .toList();
+    }
+
+    private static String formatPendingSummary(XPendingSummary summary) {
+        return summary.getPendingCount() + "," + summary.getLowestId() + "," + summary.getHighestId() + ","
+                + new TreeMap<>(summary.getConsumers());
+    }
+
+    @POST
+    @Path("/stream/add/{key}")
+    public String streamAdd(@PathParam("key") String key, @QueryParam("id") String id,
+            @QueryParam("maxlen") Long maxlen, @QueryParam("nomkstream") boolean nomkstream, String payload) {
+        if (id == null && maxlen == null && !nomkstream) {
+            return stream.xadd(key, parsePayload(payload));
+        }
+        XAddArgs args = new XAddArgs();
+        if (id != null) {
+            args.id(id);
+        }
+        if (maxlen != null) {
+            args.maxlen(maxlen);
+        }
+        if (nomkstream) {
+            args.nomkstream();
+        }
+        return stream.xadd(key, args, parsePayload(payload));
+    }
+
+    @GET
+    @Path("/stream/len/{key}")
+    public long streamLen(@PathParam("key") String key) {
+        return stream.xlen(key);
+    }
+
+    @GET
+    @Path("/stream/range/{key}")
+    public List<String> streamRange(@PathParam("key") String key, @QueryParam("from") @DefaultValue("-") String from,
+            @QueryParam("to") @DefaultValue("+") String to, @QueryParam("count") int count,
+            @QueryParam("rev") boolean rev) {
+        StreamRange range = StreamRange.of(from, to);
+        List<StreamMessage<String, String, String>> messages;
+        if (rev) {
+            messages = count > 0 ? stream.xrevrange(key, range, count) : stream.xrevrange(key, range);
+        } else {
+            messages = count > 0 ? stream.xrange(key, range, count) : stream.xrange(key, range);
+        }
+        return formatMessages(messages);
+    }
+
+    @GET
+    @Path("/stream/read/{key}")
+    public List<String> streamRead(@PathParam("key") String key, @QueryParam("id") @DefaultValue("0-0") String id,
+            @QueryParam("count") int count, @QueryParam("block") long block) {
+        if (count == 0 && block == 0) {
+            return formatMessages(stream.xread(key, id));
+        }
+        return formatMessages(stream.xread(key, id, readArgs(count, block)));
+    }
+
+    @GET
+    @Path("/stream/read")
+    public List<String> streamReadMultiple(@QueryParam("stream") List<String> streams, @QueryParam("count") int count,
+            @QueryParam("block") long block) {
+        Map<String, String> lastIds = parseLastIds(streams);
+        if (count == 0 && block == 0) {
+            return formatMessages(stream.xread(lastIds));
+        }
+        return formatMessages(stream.xread(lastIds, readArgs(count, block)));
+    }
+
+    private static XReadArgs readArgs(int count, long block) {
+        XReadArgs args = new XReadArgs();
+        if (count > 0) {
+            args.count(count);
+        }
+        if (block > 0) {
+            args.block(Duration.ofMillis(block));
+        }
+        return args;
+    }
+
+    @POST
+    @Path("/stream/read/blocking/{key}")
+    public List<String> streamReadBlocking(@PathParam("key") String key, String payload) {
+        CompletableFuture<List<StreamMessage<String, String, String>>> read = reactiveStream
+                .xread(key, "0-0", new XReadArgs().block(Duration.ofSeconds(5)))
+                .subscribeAsCompletionStage();
+        stream.xadd(key, parsePayload(payload));
+        return formatMessages(read.join());
+    }
+
+    @POST
+    @Path("/stream/group/{key}/{group}")
+    public void streamGroupCreate(@PathParam("key") String key, @PathParam("group") String group,
+            @QueryParam("from") @DefaultValue("$") String from, @QueryParam("mkstream") boolean mkstream) {
+        if (mkstream) {
+            stream.xgroupCreate(key, group, from, new XGroupCreateArgs().mkstream());
+        } else {
+            stream.xgroupCreate(key, group, from);
+        }
+    }
+
+    @DELETE
+    @Path("/stream/group/{key}/{group}")
+    public boolean streamGroupDestroy(@PathParam("key") String key, @PathParam("group") String group) {
+        return stream.xgroupDestroy(key, group);
+    }
+
+    @POST
+    @Path("/stream/group/{key}/{group}/setid")
+    public void streamGroupSetId(@PathParam("key") String key, @PathParam("group") String group,
+            @QueryParam("from") String from) {
+        stream.xgroupSetId(key, group, from);
+    }
+
+    @POST
+    @Path("/stream/group/{key}/{group}/consumer/{consumer}")
+    public boolean streamGroupCreateConsumer(@PathParam("key") String key, @PathParam("group") String group,
+            @PathParam("consumer") String consumer) {
+        return stream.xgroupCreateConsumer(key, group, consumer);
+    }
+
+    @DELETE
+    @Path("/stream/group/{key}/{group}/consumer/{consumer}")
+    public long streamGroupDelConsumer(@PathParam("key") String key, @PathParam("group") String group,
+            @PathParam("consumer") String consumer) {
+        return stream.xgroupDelConsumer(key, group, consumer);
+    }
+
+    @GET
+    @Path("/stream/readgroup/{key}/{group}/{consumer}")
+    public List<String> streamReadGroup(@PathParam("key") String key, @PathParam("group") String group,
+            @PathParam("consumer") String consumer, @QueryParam("id") @DefaultValue(">") String id,
+            @QueryParam("count") int count, @QueryParam("noack") boolean noack, @QueryParam("block") long block) {
+        if (count == 0 && !noack && block == 0) {
+            return formatMessages(stream.xreadgroup(group, consumer, key, id));
+        }
+        return formatMessages(stream.xreadgroup(group, consumer, key, id, readGroupArgs(count, noack, block)));
+    }
+
+    @GET
+    @Path("/stream/readgroup/{group}/{consumer}")
+    public List<String> streamReadGroupMultiple(@PathParam("group") String group,
+            @PathParam("consumer") String consumer, @QueryParam("stream") List<String> streams,
+            @QueryParam("count") int count, @QueryParam("noack") boolean noack, @QueryParam("block") long block) {
+        Map<String, String> lastIds = parseLastIds(streams);
+        if (count == 0 && !noack && block == 0) {
+            return formatMessages(stream.xreadgroup(group, consumer, lastIds));
+        }
+        return formatMessages(stream.xreadgroup(group, consumer, lastIds, readGroupArgs(count, noack, block)));
+    }
+
+    private static XReadGroupArgs readGroupArgs(int count, boolean noack, long block) {
+        XReadGroupArgs args = new XReadGroupArgs();
+        if (count > 0) {
+            args.count(count);
+        }
+        if (noack) {
+            args.noack();
+        }
+        if (block > 0) {
+            args.block(Duration.ofMillis(block));
+        }
+        return args;
+    }
+
+    @POST
+    @Path("/stream/ack/{key}/{group}")
+    public int streamAck(@PathParam("key") String key, @PathParam("group") String group, String ids) {
+        return stream.xack(key, group, ids.split(","));
+    }
+
+    @GET
+    @Path("/stream/pending/{key}/{group}")
+    public String streamPending(@PathParam("key") String key, @PathParam("group") String group) {
+        return formatPendingSummary(stream.xpending(key, group));
+    }
+
+    @GET
+    @Path("/stream/pending/{key}/{group}/range")
+    public List<String> streamPendingRange(@PathParam("key") String key, @PathParam("group") String group,
+            @QueryParam("from") @DefaultValue("-") String from, @QueryParam("to") @DefaultValue("+") String to,
+            @QueryParam("count") @DefaultValue("10") int count, @QueryParam("consumer") String consumer,
+            @QueryParam("idle") long idle) {
+        StreamRange range = StreamRange.of(from, to);
+        if (consumer == null && idle == 0) {
+            return formatPending(stream.xpending(key, group, range, count));
+        }
+        XPendingArgs args = new XPendingArgs();
+        if (consumer != null) {
+            args.consumer(consumer);
+        }
+        if (idle > 0) {
+            args.idle(Duration.ofMillis(idle));
+        }
+        return formatPending(stream.xpending(key, group, range, count, args));
+    }
+
+    @POST
+    @Path("/stream/claim/{key}/{group}/{consumer}")
+    public List<String> streamClaim(@PathParam("key") String key, @PathParam("group") String group,
+            @PathParam("consumer") String consumer, @QueryParam("minIdle") long minIdle,
+            @QueryParam("justId") boolean justId, String ids) {
+        Duration minIdleTime = Duration.ofMillis(minIdle);
+        String[] messageIds = ids.split(",");
+        if (justId) {
+            return formatMessages(stream.xclaim(key, group, consumer, minIdleTime, new XClaimArgs().justId(), messageIds));
+        }
+        return formatMessages(stream.xclaim(key, group, consumer, minIdleTime, messageIds));
+    }
+
+    @POST
+    @Path("/stream/autoclaim/{key}/{group}/{consumer}")
+    public List<String> streamAutoClaim(@PathParam("key") String key, @PathParam("group") String group,
+            @PathParam("consumer") String consumer, @QueryParam("minIdle") long minIdle,
+            @QueryParam("start") @DefaultValue("0-0") String start, @QueryParam("count") int count,
+            @QueryParam("justId") boolean justId) {
+        Duration minIdleTime = Duration.ofMillis(minIdle);
+        ClaimedMessages<String, String, String> claimed;
+        if (justId) {
+            claimed = stream.xautoclaim(key, group, consumer, minIdleTime, start, count, true);
+        } else if (count > 0) {
+            claimed = stream.xautoclaim(key, group, consumer, minIdleTime, start, count);
+        } else {
+            claimed = stream.xautoclaim(key, group, consumer, minIdleTime, start);
+        }
+        List<String> result = new ArrayList<>();
+        result.add(claimed.getId());
+        result.addAll(formatMessages(claimed.getMessages()));
+        return result;
+    }
+
+    @POST
+    @Path("/stream/trim/{key}")
+    public long streamTrim(@PathParam("key") String key, @QueryParam("maxlen") Long maxlen,
+            @QueryParam("minid") String minid, @QueryParam("approx") boolean approx) {
+        if (maxlen == null && !approx) {
+            // the plain threshold is a MINID
+            return stream.xtrim(key, minid);
+        }
+        XTrimArgs args = new XTrimArgs();
+        if (maxlen != null) {
+            args.maxlen(maxlen);
+        }
+        if (minid != null) {
+            args.minid(minid);
+        }
+        if (approx) {
+            args.nearlyExactTrimming();
+        }
+        return stream.xtrim(key, args);
+    }
+
+    @DELETE
+    @Path("/stream/{key}")
+    public int streamDel(@PathParam("key") String key, @QueryParam("id") List<String> ids) {
+        return stream.xdel(key, ids.toArray(new String[0]));
+    }
+
+    @POST
+    @Path("/stream/reactive/add/{key}")
+    public Uni<String> streamAddReactive(@PathParam("key") String key, @QueryParam("id") String id, String payload) {
+        if (id == null) {
+            return reactiveStream.xadd(key, parsePayload(payload));
+        }
+        return reactiveStream.xadd(key, new XAddArgs().id(id), parsePayload(payload));
+    }
+
+    @GET
+    @Path("/stream/reactive/len/{key}")
+    public Uni<Long> streamLenReactive(@PathParam("key") String key) {
+        return reactiveStream.xlen(key);
+    }
+
+    @GET
+    @Path("/stream/reactive/range/{key}")
+    public Uni<List<String>> streamRangeReactive(@PathParam("key") String key) {
+        return reactiveStream.xrange(key, StreamRange.of("-", "+")).map(LettuceBackendResource::formatMessages);
+    }
+
+    @GET
+    @Path("/stream/reactive/read/{key}")
+    public Uni<List<String>> streamReadReactive(@PathParam("key") String key,
+            @QueryParam("id") @DefaultValue("0-0") String id, @QueryParam("block") long block) {
+        Uni<List<StreamMessage<String, String, String>>> read = block > 0
+                ? reactiveStream.xread(key, id, new XReadArgs().block(Duration.ofMillis(block)))
+                : reactiveStream.xread(key, id);
+        return read.map(LettuceBackendResource::formatMessages);
+    }
+
+    @GET
+    @Path("/stream/reactive/readgroup/{key}/{group}/{consumer}")
+    public Uni<List<String>> streamReadGroupReactive(@PathParam("key") String key, @PathParam("group") String group,
+            @PathParam("consumer") String consumer) {
+        return reactiveStream.xreadgroup(group, consumer, key, ">").map(LettuceBackendResource::formatMessages);
+    }
+
+    @POST
+    @Path("/stream/reactive/ack/{key}/{group}")
+    public Uni<Integer> streamAckReactive(@PathParam("key") String key, @PathParam("group") String group, String ids) {
+        return reactiveStream.xack(key, group, ids.split(","));
+    }
+
+    @GET
+    @Path("/stream/reactive/pending/{key}/{group}")
+    public Uni<String> streamPendingReactive(@PathParam("key") String key, @PathParam("group") String group) {
+        return reactiveStream.xpending(key, group).map(LettuceBackendResource::formatPendingSummary);
+    }
+
+    @POST
+    @Path("/with-transaction/stream/{key}")
+    public String withTransactionStream(@PathParam("key") String key) {
+        Map<String, String> payload = Map.of("a", "1");
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var s = tx.stream(String.class);
+            s.xgroupCreate(key, "g1", "$", new XGroupCreateArgs().mkstream());
+            s.xadd(key, new XAddArgs().id("1-0"), payload);
+            s.xadd(key, new XAddArgs().id("2-0"), payload);
+            s.xlen(key);
+            s.xrange(key, StreamRange.of("-", "+"));
+            // inside MULTI a blocking read does not block
+            s.xread(key, "0-0", new XReadArgs().block(Duration.ofSeconds(10)));
+            s.xreadgroup("g1", "c1", key, ">");
+            s.xpending(key, "g1");
+            s.xack(key, "g1", "1-0");
+            s.xdel(key, "0-1");
+            s.xtrim(key, new XTrimArgs().maxlen(1));
+        });
+        Object created = result.get(0);
+        String id1 = result.get(1);
+        String id2 = result.get(2);
+        long length = result.get(3);
+        List<StreamMessage<String, String, String>> range = result.get(4);
+        List<StreamMessage<String, String, String>> read = result.get(5);
+        List<StreamMessage<String, String, String>> group = result.get(6);
+        XPendingSummary pending = result.get(7);
+        int acknowledged = result.get(8);
+        int deleted = result.get(9);
+        long trimmed = result.get(10);
+        return result.discarded() + "," + result.size() + "," + (created == null) + "," + id1 + "," + id2 + "," + length
+                + "," + formatMessages(range) + "," + formatMessages(read) + "," + formatMessages(group) + ","
+                + formatPendingSummary(pending) + "," + acknowledged + "," + deleted + "," + trimmed;
     }
 
 }

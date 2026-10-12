@@ -155,4 +155,15 @@ public abstract class AbstractLettuceCommands<K, V> {
         return marshaller.decode(String.class, bytes);
     }
 
+    protected <F> Map<F, V> decodeMap(Type fieldType, Map<byte[], byte[]> map) {
+        if (map == null || map.isEmpty()) {
+            return Map.of();
+        }
+        Map<F, V> decoded = new LinkedHashMap<>(map.size());
+        for (Map.Entry<byte[], byte[]> e : map.entrySet()) {
+            decoded.put(marshaller.decode(fieldType, e.getKey()), decodeV(e.getValue()));
+        }
+        return decoded;
+    }
+
 }
