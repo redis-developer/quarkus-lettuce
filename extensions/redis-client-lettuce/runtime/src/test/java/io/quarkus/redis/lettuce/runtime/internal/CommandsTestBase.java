@@ -116,6 +116,13 @@ public abstract class CommandsTestBase {
         return new LettuceConnectionPool(connector(), maxPoolSize, maxWaiting, redisUri.getDatabase());
     }
 
+    /** A pool whose cleaner, run every {@code cleanerInterval}, closes the connections idle for {@code recycleTimeout}. */
+    protected static LettuceConnectionPool pool(int maxPoolSize, int maxWaiting, Duration recycleTimeout,
+            Duration cleanerInterval) {
+        return new LettuceConnectionPool(connector(), maxPoolSize, maxWaiting, redisUri.getDatabase(), vertx.getDelegate(),
+                recycleTimeout, cleanerInterval);
+    }
+
     protected static LettuceReactiveRedisDataSourceImpl reactiveDataSource() {
         return new LettuceReactiveRedisDataSourceImpl(vertx, lettuceConnection, pool());
     }

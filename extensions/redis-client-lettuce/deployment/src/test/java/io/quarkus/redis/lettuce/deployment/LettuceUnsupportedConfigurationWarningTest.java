@@ -21,7 +21,8 @@ import io.quarkus.test.common.QuarkusTestResource;
  * the reason, and does not report the ones it applies: the password and the TLS settings (including the client key
  * and certificate) are set and honoured, since the server requires a password and mutual TLS, the pool size is
  * applied to the connection pool, and the protocol version, the command queue bound, the reconnect interval and
- * the connection timeout are applied to the client, so none of them must appear in the warning.
+ * the connection timeout are applied to the client, and the pool recycling properties to the connection pool, so
+ * none of them must appear in the warning.
  */
 @QuarkusTestResource(RedisTlsTestResource.class)
 public class LettuceUnsupportedConfigurationWarningTest {
@@ -43,6 +44,8 @@ public class LettuceUnsupportedConfigurationWarningTest {
             .overrideConfigKey("quarkus.redis.replicas", "share")
             .overrideConfigKey("quarkus.redis.topology-cache-ttl", "2s")
             .overrideConfigKey("quarkus.redis.max-pool-size", "10")
+            .overrideConfigKey("quarkus.redis.pool-recycle-timeout", "1m")
+            .overrideConfigKey("quarkus.redis.pool-cleaner-interval", "10s")
             // applied to the Lettuce client, so not reported
             .overrideConfigKey("quarkus.redis.max-waiting-handlers", "4096")
             .overrideConfigKey("quarkus.redis.preferred-protocol-version", "resp2")
@@ -69,6 +72,8 @@ public class LettuceUnsupportedConfigurationWarningTest {
                     .contains("quarkus.redis.client-name (applied only with quarkus.redis.configure-client-name=true")
                     // honoured by the connection pool, so not reported
                     .doesNotContain("max-pool-size")
+                    .doesNotContain("pool-recycle-timeout")
+                    .doesNotContain("pool-cleaner-interval")
                     // honoured by the client, so not reported
                     .doesNotContain("max-waiting-handlers")
                     .doesNotContain("preferred-protocol-version")

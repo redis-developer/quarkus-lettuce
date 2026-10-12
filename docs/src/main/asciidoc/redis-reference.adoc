@@ -1107,8 +1107,8 @@ Adding the dependency is the only switch: the extension builds on `quarkus-redis
 configured with the same `quarkus.redis.*` properties and the Redis Dev Services work unchanged.
 The Lettuce data sources apply `quarkus.redis[.<name>].hosts`, `client-type` (`standalone`, the default, `cluster`,
 see <<lettuce-cluster>>, `sentinel` and `replication`, see <<lettuce-sentinel>>), `password`, `tls.*`,
-`tls-configuration-name`, `timeout`, `active`, `max-pool-size` and `max-pool-waiting` (see
-<<connection-pooling-and-blocking-commands>>), `max-waiting-handlers`, `protocol-negotiation`,
+`tls-configuration-name`, `timeout`, `active`, `max-pool-size`, `max-pool-waiting`, `pool-recycle-timeout` and
+`pool-cleaner-interval` (see <<connection-pooling-and-blocking-commands>>), `max-waiting-handlers`, `protocol-negotiation`,
 `preferred-protocol-version`, `client-name`, `configure-client-name`, `reconnect-interval` and the `tcp.*` properties
 of <<lettuce-properties>>, for a cluster `replicas` and `topology-cache-ttl`, for a Sentinel client `master-name`,
 `role`, `auto-failover` and `replicas`, and for a replication client `topology` and `replicas`:
@@ -1182,8 +1182,9 @@ supports.
 |`max-nested-arrays`
 |Not applied: Lettuce does not limit the nesting of replies.
 
-|`pool-cleaner-interval`, `pool-recycle-timeout`
-|Not applied yet.
+|`pool-recycle-timeout`, `pool-cleaner-interval`
+|How long a pooled connection may stay idle before it is closed, and how often the idle connections are checked (see
+<<connection-pooling-and-blocking-commands>>).
 
 |`cluster-transactions`
 |Not applied: Lettuce does not route `MULTI`/`EXEC` on a cluster (see <<lettuce-cluster>>).
@@ -1337,9 +1338,16 @@ consumer from starving every other command on the same data source. `withConnect
 `withTransaction(...)` borrow from the same pool for the duration of the block or
 transaction, instead of opening a fresh TCP connection per call.
 
+Idle pooled connections are recycled as with the Vert.x client: every `quarkus.redis.pool-cleaner-interval` (default
+`30s`), the connections idle for longer than `quarkus.redis.pool-recycle-timeout` (default `3m`) are closed; a
+connection in use is never recycled. Setting either property to `0` keeps the idle connections open. The most
+recently released connection is handed out first, so that a pool sized for a peak shrinks back to the connections a
+lighter load needs.
+
 Because `max-pool-size` bounds only blocking commands and scoped connections on this backend — rather than
 every command, as on the Vert.x backend — the same configured value gives noticeably higher effective
-capacity here. `quarkus.redis.max-waiting-handlers` has no Lettuce equivalent and is ignored.
+capacity here. The ordinary commands share one connection, whose command queue `quarkus.redis.max-waiting-handlers`
+bounds (see <<lettuce-properties>>).
 
 A blocking command issued from inside `withConnection(...)` runs on that pinned connection directly: it
 does not borrow a second connection from the pool, and it blocks that connection for its own duration, as

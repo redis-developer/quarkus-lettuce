@@ -51,7 +51,8 @@ import io.vertx.redis.client.RedisTopology;
  * a {@link io.lettuce.core.cluster.RedisClusterClient} for a {@code cluster} one. Also
  * creates, per client, the shared {@link LettuceConnection} of the data sources and a bounded
  * {@link LettuceConnectionPool} used for blocking commands and scoped connections
- * ({@code withConnection}/{@code withTransaction}) so they never occupy the shared connection.
+ * ({@code withConnection}/{@code withTransaction}) so they never occupy the shared connection, its idle connections
+ * recycled as configured by {@code pool-recycle-timeout} and {@code pool-cleaner-interval}.
  * <p>
  * Shutdown ordering: connections → pools → clients → resources (before Vert.x event loops).
  */
@@ -62,6 +63,10 @@ public class LettuceRecorder {
     private static final Duration POOL_CLOSE_TIMEOUT = Duration.ofSeconds(10);
     /** The default of {@code master-name}, as documented for the Vert.x client. */
     private static final String DEFAULT_MASTER_NAME = "mymaster";
+    /** The default of {@code pool-recycle-timeout}. */
+    private static final Duration DEFAULT_POOL_RECYCLE_TIMEOUT = Duration.ofMinutes(3);
+    /** The default of the Vert.x client's pool cleaner interval, applied when {@code pool-cleaner-interval} is unset. */
+    private static final Duration DEFAULT_POOL_CLEANER_INTERVAL = Duration.ofSeconds(30);
     /** Why {@code reconnect-attempts} and {@code tcp.reconnect-attempts} are not applied. */
     private static final String RECONNECT_ATTEMPTS_REASON = " (Lettuce reconnects a lost connection until it succeeds"
             + " and does not retry the initial connection)";
@@ -100,7 +105,9 @@ public class LettuceRecorder {
                 LettuceConnectionFactory factory = factories.computeIfAbsent(name,
                         k -> createFactory(name, clientConfig, settings));
                 pools.putIfAbsent(name, new LettuceConnectionPool(factory::connectAsync,
-                        clientConfig.maxPoolSize(), clientConfig.maxPoolWaiting(), factory.getDatabase()));
+                        clientConfig.maxPoolSize(), clientConfig.maxPoolWaiting(), factory.getDatabase(), vertx.getValue(),
+                        clientConfig.poolRecycleTimeout().orElse(DEFAULT_POOL_RECYCLE_TIMEOUT),
+                        clientConfig.poolCleanerInterval().orElse(DEFAULT_POOL_CLEANER_INTERVAL)));
             }
         }
     }
@@ -163,8 +170,9 @@ public class LettuceRecorder {
 
     /**
      * The Lettuce backend applies the hosts, client-type, timeout, active, password, TLS, client name, protocol,
-     * command queue and TCP socket properties (see {@link LettuceClientSettings}), {@code max-pool-size} and
-     * {@code max-pool-waiting}; for a cluster also {@code replicas} and {@code topology-cache-ttl}, but not the
+     * command queue and TCP socket properties (see {@link LettuceClientSettings}), {@code max-pool-size},
+     * {@code max-pool-waiting}, {@code pool-recycle-timeout} and {@code pool-cleaner-interval} (see
+     * {@link LettuceConnectionPool}); for a cluster also {@code replicas} and {@code topology-cache-ttl}, but not the
      * database of a host URI (a cluster only has database 0); for a Sentinel client {@code master-name},
      * {@code role}, {@code auto-failover} (a failover is always followed) and {@code replicas}, unless
      * {@code role=replica} already decides where the reads go; for a replication client {@code topology} and
@@ -224,12 +232,6 @@ public class LettuceRecorder {
         if (config.clusterTransactions().isPresent()) {
             ignored.add(getPropertyName(name, "cluster-transactions")
                     + " (Lettuce does not route MULTI/EXEC on a cluster, so transactions are not supported there)");
-        }
-        if (config.poolCleanerInterval().isPresent()) {
-            ignored.add(getPropertyName(name, "pool-cleaner-interval") + " (not applied yet)");
-        }
-        if (config.poolRecycleTimeout().isPresent() && !config.poolRecycleTimeout().get().equals(Duration.ofMinutes(3))) {
-            ignored.add(getPropertyName(name, "pool-recycle-timeout") + " (not applied yet)");
         }
         if (config.maxNestedArrays() != 32) {
             ignored.add(getPropertyName(name, "max-nested-arrays") + " (Lettuce does not limit the nesting of replies)");
