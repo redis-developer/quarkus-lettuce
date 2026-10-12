@@ -1053,6 +1053,9 @@ The host provider can be used to configure the redis client like shown below
 quarkus.redis.hosts-provider-name=hosts-provider
 ----
 
+The provider is consulted by the Vert.x client and by the <<lettuce-backend,Lettuce backend>> alike.
+When both `hosts` and `hosts-provider-name` are set, `hosts` is used and the provider is not called.
+
 == Customize the Redis options programmatically
 
 You can expose a bean implementing the `io.quarkus.redis.client.RedisOptionsCustomizer` interface to customize the Redis client options.
@@ -1105,7 +1108,8 @@ extension to your application:
 
 Adding the dependency is the only switch: the extension builds on `quarkus-redis-client`, so clients are
 configured with the same `quarkus.redis.*` properties and the Redis Dev Services work unchanged.
-The Lettuce data sources apply `quarkus.redis[.<name>].hosts`, `client-type` (`standalone`, the default, `cluster`,
+The Lettuce data sources apply `quarkus.redis[.<name>].hosts` or `hosts-provider-name` (see
+<<configure-redis-hosts-programmatically>>), `client-type` (`standalone`, the default, `cluster`,
 see <<lettuce-cluster>>, `sentinel` and `replication`, see <<lettuce-sentinel>>), `password`, `tls.*`,
 `tls-configuration-name`, `timeout`, `active`, `max-pool-size`, `max-pool-waiting`, `pool-recycle-timeout` and
 `pool-cleaner-interval` (see <<connection-pooling-and-blocking-commands>>), `max-waiting-handlers`, `protocol-negotiation`,
@@ -1116,6 +1120,8 @@ of <<lettuce-properties>>, for a cluster `replicas` and `topology-cache-ttl`, fo
 * A standalone client connects to the first URI of `hosts`; a cluster client discovers the cluster from all of them;
 a Sentinel client takes them as the sentinels; a replication client as the nodes, or discovers the nodes from the
 first one.
+The URIs come from `hosts`, or from the `RedisHostsProvider` bean named by `hosts-provider-name` when `hosts` is
+not set; `hosts` wins when both are set, as with the Vert.x client.
 * The credentials are set with `password` or encoded in the URI, for example `redis://user:password@host:6379` or
 `redis://:password@host:6379`.
 The URI is read as the Vert.x Redis client reads it: a password encoded in the URI takes precedence over
@@ -1163,6 +1169,10 @@ supports.
 [cols="1,2", options="header"]
 |===
 |Property |Lettuce backend
+
+|`hosts-provider-name`
+|The hosts, when `hosts` is not set, from the `RedisHostsProvider` bean of that name (see
+<<configure-redis-hosts-programmatically>>).
 
 |`max-waiting-handlers`
 |The request queue size of a connection (see above).
@@ -1218,8 +1228,7 @@ connections.
 |Not applied: options of the Linux native transport.
 |===
 
-The extension logs a warning at startup naming the configured properties it does not apply, with the reason, and a
-client configured only through `hosts-provider-name` is deactivated.
+The extension logs a warning at startup naming the configured properties it does not apply, with the reason.
 Lettuce and the libraries it needs in native mode (`LatencyUtils`, `HdrHistogram`) are pulled in transitively.
 
 [[lettuce-cluster]]

@@ -106,6 +106,18 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void providedPing() {
+        RestAssured.given().when().get("/lettuce/provided/ping").then()
+                .statusCode(200).body(CoreMatchers.is("PONG"));
+    }
+
+    @Test
+    public void providedClientConnectsToTheProvidedDatabase() {
+        RestAssured.given().when().get("/lettuce/provided/database").then()
+                .statusCode(200).body(CoreMatchers.is("3"));
+    }
+
+    @Test
     public void sentinelPing() {
         RestAssured.given().when().get("/lettuce/sentinel/ping").then()
                 .statusCode(200).body(CoreMatchers.is("PONG"));

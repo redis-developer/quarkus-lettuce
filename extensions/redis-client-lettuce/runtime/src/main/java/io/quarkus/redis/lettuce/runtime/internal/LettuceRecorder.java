@@ -27,6 +27,7 @@ import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionFactory.MasterReplicaMode;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceBlockingRedisDataSourceImpl;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceReactiveRedisDataSourceImpl;
+import io.quarkus.redis.runtime.client.VertxRedisClientFactory;
 import io.quarkus.redis.runtime.client.config.NetConfig;
 import io.quarkus.redis.runtime.client.config.RedisClientConfig;
 import io.quarkus.redis.runtime.client.config.RedisConfig;
@@ -97,8 +98,7 @@ public class LettuceRecorder {
         for (String name : names) {
             if (checkActive(name).get().value()) {
                 RedisClientConfig clientConfig = runtimeConfig.getValue().clients().get(name);
-                // checkActive() guarantees at least one host for an active client
-                Set<URI> hosts = clientConfig.hosts().orElseThrow();
+                Set<URI> hosts = hosts(name, clientConfig);
                 warnAboutUnsupportedConfiguration(name, clientConfig, hosts);
                 LettuceClientSettings settings = LettuceClientSettings.create(name, clientConfig, hosts, vertx.getValue(),
                         tlsRegistry.get());
@@ -169,10 +169,33 @@ public class LettuceRecorder {
     }
 
     /**
-     * The Lettuce backend applies the hosts, client-type, timeout, active, password, TLS, client name, protocol,
-     * command queue and TCP socket properties (see {@link LettuceClientSettings}), {@code max-pool-size},
-     * {@code max-pool-waiting}, {@code pool-recycle-timeout} and {@code pool-cleaner-interval} (see
-     * {@link LettuceConnectionPool}); for a cluster also {@code replicas} and {@code topology-cache-ttl}, but not the
+     * The hosts of an active client: {@code hosts} when set, else those of the {@code RedisHostsProvider} bean
+     * {@code hosts-provider-name} names, resolved as the Vert.x client resolves it (the same lookup and the same
+     * failure when the bean is missing). {@code hosts} wins when both are set, as with the Vert.x client.
+     * {@link #checkActive(String)} guarantees one of the two is set.
+     *
+     * @throws ConfigurationException if the provider bean is missing or returns no host
+     */
+    private static Set<URI> hosts(String name, RedisClientConfig config) {
+        if (hasHosts(config)) {
+            return config.hosts().get();
+        }
+        String providerName = config.hostsProviderName().orElseThrow();
+        Set<URI> hosts = VertxRedisClientFactory.findProvider(providerName).getHosts();
+        if (hosts == null || hosts.isEmpty()) {
+            throw new ConfigurationException(String.format(
+                    "The Redis hosts provider '%s' of the Lettuce Redis client '%s' (configuration property '%s') "
+                            + "returned no host",
+                    providerName, name, getPropertyName(name, HOSTS_PROVIDER_NAME)));
+        }
+        return hosts;
+    }
+
+    /**
+     * The Lettuce backend applies the hosts (or {@code hosts-provider-name}), client-type, timeout, active, password,
+     * TLS, client name, protocol, command queue and TCP socket properties (see {@link LettuceClientSettings}),
+     * {@code max-pool-size}, {@code max-pool-waiting}, {@code pool-recycle-timeout} and {@code pool-cleaner-interval}
+     * (see {@link LettuceConnectionPool}); for a cluster also {@code replicas} and {@code topology-cache-ttl}, but not the
      * database of a host URI (a cluster only has database 0); for a Sentinel client {@code master-name},
      * {@code role}, {@code auto-failover} (a failover is always followed) and {@code replicas}, unless
      * {@code role=replica} already decides where the reads go; for a replication client {@code topology} and
@@ -353,23 +376,15 @@ public class LettuceRecorder {
                                 """,
                         name, getPropertyName(name, "active"), name));
             }
-            if (!hasHosts(redisClientConfig)) {
-                if (redisClientConfig.hostsProviderName().isPresent()) {
-                    return ActiveResult.inactive(String.format(
-                            """
-                                    Lettuce Redis Client '%s' was deactivated automatically because it is configured through '%s', \
-                                    which the Lettuce backend does not support yet. Set the configuration property '%s' instead. \
-                                    Refer to https://quarkus.io/guides/redis-reference for guidance.
-                                    """,
-                            name, getPropertyName(name, HOSTS_PROVIDER_NAME), getPropertyName(name, HOSTS)));
-                }
+            if (!hasHosts(redisClientConfig) && redisClientConfig.hostsProviderName().isEmpty()) {
                 return ActiveResult.inactive(String.format(
                         """
                                 Lettuce Redis Client '%s' was deactivated automatically because the hosts are not set. \
-                                To activate the Redis Client, set the configuration property '%s'. \
+                                To activate the Redis Client, set the configuration property '%s', or '%s' together with \
+                                a RedisHostsProvider bean of that name. \
                                 Refer to https://quarkus.io/guides/redis-reference for guidance.
                                 """,
-                        name, getPropertyName(name, HOSTS)));
+                        name, getPropertyName(name, HOSTS), getPropertyName(name, HOSTS_PROVIDER_NAME)));
             }
             return ActiveResult.active();
         };
