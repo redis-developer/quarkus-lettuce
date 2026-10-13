@@ -623,9 +623,11 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
     private StreamMessage<K, F, V> decodeStreamMessage(io.lettuce.core.StreamMessage<byte[], byte[]> message) {
         K key = decodeK(message.getStream());
         Map<F, V> payload = decodeMap(fieldType, message.getBody());
-        if (message.isClaimed()) {
-            return new StreamMessage<>(key, message.getId(), payload,
-                    Duration.ofMillis(message.getMillisElapsedFromDelivery()), message.getDeliveredCount().intValue());
+        Long millisElapsedFromDelivery = message.getMillisElapsedFromDelivery();
+        if (millisElapsedFromDelivery != null) {
+            Long deliveredCount = message.getDeliveredCount();
+            return new StreamMessage<>(key, message.getId(), payload, Duration.ofMillis(millisElapsedFromDelivery),
+                    deliveredCount == null ? 0 : deliveredCount.intValue());
         }
         return new StreamMessage<>(key, message.getId(), payload);
     }

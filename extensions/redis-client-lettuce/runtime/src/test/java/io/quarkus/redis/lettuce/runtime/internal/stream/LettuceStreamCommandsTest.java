@@ -374,7 +374,9 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
             assertThat(m.durationSinceLastDelivery()).isNotNull();
             assertThat(m.durationSinceLastDelivery().toMillis()).isGreaterThan(0);
         });
-        assertThat(messages.stream().filter(m -> m.deliveryCount() == 0)).hasSize(2);
+        // CLAIM reports the idle time for the never-delivered entries as well
+        assertThat(messages.stream().filter(m -> m.deliveryCount() == 0)).hasSize(2)
+                .allSatisfy(m -> assertThat(m.durationSinceLastDelivery()).isNotNull());
     }
 
     @Test
