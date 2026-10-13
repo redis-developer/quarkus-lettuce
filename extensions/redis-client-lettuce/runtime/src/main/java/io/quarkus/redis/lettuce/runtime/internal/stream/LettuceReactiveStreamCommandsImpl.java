@@ -114,11 +114,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
 
     LettuceCommand<io.lettuce.core.models.stream.ClaimedMessages<byte[], byte[]>, ClaimedMessages<K, F, V>> _xautoclaim(K key,
             String group, String consumer, Duration minIdleTime, String start) {
-        nonNull(key, "key");
-        notNullOrBlank(group, "group");
-        notNullOrBlank(consumer, "consumer");
-        validateTimeout(minIdleTime, "minIdleTime");
-        notNullOrBlank(start, "start");
+        validateXAutoClaimParams(key, group, consumer, minIdleTime, start);
         XAutoClaimArgs<byte[]> args = XAutoClaimArgs.Builder
                 .xautoclaim(consumer(group, consumer), minIdleTime, start);
         return LettuceCommand.of(() -> async.xautoclaim(marshaller.encode(key), args), this::decodeClaimedMessages);
@@ -132,11 +128,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
 
     LettuceCommand<io.lettuce.core.models.stream.ClaimedMessages<byte[], byte[]>, ClaimedMessages<K, F, V>> _xautoclaim(K key,
             String group, String consumer, Duration minIdleTime, String start, int count) {
-        nonNull(key, "key");
-        notNullOrBlank(group, "group");
-        notNullOrBlank(consumer, "consumer");
-        validateTimeout(minIdleTime, "minIdleTime");
-        notNullOrBlank(start, "start");
+        validateXAutoClaimParams(key, group, consumer, minIdleTime, start);
         positive(count, "count");
         XAutoClaimArgs<byte[]> args = XAutoClaimArgs.Builder
                 .xautoclaim(consumer(group, consumer), minIdleTime, start);
@@ -152,11 +144,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
 
     LettuceCommand<io.lettuce.core.models.stream.ClaimedMessages<byte[], byte[]>, ClaimedMessages<K, F, V>> _xautoclaim(K key,
             String group, String consumer, Duration minIdleTime, String start, int count, boolean justId) {
-        nonNull(key, "key");
-        notNullOrBlank(group, "group");
-        notNullOrBlank(consumer, "consumer");
-        validateTimeout(minIdleTime, "minIdleTime");
-        notNullOrBlank(start, "start");
+        validateXAutoClaimParams(key, group, consumer, minIdleTime, start);
         positive(count, "count");
         XAutoClaimArgs<byte[]> args = XAutoClaimArgs.Builder
                 .xautoclaim(consumer(group, consumer), minIdleTime, start);
@@ -165,6 +153,14 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
             args.justid();
         }
         return LettuceCommand.of(() -> async.xautoclaim(marshaller.encode(key), args), this::decodeClaimedMessages);
+    }
+
+    private void validateXAutoClaimParams(K key, String group, String consumer, Duration minIdleTime, String start) {
+        nonNull(key, "key");
+        notNullOrBlank(group, "group");
+        notNullOrBlank(consumer, "consumer");
+        validateTimeout(minIdleTime, "minIdleTime");
+        notNullOrBlank(start, "start");
     }
 
     @Override
