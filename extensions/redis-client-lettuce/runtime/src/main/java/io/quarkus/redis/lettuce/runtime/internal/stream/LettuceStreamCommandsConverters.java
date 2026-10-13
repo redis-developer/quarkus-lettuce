@@ -20,8 +20,6 @@ import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 
 public final class LettuceStreamCommandsConverters {
 
-    private static final String BLOCK = "BLOCK";
-
     private LettuceStreamCommandsConverters() {
         // Utility class
     }
@@ -66,14 +64,7 @@ public final class LettuceStreamCommandsConverters {
     }
 
     public static io.lettuce.core.XReadArgs toXReadArgs(XReadArgs quarkus) {
-        return replayingXReadArgs(quarkus.toArgs());
-    }
-
-    public static io.lettuce.core.XReadArgs toXReadArgs(XReadGroupArgs quarkus) {
-        return replayingXReadArgs(quarkus.toArgs());
-    }
-
-    private static io.lettuce.core.XReadArgs replayingXReadArgs(List<Object> tokens) {
+        List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.XReadArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
@@ -82,12 +73,14 @@ public final class LettuceStreamCommandsConverters {
         };
     }
 
-    public static boolean isBlocking(XReadArgs quarkus) {
-        return quarkus.toArgs().contains(BLOCK);
-    }
-
-    public static boolean isBlocking(XReadGroupArgs quarkus) {
-        return quarkus.toArgs().contains(BLOCK);
+    public static io.lettuce.core.XReadArgs toXReadArgs(XReadGroupArgs quarkus) {
+        List<Object> tokens = quarkus.toArgs();
+        return new io.lettuce.core.XReadArgs() {
+            @Override
+            public <K, V> void build(CommandArgs<K, V> args) {
+                ArgReplay.replay(tokens, args);
+            }
+        };
     }
 
     public static io.lettuce.core.XTrimArgs toXTrimArgs(XTrimArgs quarkus) {

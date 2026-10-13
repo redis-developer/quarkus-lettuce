@@ -70,24 +70,23 @@ class LettuceStreamCommandsConvertersTest {
     }
 
     @Test
-    void xReadArgsRenderTokensAndDetectBlock() {
+    void xReadArgsRenderTokens() {
         XReadArgs plain = new XReadArgs().count(2);
         assertThat(renderToTokens(LettuceStreamCommandsConverters.toXReadArgs(plain)::build)).containsExactly("COUNT", "2");
-        assertThat(LettuceStreamCommandsConverters.isBlocking(plain)).isFalse();
 
         XReadArgs blocking = new XReadArgs().count(2).block(Duration.ofSeconds(1));
         assertThat(renderToTokens(LettuceStreamCommandsConverters.toXReadArgs(blocking)::build))
                 .containsExactly("COUNT", "2", "BLOCK", "1000");
-        assertThat(LettuceStreamCommandsConverters.isBlocking(blocking)).isTrue();
     }
 
     @Test
-    void xReadGroupArgsRenderTokensAndDetectBlock() {
+    void xReadGroupArgsRenderTokens() {
         XReadGroupArgs plain = new XReadGroupArgs().count(2).noack().claim(Duration.ofMillis(5));
         assertThat(renderToTokens(LettuceStreamCommandsConverters.toXReadArgs(plain)::build))
                 .containsExactly("COUNT", "2", "CLAIM", "5", "NOACK");
-        assertThat(LettuceStreamCommandsConverters.isBlocking(plain)).isFalse();
-        assertThat(LettuceStreamCommandsConverters.isBlocking(new XReadGroupArgs().block(Duration.ZERO))).isTrue();
+        assertThat(
+                renderToTokens(LettuceStreamCommandsConverters.toXReadArgs(new XReadGroupArgs().block(Duration.ZERO))::build))
+                .containsExactly("BLOCK", "0");
     }
 
     @Test

@@ -1269,6 +1269,15 @@ A blocking command issued from inside `withConnection(...)` runs on that pinned 
 does not borrow a second connection from the pool, and it blocks that connection for its own duration, as
 it would without pooling.
 
+As on the Vert.x backend, a borrowed connection goes back to the pool only when Redis answers the blocking
+command, not when the caller stops waiting: the blocking API gives up after `quarkus.redis.timeout` and a
+reactive subscriber can cancel, but neither unblocks the command on the server, so the connection stays out
+of the pool until the command's own duration elapses or a value arrives. Keep that duration (the `BLPOP`
+timeout, the `BLOCK` of `XREAD`) below `quarkus.redis.timeout` when using the blocking API, and only block
+indefinitely (a zero duration) from the reactive API, where the subscriber keeps waiting for the value: a
+blocked command nobody waits for holds its connection until a value arrives, and `max-pool-size` of them
+exhaust the pool.
+
 The extension also exposes the Lettuce client itself as CDI beans for every client that is injected through a
 Lettuce type (using `@RedisClientName` for named clients): `io.lettuce.core.RedisClient` and
 `io.lettuce.core.api.StatefulRedisConnection<String, String>` for a standalone, Sentinel or replication client (for

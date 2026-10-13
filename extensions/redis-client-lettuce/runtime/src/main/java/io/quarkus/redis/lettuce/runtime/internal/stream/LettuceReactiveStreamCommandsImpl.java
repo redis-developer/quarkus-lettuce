@@ -374,7 +374,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<StreamMessage<K, F, V>>> xread(K key, String id, XReadArgs args) {
-        if (args != null && LettuceStreamCommandsConverters.isBlocking(args)) {
+        if (args != null && args.block() != null) {
             return blocking(cmds -> _xread(cmds, key, id, args));
         }
         return _xread(key, id, args).toUni();
@@ -397,7 +397,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<StreamMessage<K, F, V>>> xread(Map<K, String> lastIdsPerStream, XReadArgs args) {
-        if (args != null && LettuceStreamCommandsConverters.isBlocking(args)) {
+        if (args != null && args.block() != null) {
             return blocking(cmds -> _xread(cmds, lastIdsPerStream, args));
         }
         return _xread(lastIdsPerStream, args).toUni();
@@ -451,7 +451,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
     @Override
     public Uni<List<StreamMessage<K, F, V>>> xreadgroup(String group, String consumer, K key, String id,
             XReadGroupArgs args) {
-        if (args != null && LettuceStreamCommandsConverters.isBlocking(args)) {
+        if (args != null && args.block() != null) {
             return blocking(cmds -> _xreadgroup(cmds, group, consumer, key, id, args));
         }
         return _xreadgroup(group, consumer, key, id, args).toUni();
@@ -479,7 +479,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
     @Override
     public Uni<List<StreamMessage<K, F, V>>> xreadgroup(String group, String consumer, Map<K, String> lastIdsPerStream,
             XReadGroupArgs args) {
-        if (args != null && LettuceStreamCommandsConverters.isBlocking(args)) {
+        if (args != null && args.block() != null) {
             return blocking(cmds -> _xreadgroup(cmds, group, consumer, lastIdsPerStream, args));
         }
         return _xreadgroup(group, consumer, lastIdsPerStream, args).toUni();
