@@ -17,6 +17,7 @@ import io.quarkus.redis.datasource.stream.XReadArgs;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.redis.datasource.stream.XTrimArgs;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
+import io.quarkus.redis.lettuce.runtime.internal.BlockingReads;
 
 public final class LettuceStreamCommandsConverters {
 
@@ -65,20 +66,28 @@ public final class LettuceStreamCommandsConverters {
 
     public static io.lettuce.core.XReadArgs toXReadArgs(XReadArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
+        boolean blocking = quarkus.block() != null;
         return new io.lettuce.core.XReadArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
                 ArgReplay.replay(tokens, args);
+                if (blocking) {
+                    BlockingReads.mark(args);
+                }
             }
         };
     }
 
     public static io.lettuce.core.XReadArgs toXReadArgs(XReadGroupArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
+        boolean blocking = quarkus.block() != null;
         return new io.lettuce.core.XReadArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
                 ArgReplay.replay(tokens, args);
+                if (blocking) {
+                    BlockingReads.mark(args);
+                }
             }
         };
     }

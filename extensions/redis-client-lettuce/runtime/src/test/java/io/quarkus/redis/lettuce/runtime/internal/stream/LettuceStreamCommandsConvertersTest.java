@@ -22,6 +22,7 @@ import io.quarkus.redis.datasource.stream.XPendingArgs;
 import io.quarkus.redis.datasource.stream.XReadArgs;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.redis.datasource.stream.XTrimArgs;
+import io.quarkus.redis.lettuce.runtime.internal.BlockingReads;
 
 class LettuceStreamCommandsConvertersTest {
 
@@ -77,6 +78,21 @@ class LettuceStreamCommandsConvertersTest {
         XReadArgs blocking = new XReadArgs().count(2).block(Duration.ofSeconds(1));
         assertThat(renderToTokens(LettuceStreamCommandsConverters.toXReadArgs(blocking)::build))
                 .containsExactly("COUNT", "2", "BLOCK", "1000");
+    }
+
+    @Test
+    void xReadArgsMarkTheCommandArgsOnlyWithBlock() {
+        CommandArgs<String, String> plain = new CommandArgs<>(StringCodec.UTF8);
+        LettuceStreamCommandsConverters.toXReadArgs(new XReadArgs().count(2)).build(plain);
+        assertThat(BlockingReads.unmark(plain)).isFalse();
+
+        CommandArgs<String, String> blocking = new CommandArgs<>(StringCodec.UTF8);
+        LettuceStreamCommandsConverters.toXReadArgs(new XReadArgs().block(Duration.ofSeconds(1))).build(blocking);
+        assertThat(BlockingReads.unmark(blocking)).isTrue();
+
+        CommandArgs<String, String> group = new CommandArgs<>(StringCodec.UTF8);
+        LettuceStreamCommandsConverters.toXReadArgs(new XReadGroupArgs().block(Duration.ZERO)).build(group);
+        assertThat(BlockingReads.unmark(group)).isTrue();
     }
 
     @Test
