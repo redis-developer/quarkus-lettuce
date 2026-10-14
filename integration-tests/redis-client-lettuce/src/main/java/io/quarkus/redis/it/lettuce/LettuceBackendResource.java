@@ -5,7 +5,9 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.OptionalDouble;
+import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 
@@ -24,6 +26,10 @@ import io.lettuce.core.cluster.models.partitions.RedisClusterNode.NodeFlag;
 import io.quarkus.redis.client.RedisClientName;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.autosuggest.AutoSuggestCommands;
+import io.quarkus.redis.datasource.autosuggest.GetArgs;
+import io.quarkus.redis.datasource.autosuggest.ReactiveAutoSuggestCommands;
+import io.quarkus.redis.datasource.autosuggest.Suggestion;
 import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
 import io.quarkus.redis.datasource.bitmap.BitMapCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
@@ -40,6 +46,9 @@ import io.quarkus.redis.datasource.hash.HashCommands;
 import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
 import io.quarkus.redis.datasource.hyperloglog.HyperLogLogCommands;
 import io.quarkus.redis.datasource.hyperloglog.ReactiveHyperLogLogCommands;
+import io.quarkus.redis.datasource.json.JsonCommands;
+import io.quarkus.redis.datasource.json.JsonSetArgs;
+import io.quarkus.redis.datasource.json.ReactiveJsonCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.keys.KeyScanArgs;
 import io.quarkus.redis.datasource.keys.KeyScanCursor;
@@ -58,7 +67,11 @@ import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResu
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import io.smallrye.mutiny.Uni;
+import io.vertx.core.json.Json;
+import io.vertx.core.json.JsonArray;
+import io.vertx.core.json.JsonObject;
 import io.vertx.redis.client.Command;
 import io.vertx.redis.client.Response;
 
@@ -92,8 +105,12 @@ public class LettuceBackendResource {
     private final ReactiveHyperLogLogCommands<String, String> reactiveHyperLogLog;
     private final GeoCommands<String, String> geo;
     private final ReactiveGeoCommands<String, String> reactiveGeo;
+    private final JsonCommands<String> json;
+    private final ReactiveJsonCommands<String> reactiveJson;
     private final CountMinCommands<String, String> countmin;
     private final ReactiveCountMinCommands<String, String> reactiveCountMin;
+    private final AutoSuggestCommands<String> autosuggest;
+    private final ReactiveAutoSuggestCommands<String> reactiveAutoSuggest;
 
     @Inject
     public LettuceBackendResource(RedisDataSource ds, ReactiveRedisDataSource reactiveDs,
@@ -129,8 +146,12 @@ public class LettuceBackendResource {
         this.reactiveHyperLogLog = reactiveDs.hyperloglog(String.class);
         this.geo = ds.geo(String.class);
         this.reactiveGeo = reactiveDs.geo(String.class);
+        this.json = ds.json();
+        this.reactiveJson = reactiveDs.json();
         this.countmin = ds.countmin(String.class);
         this.reactiveCountMin = reactiveDs.countmin(String.class);
+        this.autosuggest = ds.autosuggest(String.class);
+        this.reactiveAutoSuggest = reactiveDs.autosuggest(String.class);
     }
 
     @GET
@@ -718,6 +739,72 @@ public class LettuceBackendResource {
     }
 
     @POST
+    @Path("/autosuggest/add/{key}/{score}")
+    public long autoSuggestAdd(@PathParam("key") String key, @PathParam("score") double score,
+            @QueryParam("incr") boolean incr, String string) {
+        return autosuggest.ftSugAdd(key, string, score, incr);
+    }
+
+    @DELETE
+    @Path("/autosuggest/{key}/{string}")
+    public boolean autoSuggestDel(@PathParam("key") String key, @PathParam("string") String string) {
+        return autosuggest.ftSugDel(key, string);
+    }
+
+    @GET
+    @Path("/autosuggest/len/{key}")
+    public long autoSuggestLen(@PathParam("key") String key) {
+        return autosuggest.ftSugLen(key);
+    }
+
+    @GET
+    @Path("/autosuggest/get/{key}/{prefix}")
+    public List<String> autoSuggestGet(@PathParam("key") String key, @PathParam("prefix") String prefix,
+            @QueryParam("fuzzy") boolean fuzzy, @QueryParam("max") int max,
+            @QueryParam("withScores") boolean withScores) {
+        List<Suggestion> suggestions = fuzzy || max > 0 || withScores
+                ? autosuggest.ftSugGet(key, prefix, getArgs(fuzzy, max, withScores))
+                : autosuggest.ftSugGet(key, prefix);
+        return formatSuggestions(suggestions, withScores);
+    }
+
+    @POST
+    @Path("/autosuggest/reactive/add/{key}/{score}")
+    public Uni<Long> autoSuggestAddReactive(@PathParam("key") String key, @PathParam("score") double score,
+            @QueryParam("incr") boolean incr, String string) {
+        return reactiveAutoSuggest.ftSugAdd(key, string, score, incr);
+    }
+
+    @GET
+    @Path("/autosuggest/reactive/get/{key}/{prefix}")
+    public Uni<List<String>> autoSuggestGetReactive(@PathParam("key") String key, @PathParam("prefix") String prefix,
+            @QueryParam("fuzzy") boolean fuzzy, @QueryParam("max") int max,
+            @QueryParam("withScores") boolean withScores) {
+        return reactiveAutoSuggest.ftSugGet(key, prefix, getArgs(fuzzy, max, withScores))
+                .map(suggestions -> formatSuggestions(suggestions, withScores));
+    }
+
+    private static GetArgs getArgs(boolean fuzzy, int max, boolean withScores) {
+        GetArgs args = new GetArgs();
+        if (fuzzy) {
+            args.fuzzy();
+        }
+        if (max > 0) {
+            args.max(max);
+        }
+        if (withScores) {
+            args.withScores();
+        }
+        return args;
+    }
+
+    private static List<String> formatSuggestions(List<Suggestion> suggestions, boolean withScores) {
+        return suggestions.stream()
+                .map(s -> withScores ? s.suggestion() + ":" + s.score() : s.suggestion())
+                .toList();
+    }
+
+    @POST
     @Path("/geo/add/{key}/{longitude}/{latitude}")
     public boolean geoAdd(@PathParam("key") String key, @PathParam("longitude") double longitude,
             @PathParam("latitude") double latitude, String member) {
@@ -758,9 +845,6 @@ public class LettuceBackendResource {
                 .toList();
     }
 
-    /**
-     * {@code GEORADIUSBYMEMBER} is deprecated in Redis in favour of {@code GEOSEARCH}, but still supported.
-     */
     @SuppressWarnings("deprecation")
     @GET
     @Path("/geo/radiusbymember/{key}/{member}/{radius}")
@@ -791,6 +875,189 @@ public class LettuceBackendResource {
     public Uni<Double> geoDistReactive(@PathParam("key") String key, @PathParam("from") String from,
             @PathParam("to") String to) {
         return reactiveGeo.geodist(key, from, to, GeoUnit.KM);
+    }
+
+    @RegisterForReflection
+    public static class JsonPerson {
+        public String name;
+        public int age;
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof JsonPerson other && age == other.age && Objects.equals(name, other.name);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(name, age);
+        }
+    }
+
+    @POST
+    @Path("/json/{key}")
+    public String jsonSet(@PathParam("key") String key, @QueryParam("path") String path,
+            @QueryParam("nx") boolean nx, @QueryParam("xx") boolean xx, String body) {
+        String target = path == null ? "$" : path;
+        Object value = Json.decodeValue(body);
+        JsonSetArgs args = new JsonSetArgs();
+        if (nx) {
+            args.nx();
+        }
+        if (xx) {
+            args.xx();
+        }
+        if (value instanceof JsonObject object) {
+            json.jsonSet(key, target, object, args);
+        } else if (value instanceof JsonArray array) {
+            json.jsonSet(key, target, array, args);
+        } else {
+            json.jsonSet(key, target, value, args);
+        }
+        return encodeArray(json.jsonGet(key, "$"));
+    }
+
+    @GET
+    @Path("/json/{key}")
+    public String jsonGetObject(@PathParam("key") String key) {
+        return encodeObject(json.jsonGetObject(key));
+    }
+
+    @GET
+    @Path("/json/array/{key}")
+    public String jsonGetArray(@PathParam("key") String key) {
+        return encodeArray(json.jsonGetArray(key));
+    }
+
+    @GET
+    @Path("/json/path/{key}")
+    public String jsonGetPath(@PathParam("key") String key, @QueryParam("path") String path) {
+        return encodeArray(json.jsonGet(key, path));
+    }
+
+    @GET
+    @Path("/json/paths/{key}")
+    public String jsonGetPaths(@PathParam("key") String key, @QueryParam("path") List<String> paths) {
+        return encodeObject(json.jsonGet(key, paths.toArray(new String[0])));
+    }
+
+    @POST
+    @Path("/json/person/{key}")
+    public String jsonSetPerson(@PathParam("key") String key, String value) {
+        String[] parts = value.split(",");
+        JsonPerson person = new JsonPerson();
+        person.name = parts[0];
+        person.age = Integer.parseInt(parts[1]);
+        json.jsonSet(key, person);
+        JsonPerson read = json.jsonGet(key, JsonPerson.class);
+        return read.name + "," + read.age + "," + person.equals(read);
+    }
+
+    @POST
+    @Path("/json/arrappend/{key}")
+    public List<Integer> jsonArrAppend(@PathParam("key") String key, @QueryParam("path") String path, String values) {
+        return json.jsonArrAppend(key, path, values.split(","));
+    }
+
+    @GET
+    @Path("/json/arrlen/{key}")
+    public List<Integer> jsonArrLen(@PathParam("key") String key, @QueryParam("path") String path) {
+        if (path == null) {
+            OptionalInt length = json.jsonArrLen(key);
+            return length.isPresent() ? List.of(length.getAsInt()) : List.of();
+        }
+        return json.jsonArrLen(key, path);
+    }
+
+    @POST
+    @Path("/json/arrpop/{key}")
+    public List<Integer> jsonArrPop(@PathParam("key") String key, @QueryParam("path") String path) {
+        return json.jsonArrPop(key, Integer.class, path);
+    }
+
+    @GET
+    @Path("/json/type/{key}")
+    public List<String> jsonType(@PathParam("key") String key, @QueryParam("path") String path) {
+        return json.jsonType(key, path);
+    }
+
+    @POST
+    @Path("/json/numincrby/{key}")
+    public String jsonNumIncrBy(@PathParam("key") String key, @QueryParam("path") String path, String value) {
+        json.jsonNumincrby(key, path, Double.parseDouble(value));
+        return encodeArray(json.jsonGet(key, path));
+    }
+
+    @POST
+    @Path("/json/strappend/{key}")
+    public List<Integer> jsonStrAppend(@PathParam("key") String key, @QueryParam("path") String path, String value) {
+        return json.jsonStrAppend(key, path, value);
+    }
+
+    @GET
+    @Path("/json/strlen/{key}")
+    public List<Integer> jsonStrLen(@PathParam("key") String key, @QueryParam("path") String path) {
+        return json.jsonStrLen(key, path);
+    }
+
+    @POST
+    @Path("/json/toggle/{key}")
+    public List<Boolean> jsonToggle(@PathParam("key") String key, @QueryParam("path") String path) {
+        return json.jsonToggle(key, path);
+    }
+
+    @GET
+    @Path("/json/objkeys/{key}")
+    public List<String> jsonObjKeys(@PathParam("key") String key) {
+        return json.jsonObjKeys(key);
+    }
+
+    @GET
+    @Path("/json/objlen/{key}")
+    public Integer jsonObjLen(@PathParam("key") String key) {
+        OptionalInt length = json.jsonObjLen(key);
+        return length.isPresent() ? length.getAsInt() : null;
+    }
+
+    @GET
+    @Path("/json/mget")
+    public List<String> jsonMget(@QueryParam("path") String path, @QueryParam("key") List<String> keys) {
+        return json.jsonMget(path, keys.toArray(new String[0])).stream()
+                .map(LettuceBackendResource::encodeArray)
+                .toList();
+    }
+
+    @POST
+    @Path("/json/clear/{key}")
+    public int jsonClear(@PathParam("key") String key, @QueryParam("path") String path) {
+        return path == null ? json.jsonClear(key) : json.jsonClear(key, path);
+    }
+
+    @DELETE
+    @Path("/json/{key}")
+    public int jsonDel(@PathParam("key") String key, @QueryParam("path") String path) {
+        return path == null ? json.jsonDel(key) : json.jsonDel(key, path);
+    }
+
+    @POST
+    @Path("/json/reactive/{key}")
+    public Uni<String> jsonSetReactive(@PathParam("key") String key, String body) {
+        return reactiveJson.jsonSet(key, "$", new JsonObject(body))
+                .chain(() -> reactiveJson.jsonGetObject(key))
+                .map(LettuceBackendResource::encodeObject);
+    }
+
+    @GET
+    @Path("/json/reactive/{key}")
+    public Uni<String> jsonGetReactive(@PathParam("key") String key, @QueryParam("path") String path) {
+        return reactiveJson.jsonGet(key, path).map(LettuceBackendResource::encodeArray);
+    }
+
+    private static String encodeObject(JsonObject object) {
+        return object == null ? null : object.encode();
+    }
+
+    private static String encodeArray(JsonArray array) {
+        return array == null ? null : array.encode();
     }
 
     @GET
@@ -965,6 +1232,35 @@ public class LettuceBackendResource {
     }
 
     @POST
+    @Path("/with-transaction/json/{key}")
+    public String withTransactionJson(@PathParam("key") String key) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var j = tx.json();
+            j.jsonSet(key, JsonObject.of("name", "luke", "tags", JsonArray.of("jedi"), "age", 20));
+            j.jsonArrAppend(key, "$.tags", "pilot");
+            j.jsonArrLen(key, "$.tags");
+            j.jsonNumincrby(key, "$.age", 2);
+            j.jsonStrAppend(key, "$.name", " skywalker");
+            j.jsonType(key, "$.age");
+            j.jsonGet(key);
+            j.jsonDel(key, "$.tags");
+            j.jsonObjKeys(key, "$");
+        });
+        Object set = result.get(0);
+        List<Integer> appended = result.get(1);
+        List<Integer> length = result.get(2);
+        Object incremented = result.get(3);
+        List<Integer> strAppended = result.get(4);
+        List<String> type = result.get(5);
+        JsonObject document = result.get(6);
+        int deleted = result.get(7);
+        List<List<String>> keys = result.get(8);
+        return result.discarded() + "," + result.size() + "," + (set == null) + "," + appended + "," + length + ","
+                + (incremented == null) + "," + strAppended + "," + type + "," + document.encode() + "," + deleted + ","
+                + keys;
+    }
+
+    @POST
     @Path("/with-transaction/countmin/{key}")
     public String withTransactionCountMin(@PathParam("key") String key) {
         String other = key + "-other";
@@ -989,6 +1285,30 @@ public class LettuceBackendResource {
         List<Long> queried = result.get(6);
         return result.discarded() + "," + result.size() + "," + (init == null) + "," + incremented + "," + counts + ","
                 + (mergeResult == null) + "," + queried;
+    }
+
+    @POST
+    @Path("/with-transaction/autosuggest/{key}")
+    public String withTransactionAutoSuggest(@PathParam("key") String key) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var a = tx.autosuggest(String.class);
+            a.ftSugAdd(key, "abc", 1.0);
+            a.ftSugAdd(key, "abcd", 1.0);
+            a.ftSugAdd(key, "abcde", 2.0);
+            a.ftSugAdd(key, "boo", 20);
+            a.ftSugDel(key, "boo");
+            a.ftSugLen(key);
+            a.ftSugget(key, "abcd");
+            a.ftSugget(key, "ab", new GetArgs().max(1).withScores());
+        });
+        long first = result.get(0);
+        long last = result.get(3);
+        boolean deleted = result.get(4);
+        long len = result.get(5);
+        List<Suggestion> plain = result.get(6);
+        List<Suggestion> scored = result.get(7);
+        return result.discarded() + "," + result.size() + "," + first + "," + last + "," + deleted + "," + len + ","
+                + plain.stream().map(Suggestion::suggestion).sorted().toList() + "," + formatSuggestions(scored, true);
     }
 
 }
