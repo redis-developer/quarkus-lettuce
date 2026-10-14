@@ -1236,10 +1236,27 @@ than trusting the configured order, so the master need not be the first host.
 * The topology is discovered when a connection is opened and kept for its lifetime: it is not refreshed
 periodically, and `topology-cache-ttl` has no effect. Use a Sentinel client when the master can change.
 
-The key, value (string), hash, list, set, sorted set, bitmap, hyperloglog, geo, JSON, autosuggest and count-min command groups are
-implemented on the Lettuce backend, including their transactional variants. The other groups (stream, pub/sub,
-bloom, cuckoo, top-k, graph, search and time series) are not implemented yet and throw an
+The key, value (string), hash, list, set, sorted set, bitmap, hyperloglog, geo, JSON, search, autosuggest, count-min and
+command groups are implemented on the Lettuce backend, including their transactional variants. The other
+groups (stream, pub/sub, bloom, cuckoo, top-k, graph and time series) are not implemented yet and throw an
 `UnsupportedOperationException` when requested from a data source.
+
+The search commands are translated to the Lettuce search API, which does not expose every option of the Vert.x
+client. The Lettuce backend differs in these details:
+
+* `QueryArgs.withPayloads()`, `filter(...)`, `geoFilter(...)` and `explainScore()` are not supported and throw an
+`IllegalArgumentException`; `FILTER` and `GEOFILTER` can be expressed in the query string instead.
+* The weight of a `TEXT` field (`FieldOptions.weight(...)`) must be a whole number, and `AggregateArgs` cannot
+combine `allFields()` with named `field(...)` loads.
+* The scorer (`QueryArgs.scorer(...)`), the document language and the phonetic matcher are restricted to the values
+Lettuce knows (the built-in RediSearch ones); custom scorers registered through a RediSearch extension are rejected
+with an `IllegalArgumentException`.
+* `FT.SEARCH` and `FT.AGGREGATE` always send a `DIALECT`, 2 when none is set on the arguments. The Vert.x client
+omits it, so the server-side default dialect (`search-default-dialect`) does not apply on the Lettuce backend.
+* On a cluster, `FT.CURSOR READ` and `FT.CURSOR DEL` must reach the node that created the cursor. The backend
+remembers the node of every cursor returned by `FT.AGGREGATE ... WITHCURSOR` in memory, for the cursor's
+`MAXIDLE` (the server default of 300 000 ms when none is set). A cursor obtained from another application instance,
+or read after that period, cannot be routed and fails.
 
 The data source methods exposing Vert.x types, such as `ReactiveRedisDataSource.getRedis()`, are not supported
 by the Lettuce backend and throw an `UnsupportedOperationException`; use `execute(...)` instead.

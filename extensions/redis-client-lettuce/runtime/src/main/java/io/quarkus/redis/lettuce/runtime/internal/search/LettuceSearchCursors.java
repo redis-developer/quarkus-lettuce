@@ -12,7 +12,7 @@ import io.lettuce.core.search.AggregationReply.Cursor;
 
 public final class LettuceSearchCursors {
 
-    private static final Duration DEFAULT_MAX_IDLE = Duration.ofHours(1);
+    private static final Duration DEFAULT_MAX_IDLE = Duration.ofMillis(300_000);
 
     private final ConcurrentMap<CursorKey, CursorState> cursors = new ConcurrentHashMap<>();
 

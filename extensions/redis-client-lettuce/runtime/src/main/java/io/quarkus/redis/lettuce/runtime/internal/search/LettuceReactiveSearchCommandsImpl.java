@@ -2,7 +2,10 @@ package io.quarkus.redis.lettuce.runtime.internal.search;
 
 import static io.quarkus.redis.runtime.datasource.Validation.notNullOrBlank;
 import static io.quarkus.redis.runtime.datasource.Validation.notNullOrEmpty;
-import static io.smallrye.mutiny.helpers.ParameterValidation.*;
+import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
+import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
+import static io.smallrye.mutiny.helpers.ParameterValidation.positive;
+import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
