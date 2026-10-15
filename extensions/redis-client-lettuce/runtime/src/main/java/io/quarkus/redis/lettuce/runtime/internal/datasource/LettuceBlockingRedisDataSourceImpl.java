@@ -23,6 +23,7 @@ import io.quarkus.redis.datasource.autosuggest.ReactiveAutoSuggestCommands;
 import io.quarkus.redis.datasource.bitmap.BitMapCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
 import io.quarkus.redis.datasource.bloom.BloomCommands;
+import io.quarkus.redis.datasource.bloom.ReactiveBloomCommands;
 import io.quarkus.redis.datasource.countmin.CountMinCommands;
 import io.quarkus.redis.datasource.countmin.ReactiveCountMinCommands;
 import io.quarkus.redis.datasource.cuckoo.CuckooCommands;
@@ -57,6 +58,7 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.BlockingAutoSuggestCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingBitmapCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingBloomCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingCountMinCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingGeoCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHashCommandsImpl;
@@ -461,12 +463,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, V> BloomCommands<K, V> bloom(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("bloom");
+        ReactiveBloomCommands<K, V> r = reactive.bloom(redisKeyType, valueType);
+        return new BlockingBloomCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> BloomCommands<K, V> bloom(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("bloom");
+        ReactiveBloomCommands<K, V> r = reactive.bloom(redisKeyType, valueType);
+        return new BlockingBloomCommandsImpl<>(this, r, timeout);
     }
 
     @Override
