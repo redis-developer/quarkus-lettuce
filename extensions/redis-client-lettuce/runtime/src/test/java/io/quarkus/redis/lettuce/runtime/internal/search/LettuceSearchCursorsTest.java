@@ -89,6 +89,26 @@ class LettuceSearchCursorsTest {
     }
 
     @Test
+    void forgetsACursorWhoseIndexIsGone() {
+        cursors.track("idx", 0, reply(42, "nodeA"));
+        cursors.forgetIfGone("idx", 42,
+                new RedisCommandExecutionException("SEARCH_INDEX_NOT_FOUND Index not found: idx"));
+
+        assertThat(cursors.cursor("idx", 42).getNodeId()).isEmpty();
+    }
+
+    @Test
+    void keepsACursorAfterAServerErrorThatLeavesItAlive() {
+        cursors.track("idx", 0, reply(42, "nodeA"));
+        cursors.forgetIfGone("idx", 42, new RedisCommandExecutionException("Timeout limit was reached"));
+        cursors.forgetIfGone("idx", 42, new RedisCommandExecutionException(
+                "OOM command not allowed when used memory > 'maxmemory'"));
+        cursors.forgetIfGone("idx", 42, new RedisCommandExecutionException((String) null));
+
+        assertThat(cursors.cursor("idx", 42).getNodeId()).contains("nodeA");
+    }
+
+    @Test
     void keepsACursorAfterATransportFailure() {
         cursors.track("idx", 0, reply(42, "nodeA"));
         cursors.forgetIfGone("idx", 42, new RedisCommandTimeoutException("Command timed out"));

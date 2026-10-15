@@ -1,6 +1,7 @@
 package io.quarkus.redis.lettuce.runtime.internal.search;
 
 import java.time.Duration;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -52,9 +53,20 @@ public final class LettuceSearchCursors {
     public void forgetIfGone(String index, long cursorId, Throwable failure) {
         Throwable cause = failure instanceof CompletionException && failure.getCause() != null ? failure.getCause()
                 : failure;
-        if (cause instanceof RedisCommandExecutionException) {
+        if (cause instanceof RedisCommandExecutionException && isGone(cause.getMessage())) {
             forget(index, cursorId);
         }
+    }
+
+    private static boolean isGone(String message) {
+        if (message == null) {
+            return false;
+        }
+        String lower = message.toLowerCase(Locale.ROOT);
+        // "Cursor not found, id: 42" (Redis 8) / "Cursor not found" (RediSearch 2.x),
+        // "SEARCH_INDEX_NOT_FOUND Index not found: idx" (Redis 8) / "idx: no such index" (RediSearch 2.x)
+        return lower.contains("cursor not found") || lower.contains("cursor does not exist")
+                || lower.contains("index not found") || lower.contains("no such index");
     }
 
     private void remember(String index, long cursorId, String nodeId, Duration maxIdle) {

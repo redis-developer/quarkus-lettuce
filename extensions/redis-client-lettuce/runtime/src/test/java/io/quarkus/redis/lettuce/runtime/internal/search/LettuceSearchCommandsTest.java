@@ -2,6 +2,7 @@ package io.quarkus.redis.lettuce.runtime.internal.search;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.fail;
 import static org.awaitility.Awaitility.await;
 
@@ -13,6 +14,8 @@ import org.assertj.core.data.Offset;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import io.lettuce.core.RedisCommandExecutionException;
+import io.lettuce.core.search.AggregationReply;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.hash.HashCommands;
@@ -576,6 +579,61 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
             blockingSearch.ftCursorDel("myIndex", result.cursor());
             assertThatThrownBy(() -> blockingSearch.ftCursorRead("myIndex", c)).hasMessageContaining("Cursor not found");
         });
+    }
+
+    @Test
+    void cursorRegistryForgetsOnlyCursorsTheServerReportsGone() {
+        String index = "tripwire";
+        blockingSearch.ftCreate(index, new CreateArgs().onHash().prefixes("tw:").indexedField("n", FieldType.NUMERIC));
+        for (int i = 1; i <= 4; i++) {
+            blockingHash.hset("tw:" + i, "n", Integer.toString(i));
+        }
+        LettuceSearchCursors registry = new LettuceSearchCursors();
+
+        // A server error that leaves the cursor alive must not evict it
+        long cursor = openCursor(index);
+        trackWithNode(registry, index, cursor);
+        Throwable badArgument = catchThrowable(() -> reactiveDs
+                .execute("FT.CURSOR", "READ", index, Long.toString(cursor), "COUNT", "abc").await().atMost(TIMEOUT));
+        assertThat(badArgument).isInstanceOf(RedisCommandExecutionException.class).hasMessageContaining("COUNT");
+        registry.forgetIfGone(index, cursor, badArgument);
+        assertThat(registry.cursor(index, cursor).getNodeId()).contains("nodeA");
+        assertThat(reactiveSearch.ftCursorRead(index, cursor, 1).await().atMost(TIMEOUT).cursor()).isEqualTo(cursor);
+
+        // "Cursor not found" after FT.CURSOR DEL evicts it
+        blockingSearch.ftCursorDel(index, cursor);
+        Throwable notFound = catchThrowable(() -> reactiveSearch.ftCursorRead(index, cursor).await().atMost(TIMEOUT));
+        assertThat(notFound).isInstanceOf(RedisCommandExecutionException.class);
+        registry.forgetIfGone(index, cursor, notFound);
+        assertThat(registry.cursor(index, cursor).getNodeId()).isEmpty();
+
+        // "Cursor does not exist" from a second FT.CURSOR DEL evicts it
+        trackWithNode(registry, index, cursor);
+        Throwable doesNotExist = catchThrowable(() -> reactiveSearch.ftCursorDel(index, cursor).await().atMost(TIMEOUT));
+        assertThat(doesNotExist).isInstanceOf(RedisCommandExecutionException.class);
+        registry.forgetIfGone(index, cursor, doesNotExist);
+        assertThat(registry.cursor(index, cursor).getNodeId()).isEmpty();
+
+        // "Index not found" after FT.DROPINDEX evicts it
+        long orphan = openCursor(index);
+        trackWithNode(registry, index, orphan);
+        blockingSearch.ftDropIndex(index);
+        Throwable indexGone = catchThrowable(() -> reactiveSearch.ftCursorRead(index, orphan).await().atMost(TIMEOUT));
+        assertThat(indexGone).isInstanceOf(RedisCommandExecutionException.class);
+        registry.forgetIfGone(index, orphan, indexGone);
+        assertThat(registry.cursor(index, orphan).getNodeId()).isEmpty();
+    }
+
+    private long openCursor(String index) {
+        return await().until(() -> blockingSearch
+                .ftAggregate(index, "*", new AggregateArgs().field("n").withCursor().cursorCount(1)).cursor(),
+                c -> c > 0);
+    }
+
+    private static void trackWithNode(LettuceSearchCursors registry, String index, long cursor) {
+        AggregationReply<byte[]> reply = new AggregationReply<>();
+        reply.setCursor(AggregationReply.Cursor.of(cursor, "nodeA"));
+        registry.track(index, 0, reply);
     }
 
     @Test
