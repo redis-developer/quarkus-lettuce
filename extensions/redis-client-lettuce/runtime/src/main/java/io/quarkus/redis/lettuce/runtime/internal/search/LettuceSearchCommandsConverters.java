@@ -65,6 +65,8 @@ final class LettuceSearchCommandsConverters {
         if (quarkus.getOffset() != -1) {
             builder.limit(quarkus.getOffset(), quarkus.getCount());
         }
+        // Like SearchArgs, Lettuce's AggregateArgs always sends DIALECT and defaults to 2, so an unset Quarkus
+        // dialect cannot fall back to the server setting the way the Vert.x backend does.
         if (quarkus.getDialect() != -1) {
             builder.dialect(toLettuceDialect(quarkus.getDialect()));
         }
@@ -413,12 +415,14 @@ final class LettuceSearchCommandsConverters {
         if (quarkus.getDistance() != 0) {
             lettuce.distance(quarkus.getDistance());
         }
-        // `TERMS INCLUDE|EXCLUDE dict [term...]`: the first Quarkus value is the dictionary, the rest are terms
-        if (!includes.isEmpty()) {
-            lettuce.termsInclude(includes.get(0), includes.subList(1, includes.size()).toArray(String[]::new));
+        // Every Quarkus value is a dictionary name. A `TERMS INCLUDE|EXCLUDE` clause names a single dictionary
+        // (the server ignores anything after it), so each dictionary gets its own clause. The Vert.x backend
+        // sends them all in one clause and so only applies the first.
+        for (String dictionary : includes) {
+            lettuce.termsInclude(dictionary);
         }
-        if (!excludes.isEmpty()) {
-            lettuce.termsExclude(excludes.get(0), excludes.subList(1, excludes.size()).toArray(String[]::new));
+        for (String dictionary : excludes) {
+            lettuce.termsExclude(dictionary);
         }
         if (quarkus.getDialect() != -1) {
             lettuce.dialect(quarkus.getDialect());

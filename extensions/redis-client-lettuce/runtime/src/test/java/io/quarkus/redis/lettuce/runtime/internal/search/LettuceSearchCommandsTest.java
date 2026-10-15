@@ -947,6 +947,14 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
                         .misspelledWords())
                 .isEmpty();
 
+        // Several dictionaries: each one must be applied (one TERMS clause per dictionary). "zebra" is neither in
+        // the index nor in my-dict, so only other-dict can make it correct.
+        blockingSearch.ftDictAdd("other-dict", "zebra");
+        assertThat(blockingSearch.ftSpellCheck("my-index", "bonjour zebra",
+                new SpellCheckArgs().includes("my-dict", "other-dict")).isCorrect()).isTrue();
+        assertThat(blockingSearch.ftSpellCheck("my-index", "bonjour zebra",
+                new SpellCheckArgs().includes("my-dict")).misspelledWords()).containsExactly("zebra");
+
         res = blockingSearch.ftSpellCheck("my-index", "bonjour magyc hocky",
                 new SpellCheckArgs().includes("my-dict").distance(3));
         assertThat(res.suggestions("bonjour")).isNull();
