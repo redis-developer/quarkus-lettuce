@@ -1159,6 +1159,84 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void topKAddAndList() {
+        String key = getKey("topk-sync");
+        String customKey = getKey("topk-custom");
+
+        // adding to a key that was not reserved is a server-side error
+        RestAssured.given().when().post("/lettuce/topk/add/" + key + "/luke").then().statusCode(500);
+
+        RestAssured.given().when().post("/lettuce/topk/reserve/" + key + "/2").then().statusCode(204);
+        RestAssured.given().when().post("/lettuce/topk/reserve/" + customKey + "/100/2/4/0.5").then().statusCode(204);
+        // re-reserving an existing key is a server-side error
+        RestAssured.given().when().post("/lettuce/topk/reserve/" + key + "/2").then().statusCode(500);
+
+        RestAssured.given().when().post("/lettuce/topk/add/" + key + "/luke").then()
+                .statusCode(200).body(CoreMatchers.is("null"));
+        RestAssured.given().when().post("/lettuce/topk/add/" + key + "/luke").then()
+                .statusCode(200).body(CoreMatchers.is("null"));
+        RestAssured.given().when().post("/lettuce/topk/add/" + key + "/leia").then()
+                .statusCode(200).body(CoreMatchers.is("null"));
+        // the list is full (k=2): anakin evicts leia
+        RestAssured.given().when().post("/lettuce/topk/add/" + key + "/anakin").then()
+                .statusCode(200).body(CoreMatchers.is("leia"));
+        RestAssured.given().body("luke,luke,leia,leia,leia,luke").when().post("/lettuce/topk/add/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[null,null,\"anakin\",null,null,null]"));
+
+        // TOPK.LIST replies most frequent first
+        RestAssured.given().when().get("/lettuce/topk/list/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[\"luke\",\"leia\"]"));
+        RestAssured.given().when().get("/lettuce/topk/list/" + key + "/withcount").then()
+                .statusCode(200).body(CoreMatchers.is("{\"luke\":5,\"leia\":4}"));
+
+        RestAssured.given().when().post("/lettuce/topk/incrby/" + key + "/anakin/6").then()
+                .statusCode(200).body(CoreMatchers.is("leia"));
+        RestAssured.given().when().get("/lettuce/topk/list/" + key + "/withcount").then()
+                .statusCode(200).body(CoreMatchers.is("{\"anakin\":7,\"luke\":5}"));
+        // leia (20) evicts luke (5), then luke (25) evicts anakin (7)
+        RestAssured.given().body("leia=20,luke=20").when().post("/lettuce/topk/incrby/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("{\"leia\":\"luke\",\"luke\":\"anakin\"}"));
+
+        RestAssured.given().when().get("/lettuce/topk/query/" + key + "/anakin").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().when().get("/lettuce/topk/query/" + key + "/luke").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().queryParam("items", "luke,leia,anakin").when().get("/lettuce/topk/query/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[true,true,false]"));
+    }
+
+    @Test
+    public void topKReactive() {
+        String key = getKey("topk-reactive");
+
+        RestAssured.given().when().post("/lettuce/topk/reserve/" + key + "/1").then().statusCode(204);
+        RestAssured.given().when().post("/lettuce/topk/reactive/add/" + key + "/x").then()
+                .statusCode(200).body(CoreMatchers.is("null"));
+        RestAssured.given().when().post("/lettuce/topk/reactive/add/" + key + "/x").then()
+                .statusCode(200).body(CoreMatchers.is("null"));
+        RestAssured.given().when().get("/lettuce/topk/reactive/list/" + key + "/withcount").then()
+                .statusCode(200).body(CoreMatchers.is("{\"x\":2}"));
+        RestAssured.given().when().get("/lettuce/topk/reactive/query/" + key + "/x").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().get("/lettuce/topk/reactive/query/" + key + "/y").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+    }
+
+    @Test
+    public void withTransactionTopK() {
+        String key = getKey("tx-topk");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/topk/" + key)
+                .then().statusCode(200).extract().asString();
+        // reserve(3) -> null, add(12 items) -> "c" evicted by the third "d", incrby(c,10) -> "c" re-enters and evicts "b",
+        // incrby(d=2,e=20) -> "d" (5) stays, "e" evicts the least frequent "a" (4), query(a) -> false,
+        // query(a,b,e) -> [false,false,true], list -> [e, c, d], listWithCount -> {e=20, c=12, d=5}
+        assertEquals("false,8,true,[null, null, null, null, null, null, null, null, null, null, c, null],b,"
+                + "{d=null, e=a},false,[false, false, true],[e, c, d],{e=20, c=12, d=5}", body);
+        RestAssured.given().when().get("/lettuce/topk/list/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[\"e\",\"c\",\"d\"]"));
+    }
+
+    @Test
     public void autoSuggestAddGetDel() {
         String key = getKey("sug-sync");
 
