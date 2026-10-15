@@ -26,6 +26,7 @@ import io.quarkus.redis.datasource.bloom.BloomCommands;
 import io.quarkus.redis.datasource.countmin.CountMinCommands;
 import io.quarkus.redis.datasource.countmin.ReactiveCountMinCommands;
 import io.quarkus.redis.datasource.cuckoo.CuckooCommands;
+import io.quarkus.redis.datasource.cuckoo.ReactiveCuckooCommands;
 import io.quarkus.redis.datasource.geo.GeoCommands;
 import io.quarkus.redis.datasource.geo.ReactiveGeoCommands;
 import io.quarkus.redis.datasource.graph.GraphCommands;
@@ -58,6 +59,7 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.BlockingAutoSuggestCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingBitmapCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingCountMinCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingCuckooCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingGeoCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHashCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHyperLogLogCommandsImpl;
@@ -471,12 +473,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, V> CuckooCommands<K, V> cuckoo(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("cuckoo");
+        ReactiveCuckooCommands<K, V> r = reactive.cuckoo(redisKeyType, valueType);
+        return new BlockingCuckooCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> CuckooCommands<K, V> cuckoo(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("cuckoo");
+        ReactiveCuckooCommands<K, V> r = reactive.cuckoo(redisKeyType, valueType);
+        return new BlockingCuckooCommandsImpl<>(this, r, timeout);
     }
 
     @Override
