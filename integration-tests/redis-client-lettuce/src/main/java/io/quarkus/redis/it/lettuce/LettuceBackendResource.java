@@ -811,7 +811,7 @@ public class LettuceBackendResource {
     public String pubSubSubscribe(@QueryParam("channels") String channels) {
         Subscription subscription = new Subscription();
         subscription.subscriber = pubsub.subscribe(List.of(channels.split(",")),
-                (channel, payload) -> subscription.record(channel, payload), subscription::end, null);
+                subscription::record, subscription::end, null);
         return register(subscription);
     }
 
@@ -821,7 +821,7 @@ public class LettuceBackendResource {
     public String pubSubSubscribeToPatterns(@QueryParam("patterns") String patterns) {
         Subscription subscription = new Subscription();
         subscription.subscriber = pubsub.subscribeToPatterns(List.of(patterns.split(",")),
-                (channel, payload) -> subscription.record(channel, payload), subscription::end, null);
+                subscription::record, subscription::end, null);
         return register(subscription);
     }
 
