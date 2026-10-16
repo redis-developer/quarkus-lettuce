@@ -70,6 +70,8 @@ import io.quarkus.redis.datasource.sortedset.ScoreRange;
 import io.quarkus.redis.datasource.sortedset.ScoredValue;
 import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
+import io.quarkus.redis.datasource.topk.ReactiveTopKCommands;
+import io.quarkus.redis.datasource.topk.TopKCommands;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
@@ -121,6 +123,8 @@ public class LettuceBackendResource {
     private final ReactiveAutoSuggestCommands<String> reactiveAutoSuggest;
     private final CountMinCommands<String, String> countmin;
     private final ReactiveCountMinCommands<String, String> reactiveCountMin;
+    private final TopKCommands<String, String> topk;
+    private final ReactiveTopKCommands<String, String> reactiveTopK;
 
     private final Map<String, Subscription> subscriptions = new ConcurrentHashMap<>();
     private final AtomicInteger subscriptionIds = new AtomicInteger();
@@ -165,6 +169,8 @@ public class LettuceBackendResource {
         this.reactiveAutoSuggest = reactiveDs.autosuggest(String.class);
         this.countmin = ds.countmin(String.class);
         this.reactiveCountMin = reactiveDs.countmin(String.class);
+        this.topk = ds.topk(String.class);
+        this.reactiveTopK = reactiveDs.topk(String.class);
     }
 
     @GET
@@ -718,6 +724,101 @@ public class LettuceBackendResource {
     @Path("/countmin/reactive/query/{key}/{item}")
     public Uni<Long> countMinQueryReactive(@PathParam("key") String key, @PathParam("item") String item) {
         return reactiveCountMin.cmsQuery(key, item);
+    }
+
+    @POST
+    @Path("/topk/reserve/{key}/{topk}")
+    public void topKReserve(@PathParam("key") String key, @PathParam("topk") int topk) {
+        this.topk.topkReserve(key, topk);
+    }
+
+    @POST
+    @Path("/topk/reserve/{key}/{topk}/{width}/{depth}/{decay}")
+    public void topKReserve(@PathParam("key") String key, @PathParam("topk") int topk, @PathParam("width") int width,
+            @PathParam("depth") int depth, @PathParam("decay") double decay) {
+        this.topk.topkReserve(key, topk, width, depth, decay);
+    }
+
+    /**
+     * Returns the item evicted by this addition, or the literal {@code "null"} when nothing was evicted.
+     */
+    @POST
+    @Path("/topk/add/{key}/{item}")
+    public String topKAdd(@PathParam("key") String key, @PathParam("item") String item) {
+        return String.valueOf(topk.topkAdd(key, item).orElse(null));
+    }
+
+    /**
+     * Body: {@code item,item,...}. Replies with one entry per item: the evicted item or {@code null}.
+     */
+    @POST
+    @Path("/topk/add/{key}")
+    public List<String> topKAddMany(@PathParam("key") String key, String items) {
+        return topk.topkAdd(key, items.split(","));
+    }
+
+    @POST
+    @Path("/topk/incrby/{key}/{item}/{increment}")
+    public String topKIncrBy(@PathParam("key") String key, @PathParam("item") String item,
+            @PathParam("increment") int increment) {
+        return String.valueOf(topk.topkIncrBy(key, item, increment).orElse(null));
+    }
+
+    /**
+     * Body: {@code item=increment,item=increment,...}. Uses an insertion-ordered map so the reply order is deterministic.
+     * The reply maps each item to the item it evicted, or to {@code null}.
+     */
+    @POST
+    @Path("/topk/incrby/{key}")
+    public Map<String, String> topKIncrByMany(@PathParam("key") String key, String couples) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        for (String couple : couples.split(",")) {
+            String[] parts = couple.split("=");
+            map.put(parts[0], Integer.parseInt(parts[1]));
+        }
+        return topk.topkIncrBy(key, map);
+    }
+
+    @GET
+    @Path("/topk/list/{key}")
+    public List<String> topKList(@PathParam("key") String key) {
+        return topk.topkList(key);
+    }
+
+    @GET
+    @Path("/topk/list/{key}/withcount")
+    public Map<String, Integer> topKListWithCount(@PathParam("key") String key) {
+        return topk.topkListWithCount(key);
+    }
+
+    @GET
+    @Path("/topk/query/{key}/{item}")
+    public boolean topKQuery(@PathParam("key") String key, @PathParam("item") String item) {
+        return topk.topkQuery(key, item);
+    }
+
+    @GET
+    @Path("/topk/query/{key}")
+    public List<Boolean> topKQueryMany(@PathParam("key") String key, @QueryParam("items") String items) {
+        return topk.topkQuery(key, items.split(","));
+    }
+
+    @POST
+    @Path("/topk/reactive/add/{key}/{item}")
+    public Uni<String> topKAddReactive(@PathParam("key") String key, @PathParam("item") String item) {
+        return reactiveTopK.topkAdd(key, item).map(String::valueOf);
+    }
+
+    @GET
+    @Path("/topk/reactive/list/{key}/withcount")
+    public Uni<Map<String, Integer>> topKListWithCountReactive(@PathParam("key") String key) {
+        return reactiveTopK.topkListWithCount(key);
+    }
+
+    @GET
+    @Path("/topk/reactive/query/{key}/{item}")
+    public Uni<Boolean> topKQueryReactive(@PathParam("key") String key, @PathParam("item") String item) {
+        return reactiveTopK.topkQuery(key, item);
     }
 
     @POST
@@ -1381,6 +1482,35 @@ public class LettuceBackendResource {
         List<Long> queried = result.get(6);
         return result.discarded() + "," + result.size() + "," + (init == null) + "," + incremented + "," + counts + ","
                 + (mergeResult == null) + "," + queried;
+    }
+
+    @POST
+    @Path("/with-transaction/topk/{key}")
+    public String withTransactionTopK(@PathParam("key") String key) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var t = tx.topk(String.class, String.class);
+            t.topkReserve(key, 3);
+            t.topkAdd(key, "a", "a", "b", "b", "a", "c", "a", "b", "c", "d", "d", "d");
+            t.topkIncrBy(key, "c", 10);
+            Map<String, Integer> couples = new LinkedHashMap<>();
+            couples.put("d", 2);
+            couples.put("e", 20);
+            t.topkIncrBy(key, couples);
+            t.topkQuery(key, "a");
+            t.topkQuery(key, "a", "b", "e");
+            t.topkList(key);
+            t.topkListWithCount(key);
+        });
+        Object reserve = result.get(0);
+        List<String> added = result.get(1);
+        String evicted = result.get(2);
+        Map<String, String> evictedByCouples = result.get(3);
+        boolean queried = result.get(4);
+        List<Boolean> queriedMany = result.get(5);
+        List<String> list = result.get(6);
+        Map<String, Integer> withCount = result.get(7);
+        return result.discarded() + "," + result.size() + "," + (reserve == null) + "," + added + "," + evicted + ","
+                + evictedByCouples + "," + queried + "," + queriedMany + "," + list + "," + withCount;
     }
 
     @POST
