@@ -39,7 +39,7 @@ import io.vertx.redis.client.RedisReplicas;
 import io.vertx.redis.client.RedisRole;
 
 /**
- * Unit tests for the URI credential parsing, the password precedence, the peer verification mapping and the
+ * Unit tests for the URI credential parsing, the credential precedence, the peer verification mapping and the
  * client option mappings of {@link LettuceClientSettings}, all of which must match the Vert.x Redis client.
  */
 class LettuceClientSettingsTest {
@@ -91,8 +91,31 @@ class LettuceClientSettingsTest {
         assertThat(none.hasPassword()).isFalse();
     }
 
+    @Test
+    void uriUsernameWinsOverProperty() {
+        RedisCredentials fromUri = resolve(new UserInfo("uri-user", "pass"), "property-user", null);
+        assertThat(fromUri.getUsername()).isEqualTo("uri-user");
+        assertThat(fromUri.getPassword()).containsExactly("pass".toCharArray());
+
+        RedisCredentials fromProperty = resolve(new UserInfo(null, "pass"), "property-user", null);
+        assertThat(fromProperty.getUsername()).isEqualTo("property-user");
+        assertThat(fromProperty.getPassword()).containsExactly("pass".toCharArray());
+
+        RedisCredentials bothProperties = resolve(UserInfo.NONE, "property-user", "property-pass");
+        assertThat(bothProperties.getUsername()).isEqualTo("property-user");
+        assertThat(bothProperties.getPassword()).containsExactly("property-pass".toCharArray());
+
+        RedisCredentials none = resolve(UserInfo.NONE, null, "property-pass");
+        assertThat(none.hasUsername()).isFalse();
+    }
+
     private static RedisCredentials resolve(UserInfo userInfo, String password) {
-        return ((StaticCredentialsProvider) LettuceClientSettings.credentials(userInfo, password)).resolveCredentialsNow();
+        return resolve(userInfo, null, password);
+    }
+
+    private static RedisCredentials resolve(UserInfo userInfo, String username, String password) {
+        return ((StaticCredentialsProvider) LettuceClientSettings.credentials(userInfo, username, password))
+                .resolveCredentialsNow();
     }
 
     @Test

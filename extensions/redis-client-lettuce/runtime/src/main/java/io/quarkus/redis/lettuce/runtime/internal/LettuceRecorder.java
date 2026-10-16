@@ -7,6 +7,7 @@ import static io.quarkus.redis.runtime.client.config.RedisConfig.getPropertyName
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -98,7 +99,7 @@ public class LettuceRecorder {
         for (String name : names) {
             if (checkActive(name).get().value()) {
                 RedisClientConfig clientConfig = runtimeConfig.getValue().clients().get(name);
-                Set<URI> hosts = hosts(name, clientConfig);
+                List<URI> hosts = hosts(name, clientConfig);
                 warnAboutUnsupportedConfiguration(name, clientConfig, hosts);
                 LettuceClientSettings settings = LettuceClientSettings.create(name, clientConfig, hosts, vertx.getValue(),
                         tlsRegistry.get());
@@ -176,23 +177,24 @@ public class LettuceRecorder {
      *
      * @throws ConfigurationException if the provider bean is missing or returns no host
      */
-    private static Set<URI> hosts(String name, RedisClientConfig config) {
+    private static List<URI> hosts(String name, RedisClientConfig config) {
         if (hasHosts(config)) {
             return config.hosts().get();
         }
         String providerName = config.hostsProviderName().orElseThrow();
-        Set<URI> hosts = VertxRedisClientFactory.findProvider(providerName).getHosts();
+        Collection<URI> hosts = VertxRedisClientFactory.findProvider(providerName).getHosts();
         if (hosts == null || hosts.isEmpty()) {
             throw new ConfigurationException(String.format(
                     "The Redis hosts provider '%s' of the Lettuce Redis client '%s' (configuration property '%s') "
                             + "returned no host",
                     providerName, name, getPropertyName(name, HOSTS_PROVIDER_NAME)));
         }
-        return hosts;
+        return new ArrayList<>(hosts);
     }
 
     /**
-     * The Lettuce backend applies the hosts (or {@code hosts-provider-name}), client-type, timeout, active, password,
+     * The Lettuce backend applies the hosts (or {@code hosts-provider-name}), client-type, timeout, active, username,
+     * password,
      * TLS, client name, protocol, command queue and TCP socket properties (see {@link LettuceClientSettings}),
      * {@code max-pool-size}, {@code max-pool-waiting}, {@code pool-recycle-timeout} and {@code pool-cleaner-interval}
      * (see {@link LettuceConnectionPool}); for a cluster also {@code replicas} and {@code topology-cache-ttl}, but not the
@@ -203,7 +205,7 @@ public class LettuceRecorder {
      * properties are not applied, and why, instead of silently connecting differently than configured. Properties
      * with a default value are reported only when set to something else.
      */
-    private static void warnAboutUnsupportedConfiguration(String name, RedisClientConfig config, Set<URI> hosts) {
+    private static void warnAboutUnsupportedConfiguration(String name, RedisClientConfig config, List<URI> hosts) {
         List<String> ignored = new ArrayList<>();
         RedisClientType type = config.clientType();
         if (type == RedisClientType.CLUSTER) {
@@ -233,10 +235,6 @@ public class LettuceRecorder {
         if (type == RedisClientType.SENTINEL && config.role().orElse(RedisRole.MASTER) == RedisRole.REPLICA
                 && config.replicas().isPresent()) {
             ignored.add(getPropertyName(name, "replicas") + " (role=replica reads from the replicas)");
-        }
-        // the deprecated alias is applied by neither backend (see LettuceClientSettings.topologyCacheTtl)
-        if (!config.hashSlotCacheTtl().equals(LettuceClientSettings.DEFAULT_TOPOLOGY_CACHE_TTL)) {
-            ignored.add(getPropertyName(name, "hash-slot-cache-ttl") + " (deprecated, use topology-cache-ttl)");
         }
         if (type != RedisClientType.SENTINEL) {
             if (config.masterName().isPresent()) {
@@ -294,7 +292,6 @@ public class LettuceRecorder {
         present.put("write-idle-timeout" + noIdleHandler, tcp.writeIdleTimeout().isPresent());
         String noProxy = " (Lettuce does not connect through a proxy)";
         present.put("proxy-configuration-name" + noProxy, tcp.proxyConfigurationName().isPresent());
-        present.put("non-proxy-hosts" + noProxy, tcp.nonProxyHosts().isPresent());
         // The default of the client-level reconnect-attempts (0) is registered for every client as
         // quarkus.redis.*.reconnect-attempts, which the tcp group of the default client (quarkus.redis.tcp.*) also
         // matches: the tcp property is always present for that client. Treat it like a defaulted property and report
@@ -352,7 +349,8 @@ public class LettuceRecorder {
     public Supplier<ReactiveRedisDataSource> getReactiveDataSource(String name) {
         return () -> reactiveDataSources.computeIfAbsent(name, k -> {
             LettuceConnection conn = dataSourceConnection(k);
-            return new LettuceReactiveRedisDataSourceImpl(mutinyVertx, conn, pools.get(k));
+            LettuceConnectionFactory factory = factories.get(k);
+            return new LettuceReactiveRedisDataSourceImpl(mutinyVertx, conn, pools.get(k), factory::connectPubSubAsync);
         });
     }
 
