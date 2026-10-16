@@ -37,6 +37,15 @@ public class XReadArgs implements RedisCommandExtraArguments {
         return this;
     }
 
+    /**
+     * Returns the configured BLOCK duration, or null when the read does not block.
+     *
+     * @return the configured BLOCK duration, or null when the read does not block.
+     */
+    public Duration block() {
+        return block;
+    }
+
     @Override
     public List<Object> toArgs() {
         List<Object> args = new ArrayList<>();

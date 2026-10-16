@@ -113,7 +113,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
 
     LettuceCommand<Map<byte[], byte[]>, Map<F, V>> _hgetall(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.hgetall(marshaller.encode(key)), this::decodeMap);
+        return LettuceCommand.of(() -> async.hgetall(marshaller.encode(key)), map -> decodeMap(fieldType, map));
     }
 
     @Override
@@ -204,7 +204,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     @Override
     public ReactiveHashScanCursor<F, V> hscan(K key) {
         nonNull(key, "key");
-        return new LettuceReactiveHashScanCursorImpl<>(async, marshaller.encode(key), this::decodeMap);
+        return new LettuceReactiveHashScanCursorImpl<>(async, marshaller.encode(key), map -> decodeMap(fieldType, map));
     }
 
     @Override
@@ -212,7 +212,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(scanArgs, "scanArgs");
         return new LettuceReactiveHashScanCursorImpl<>(async, marshaller.encode(key),
-                LettuceCommonConverters.toLettuceScanArgs(scanArgs), this::decodeMap);
+                LettuceCommonConverters.toLettuceScanArgs(scanArgs), map -> decodeMap(fieldType, map));
     }
 
     @Override
@@ -278,14 +278,6 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
 
     private F decodeF(byte[] bytes) {
         return marshaller.decode(fieldType, bytes);
-    }
-
-    private Map<F, V> decodeMap(Map<byte[], byte[]> map) {
-        Map<F, V> decoded = new LinkedHashMap<>(map.size());
-        for (Map.Entry<byte[], byte[]> e : map.entrySet()) {
-            decoded.put(decodeF(e.getKey()), decodeV(e.getValue()));
-        }
-        return decoded;
     }
 
     private Map<F, V> decodeFieldWithValueMap(List<KeyValue<byte[], byte[]>> entries) {
