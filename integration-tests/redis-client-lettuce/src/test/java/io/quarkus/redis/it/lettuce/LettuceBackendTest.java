@@ -791,6 +791,81 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void bloomAddExists() {
+        String key = getKey("bloom-sync");
+
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+
+        RestAssured.given().body("a").when().post("/lettuce/bloom/bfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        // an item already in the filter is not added again
+        RestAssured.given().body("a").when().post("/lettuce/bloom/bfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/z").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().when().get("/lettuce/key/exists/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
+    public void bloomMAddMExists() {
+        String key = getKey("bloom-multi");
+
+        // the duplicate "a" within the same call is reported as not added
+        RestAssured.given().body("a,b,c,a").when().post("/lettuce/bloom/bfmadd/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, true, false)));
+        RestAssured.given().queryParam("values", "a,b,z").when().get("/lettuce/bloom/bfmexists/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+    }
+
+    @Test
+    public void bloomReserveInsert() {
+        String key = getKey("bloom-reserve");
+
+        RestAssured.given().queryParam("nonScaling", true).when()
+                .post("/lettuce/bloom/bfreserve/" + key + "/0.01/100").then()
+                .statusCode(204);
+        // NOCREATE is fine because the filter was reserved above
+        RestAssured.given().queryParam("nocreate", true).body("a,b,a").when()
+                .post("/lettuce/bloom/bfinsert/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/b").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        // insert into a brand-new key creates the filter with the given capacity
+        String created = getKey("bloom-insert-create");
+        RestAssured.given().queryParam("capacity", 50).body("x,y").when()
+                .post("/lettuce/bloom/bfinsert/" + created).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true)));
+        RestAssured.given().queryParam("values", "x,y,q").when().get("/lettuce/bloom/bfmexists/" + created).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+    }
+
+    @Test
+    public void bloomReactive() {
+        String key = getKey("bloom-reactive");
+
+        RestAssured.given().when().get("/lettuce/bloom/reactive/bfexists/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("a").when().post("/lettuce/bloom/reactive/bfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("a").when().post("/lettuce/bloom/reactive/bfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("b,c,a").when().post("/lettuce/bloom/reactive/bfmadd/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+        RestAssured.given().queryParam("values", "a,b,c,z").when()
+                .get("/lettuce/bloom/reactive/bfmexists/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, true, false)));
+        // blocking and reactive views agree on the same key
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/c").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
     public void withConnectionBlockingClientIds() {
         String body = RestAssured.given().when().get("/lettuce/with-connection/client-ids")
                 .then().statusCode(200).extract().asString();
@@ -1355,6 +1430,27 @@ class LettuceBackendTest {
         assertEquals("false,8,1,4,true,3,[abcd, abcde],[abcde:1.0]", body);
         RestAssured.given().when().get("/lettuce/autosuggest/len/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("3"));
+    }
+
+    @Test
+    public void withTransactionBloom() {
+        String key = getKey("tx-bloom");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/bloom/" + key)
+                .then().statusCode(200).extract().asString();
+        // bfmadd(a,b,c,d,a) -> 4 true + 1 false, bfadd(x) -> true, bfexists(a) -> true,
+        // bfmexists(a,b,z) -> true,true,false, bfinsert(v,w,b) -> true,true,false
+        assertEquals("false;5;[true, true, true, true, false];true;true;[true, true, false];[true, true, false]", body);
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/v").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
+    public void withTransactionBloomReactive() {
+        String key = getKey("tx-bloom-reactive");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/reactive/bloom/" + key)
+                .then().statusCode(200).extract().asString();
+        // bfmadd(a,b,c) -> 3 true, bfexists(a) -> true, bfexists(z) -> false
+        assertEquals("false;3;[true, true, true];true;false", body);
     }
 
 }

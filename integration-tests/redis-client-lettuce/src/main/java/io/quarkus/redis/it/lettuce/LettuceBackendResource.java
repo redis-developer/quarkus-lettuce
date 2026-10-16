@@ -38,6 +38,10 @@ import io.quarkus.redis.datasource.autosuggest.Suggestion;
 import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
 import io.quarkus.redis.datasource.bitmap.BitMapCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
+import io.quarkus.redis.datasource.bloom.BfInsertArgs;
+import io.quarkus.redis.datasource.bloom.BfReserveArgs;
+import io.quarkus.redis.datasource.bloom.BloomCommands;
+import io.quarkus.redis.datasource.bloom.ReactiveBloomCommands;
 import io.quarkus.redis.datasource.countmin.CountMinCommands;
 import io.quarkus.redis.datasource.countmin.ReactiveCountMinCommands;
 import io.quarkus.redis.datasource.geo.GeoCommands;
@@ -119,6 +123,8 @@ public class LettuceBackendResource {
     private final ReactiveJsonCommands<String> reactiveJson;
     private final AutoSuggestCommands<String> autosuggest;
     private final ReactiveAutoSuggestCommands<String> reactiveAutoSuggest;
+    private final BloomCommands<String, String> bloom;
+    private final ReactiveBloomCommands<String, String> reactiveBloom;
     private final CountMinCommands<String, String> countmin;
     private final ReactiveCountMinCommands<String, String> reactiveCountMin;
 
@@ -163,6 +169,8 @@ public class LettuceBackendResource {
         this.reactiveJson = reactiveDs.json();
         this.autosuggest = ds.autosuggest(String.class);
         this.reactiveAutoSuggest = reactiveDs.autosuggest(String.class);
+        this.bloom = ds.bloom(String.class);
+        this.reactiveBloom = reactiveDs.bloom(String.class);
         this.countmin = ds.countmin(String.class);
         this.reactiveCountMin = reactiveDs.countmin(String.class);
     }
@@ -652,6 +660,80 @@ public class LettuceBackendResource {
     @Path("/hyperloglog/reactive/pfcount/{key}")
     public Uni<Long> hyperloglogPfCountReactive(@PathParam("key") String key) {
         return reactiveHyperLogLog.pfcount(key);
+    }
+
+    @POST
+    @Path("/bloom/bfadd/{key}")
+    public boolean bloomBfAdd(@PathParam("key") String key, String value) {
+        return bloom.bfadd(key, value);
+    }
+
+    @GET
+    @Path("/bloom/bfexists/{key}/{value}")
+    public boolean bloomBfExists(@PathParam("key") String key, @PathParam("value") String value) {
+        return bloom.bfexists(key, value);
+    }
+
+    @POST
+    @Path("/bloom/bfmadd/{key}")
+    public List<Boolean> bloomBfMAdd(@PathParam("key") String key, String values) {
+        return bloom.bfmadd(key, values.split(","));
+    }
+
+    @GET
+    @Path("/bloom/bfmexists/{key}")
+    public List<Boolean> bloomBfMExists(@PathParam("key") String key, @QueryParam("values") String values) {
+        return bloom.bfmexists(key, values.split(","));
+    }
+
+    @POST
+    @Path("/bloom/bfreserve/{key}/{errorRate}/{capacity}")
+    public void bloomBfReserve(@PathParam("key") String key, @PathParam("errorRate") double errorRate,
+            @PathParam("capacity") long capacity, @QueryParam("nonScaling") boolean nonScaling) {
+        BfReserveArgs args = new BfReserveArgs();
+        if (nonScaling) {
+            args.nonScaling();
+        }
+        bloom.bfreserve(key, errorRate, capacity, args);
+    }
+
+    @POST
+    @Path("/bloom/bfinsert/{key}")
+    public List<Boolean> bloomBfInsert(@PathParam("key") String key, @QueryParam("capacity") Long capacity,
+            @QueryParam("nocreate") boolean nocreate, String values) {
+        BfInsertArgs args = new BfInsertArgs();
+        if (capacity != null) {
+            args.capacity(capacity);
+        }
+        if (nocreate) {
+            args.nocreate();
+        }
+        return bloom.bfinsert(key, args, values.split(","));
+    }
+
+    @POST
+    @Path("/bloom/reactive/bfadd/{key}")
+    public Uni<Boolean> bloomBfAddReactive(@PathParam("key") String key, String value) {
+        return reactiveBloom.bfadd(key, value);
+    }
+
+    @GET
+    @Path("/bloom/reactive/bfexists/{key}/{value}")
+    public Uni<Boolean> bloomBfExistsReactive(@PathParam("key") String key, @PathParam("value") String value) {
+        return reactiveBloom.bfexists(key, value);
+    }
+
+    @POST
+    @Path("/bloom/reactive/bfmadd/{key}")
+    public Uni<List<Boolean>> bloomBfMAddReactive(@PathParam("key") String key, String values) {
+        return reactiveBloom.bfmadd(key, values.split(","));
+    }
+
+    @GET
+    @Path("/bloom/reactive/bfmexists/{key}")
+    public Uni<List<Boolean>> bloomBfMExistsReactive(@PathParam("key") String key,
+            @QueryParam("values") String values) {
+        return reactiveBloom.bfmexists(key, values.split(","));
     }
 
     @POST
@@ -1405,6 +1487,38 @@ public class LettuceBackendResource {
         List<Suggestion> scored = result.get(7);
         return result.discarded() + "," + result.size() + "," + first + "," + last + "," + deleted + "," + len + ","
                 + plain.stream().map(Suggestion::suggestion).sorted().toList() + "," + formatSuggestions(scored, true);
+    }
+
+    @POST
+    @Path("/with-transaction/bloom/{key}")
+    public String withTransactionBloom(@PathParam("key") String key) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var b = tx.bloom(String.class, String.class);
+            b.bfmadd(key, "a", "b", "c", "d", "a");
+            b.bfadd(key, "x");
+            b.bfexists(key, "a");
+            b.bfmexists(key, "a", "b", "z");
+            b.bfinsert(key, new BfInsertArgs(), "v", "w", "b");
+        });
+        List<Boolean> madd = result.get(0);
+        boolean added = result.get(1);
+        boolean exists = result.get(2);
+        List<Boolean> mexists = result.get(3);
+        List<Boolean> inserted = result.get(4);
+        return result.discarded() + ";" + result.size() + ";" + madd + ";" + added + ";" + exists + ";" + mexists + ";"
+                + inserted;
+    }
+
+    @POST
+    @Path("/with-transaction/reactive/bloom/{key}")
+    public Uni<String> withTransactionBloomReactive(@PathParam("key") String key) {
+        return reactive.withTransaction(tx -> {
+            var b = tx.bloom(String.class, String.class);
+            return b.bfmadd(key, "a", "b", "c")
+                    .chain(() -> b.bfexists(key, "a"))
+                    .chain(() -> b.bfexists(key, "z"));
+        }).map(result -> result.discarded() + ";" + result.size() + ";" + result.get(0) + ";" + result.get(1) + ";"
+                + result.get(2));
     }
 
 }
