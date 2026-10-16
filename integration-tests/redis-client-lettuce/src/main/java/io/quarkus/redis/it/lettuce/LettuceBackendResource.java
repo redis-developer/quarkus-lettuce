@@ -95,6 +95,7 @@ public class LettuceBackendResource {
     private final RedisClusterClient clusterClient;
     private final RedisDataSource sentinel;
     private final RedisDataSource replication;
+    private final RedisDataSource provided;
     private final ValueCommands<String, String> values;
     private final ReactiveValueCommands<String, String> reactiveValues;
     private final KeyCommands<String> keys;
@@ -131,7 +132,8 @@ public class LettuceBackendResource {
             @RedisClientName("cluster") RedisDataSource clusterDs,
             @RedisClientName("cluster") RedisClusterClient clusterClient,
             @RedisClientName("sentinel") RedisDataSource sentinelDs,
-            @RedisClientName("replication") RedisDataSource replicationDs) {
+            @RedisClientName("replication") RedisDataSource replicationDs,
+            @RedisClientName("provided") RedisDataSource providedDs) {
         this.blocking = ds;
         this.reactive = reactiveDs;
         this.secure = secureDs;
@@ -139,6 +141,7 @@ public class LettuceBackendResource {
         this.clusterClient = clusterClient;
         this.sentinel = sentinelDs;
         this.replication = replicationDs;
+        this.provided = providedDs;
         this.values = ds.value(String.class);
         this.reactiveValues = reactiveDs.value(String.class);
         this.keys = ds.key(String.class);
@@ -317,6 +320,31 @@ public class LettuceBackendResource {
     @Path("/replication/value/{key}")
     public String replicationGetValue(@PathParam("key") String key) {
         return replication.value(String.class).get(key);
+    }
+
+    /**
+     * Pings the {@code provided} client, whose hosts come from the {@link LettuceHostsProvider} bean named by
+     * {@code hosts-provider-name}.
+     */
+    @GET
+    @Path("/provided/ping")
+    public String providedPing() {
+        return provided.execute("PING").toString();
+    }
+
+    /**
+     * The database the {@code provided} client is on, from {@code CLIENT INFO}: {@code 3}, the one of the provided URI.
+     */
+    @GET
+    @Path("/provided/database")
+    public String providedDatabase() {
+        String info = provided.execute("CLIENT", "INFO").toString();
+        for (String field : info.trim().split(" ")) {
+            if (field.startsWith("db=")) {
+                return field.substring("db=".length());
+            }
+        }
+        return "unknown";
     }
 
     private static String role(RedisDataSource ds) {
