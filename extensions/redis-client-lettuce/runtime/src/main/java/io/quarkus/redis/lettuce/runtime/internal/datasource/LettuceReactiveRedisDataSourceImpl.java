@@ -57,6 +57,7 @@ import io.quarkus.redis.lettuce.runtime.internal.json.LettuceReactiveJsonCommand
 import io.quarkus.redis.lettuce.runtime.internal.key.LettuceReactiveKeyCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.list.LettuceReactiveListCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.pubsub.LettuceReactivePubSubCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.search.LettuceReactiveSearchCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSortedSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveValueCommandsImpl;
@@ -233,7 +234,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
         try {
             return CommandType.valueOf(name.toUpperCase());
         } catch (IllegalArgumentException e) {
-            return new StringKeyword(name);
+            return new StringKeyword(name.toUpperCase());
         }
     }
 
@@ -632,7 +633,8 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K> ReactiveSearchCommands<K> search(Class<K> redisKeyType) {
-        throw groupNotImplemented("search");
+        nonNull(redisKeyType, "redisKeyType");
+        return new LettuceReactiveSearchCommandsImpl<>(this, connection, redisKeyType);
     }
 
     @Override
