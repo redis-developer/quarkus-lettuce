@@ -47,6 +47,7 @@ import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
 import io.quarkus.redis.datasource.stream.StreamCommands;
 import io.quarkus.redis.datasource.string.StringCommands;
 import io.quarkus.redis.datasource.timeseries.TimeSeriesCommands;
+import io.quarkus.redis.datasource.topk.ReactiveTopKCommands;
 import io.quarkus.redis.datasource.topk.TopKCommands;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
@@ -69,6 +70,7 @@ import io.quarkus.redis.runtime.datasource.BlockingPubSubCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingSetCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingSortedSetCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingStringCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingTopKCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingTransactionalRedisDataSourceImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
 import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
@@ -497,12 +499,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, V> TopKCommands<K, V> topk(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("topk");
+        ReactiveTopKCommands<K, V> r = reactive.topk(redisKeyType, valueType);
+        return new BlockingTopKCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> TopKCommands<K, V> topk(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("topk");
+        ReactiveTopKCommands<K, V> r = reactive.topk(redisKeyType, valueType);
+        return new BlockingTopKCommandsImpl<>(this, r, timeout);
     }
 
     @Override
