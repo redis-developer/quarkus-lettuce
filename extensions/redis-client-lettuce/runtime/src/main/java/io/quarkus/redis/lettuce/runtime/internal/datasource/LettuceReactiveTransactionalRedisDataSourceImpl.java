@@ -37,6 +37,8 @@ import io.quarkus.redis.lettuce.runtime.internal.bloom.LettuceReactiveBloomComma
 import io.quarkus.redis.lettuce.runtime.internal.bloom.LettuceReactiveTransactionalBloomCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveCountMinCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveTransactionalCountMinCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.cuckoo.LettuceReactiveCuckooCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.cuckoo.LettuceReactiveTransactionalCuckooCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveGeoCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveTransactionalGeoCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.hash.LettuceReactiveHashCommandsImpl;
@@ -236,7 +238,11 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalCuckooCommands<K, V> cuckoo(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("cuckoo");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        LettuceReactiveCuckooCommandsImpl<K, V> reactiveCuckoo = (LettuceReactiveCuckooCommandsImpl<K, V>) reactive
+                .cuckoo(redisKeyType, valueType);
+        return new LettuceReactiveTransactionalCuckooCommandsImpl<>(this, reactiveCuckoo, tx);
     }
 
     @Override

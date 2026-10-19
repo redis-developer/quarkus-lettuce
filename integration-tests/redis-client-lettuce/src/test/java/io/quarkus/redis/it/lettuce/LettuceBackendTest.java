@@ -1174,6 +1174,111 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void cuckooAddExists() {
+        String key = getKey("cf-sync");
+
+        RestAssured.given().when().get("/lettuce/cuckoo/cfexists/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+
+        // unlike a bloom filter, a cuckoo filter keeps a count per item, so adding twice is allowed
+        RestAssured.given().body("a").when().post("/lettuce/cuckoo/cfadd/" + key).then().statusCode(204);
+        RestAssured.given().body("a").when().post("/lettuce/cuckoo/cfadd/" + key).then().statusCode(204);
+        RestAssured.given().body("a").when().post("/lettuce/cuckoo/cfaddnx/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("b").when().post("/lettuce/cuckoo/cfaddnx/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        RestAssured.given().when().get("/lettuce/cuckoo/cfexists/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().get("/lettuce/cuckoo/cfexists/" + key + "/z").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().when().get("/lettuce/cuckoo/cfcount/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().when().get("/lettuce/cuckoo/cfcount/" + key + "/b").then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().when().get("/lettuce/cuckoo/cfcount/" + key + "/z").then()
+                .statusCode(200).body(CoreMatchers.is("0"));
+        RestAssured.given().queryParam("values", "a,b,z").when().get("/lettuce/cuckoo/cfmexists/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+        RestAssured.given().when().get("/lettuce/key/exists/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
+    public void cuckooDel() {
+        String key = getKey("cf-del");
+
+        RestAssured.given().body("a").when().post("/lettuce/cuckoo/cfadd/" + key).then().statusCode(204);
+        RestAssured.given().body("a").when().post("/lettuce/cuckoo/cfadd/" + key).then().statusCode(204);
+
+        // one deletion per copy, then the item is gone
+        RestAssured.given().when().delete("/lettuce/cuckoo/cfdel/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().delete("/lettuce/cuckoo/cfdel/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().delete("/lettuce/cuckoo/cfdel/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().when().get("/lettuce/cuckoo/cfexists/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+
+        // deleting from a filter that does not exist is an error on the server side
+        RestAssured.given().when().delete("/lettuce/cuckoo/cfdel/" + getKey("cf-missing") + "/a").then()
+                .statusCode(500);
+    }
+
+    @Test
+    public void cuckooReserveInsert() {
+        String key = getKey("cf-reserve");
+
+        RestAssured.given().queryParam("bucketSize", 2).queryParam("maxIterations", 20).queryParam("expansion", 1)
+                .when().post("/lettuce/cuckoo/cfreserve/" + key + "/100").then()
+                .statusCode(204);
+        // NOCREATE is fine because the filter was reserved above; the duplicate "a" is stored twice
+        RestAssured.given().queryParam("nocreate", true).body("a,b,a").when()
+                .post("/lettuce/cuckoo/cfinsert/" + key).then()
+                .statusCode(204);
+        RestAssured.given().when().get("/lettuce/cuckoo/cfcount/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+        RestAssured.given().queryParam("nocreate", true).body("a,c").when()
+                .post("/lettuce/cuckoo/cfinsertnx/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(false, true)));
+
+        // insert into a brand-new key creates the filter with the given capacity
+        String created = getKey("cf-insert-create");
+        RestAssured.given().queryParam("capacity", 50).body("x,y,x").when()
+                .post("/lettuce/cuckoo/cfinsertnx/" + created).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+        RestAssured.given().queryParam("values", "x,y,q").when().get("/lettuce/cuckoo/cfmexists/" + created).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+
+        // NOCREATE on a missing key is refused by the server
+        RestAssured.given().queryParam("nocreate", true).body("a").when()
+                .post("/lettuce/cuckoo/cfinsert/" + getKey("cf-insert-missing")).then()
+                .statusCode(500);
+    }
+
+    @Test
+    public void cuckooReactive() {
+        String key = getKey("cf-reactive");
+
+        RestAssured.given().when().get("/lettuce/cuckoo/reactive/cfexists/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("a").when().post("/lettuce/cuckoo/reactive/cfadd/" + key).then().statusCode(204);
+        RestAssured.given().body("a").when().post("/lettuce/cuckoo/reactive/cfaddnx/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("b").when().post("/lettuce/cuckoo/reactive/cfaddnx/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().get("/lettuce/cuckoo/reactive/cfcount/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("1"));
+        RestAssured.given().queryParam("values", "a,b,z").when()
+                .get("/lettuce/cuckoo/reactive/cfmexists/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+        // blocking and reactive views agree on the same key
+        RestAssured.given().when().get("/lettuce/cuckoo/cfexists/" + key + "/b").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
     public void countMinIncrByAndQuery() {
         String key = getKey("cms-sync");
         String probKey = getKey("cms-prob");
@@ -1508,6 +1613,28 @@ class LettuceBackendTest {
                 .statusCode(200)
                 .body("size()", CoreMatchers.is(2))
                 .body("$", CoreMatchers.everyItem(CoreMatchers.containsString(":")));
+    }
+
+    @Test
+    public void withTransactionCuckoo() {
+        String key = getKey("tx-cf");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/cuckoo/" + key)
+                .then().statusCode(200).extract().asString();
+        // cfinsertnx(a,b,c,d,a) -> 4 true + 1 false, cfadd(x) -> null, cfexists(a) -> true,
+        // cfmexists(a,b,z) -> true,true,false, cfinsert(v,w,b) -> null, cfadd(a) -> null,
+        // cfcount(a) -> 2, cfdel(a) -> true, cfcount(a) -> 1
+        assertEquals("false;9;[true, true, true, true, false];true;true;[true, true, false];true;2;true;1", body);
+        RestAssured.given().when().get("/lettuce/cuckoo/cfcount/" + key + "/b").then()
+                .statusCode(200).body(CoreMatchers.is("2"));
+    }
+
+    @Test
+    public void withTransactionCuckooReactive() {
+        String key = getKey("tx-cf-reactive");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/reactive/cuckoo/" + key)
+                .then().statusCode(200).extract().asString();
+        // cfinsertnx(a,b,c) -> 3 true, cfadd(a) -> null, cfcount(a) -> 2, cfexists(z) -> false
+        assertEquals("false;4;[true, true, true];true;2;false", body);
     }
 
     @Test
