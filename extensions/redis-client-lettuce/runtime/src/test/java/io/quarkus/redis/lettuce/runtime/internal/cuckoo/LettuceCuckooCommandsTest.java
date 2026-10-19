@@ -164,4 +164,36 @@ class LettuceCuckooCommandsTest extends CommandsTestBase {
         assertThat(cuckoo.cfexists(key, l2)).isTrue();
     }
 
+    @Test
+    void cfinsertnxOnNonGrowingFilterNeverReturnsNull() {
+        // Quarkus' CfReserveArgs cannot express EXPANSION 0, so reserve the non-growing filter with a raw command.
+        blockingDs.execute("CF.RESERVE", key, "2", "BUCKETSIZE", "1", "MAXITERATIONS", "1", "EXPANSION", "0");
+
+        // CF.INSERTNX answers -1 for every item the full filter cannot place; the Vert.x backend reports those as false.
+        List<Boolean> added = blockingCuckoo.cfinsertnx(key, people(8));
+        assertThat(added).hasSize(8).doesNotContainNull().contains(true, false);
+        assertThat(added.get(added.size() - 1)).isFalse();
+    }
+
+    @Test
+    void cfinsertnxWithArgsOnNonGrowingFilterNeverReturnsNull() {
+        blockingDs.execute("CF.RESERVE", key, "2", "BUCKETSIZE", "1", "MAXITERATIONS", "1", "EXPANSION", "0");
+
+        List<Boolean> added = blockingCuckoo.cfinsertnx(key, new CfInsertArgs().nocreate(), people(8));
+        assertThat(added).hasSize(8).doesNotContainNull().contains(true, false);
+
+        // Re-inserting: the items already present answer 0, the ones that never fitted answer -1 -> all false, no nulls.
+        List<Boolean> again = reactiveCuckoo.cfinsertnx(key, new CfInsertArgs().nocreate(), people(8))
+                .await().atMost(TIMEOUT);
+        assertThat(again).hasSize(8).doesNotContainNull().containsOnly(false);
+    }
+
+    private static Person[] people(int count) {
+        Person[] people = new Person[count];
+        for (int i = 0; i < count; i++) {
+            people[i] = new Person("person" + i, "lastname" + i);
+        }
+        return people;
+    }
+
 }

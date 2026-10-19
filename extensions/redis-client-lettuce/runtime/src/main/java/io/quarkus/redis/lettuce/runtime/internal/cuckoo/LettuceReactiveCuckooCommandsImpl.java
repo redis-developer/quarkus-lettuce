@@ -142,7 +142,8 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
         if (values.length == 0) {
             return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
-        return LettuceCommand.of(() -> async.cfInsertNx(marshaller.encode(key), marshaller.encodeAsArray(values)));
+        return LettuceCommand.of(() -> async.cfInsertNx(marshaller.encode(key), marshaller.encodeAsArray(values)),
+                AbstractLettuceCommands::nullsToFalse);
     }
 
     @SafeVarargs
@@ -161,7 +162,9 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
         }
         io.lettuce.core.probabilistic.arguments.CfInsertArgs lettuceArgs = LettuceCuckooCommandsConverters
                 .toLettuceCfInsertArgs(args);
-        return LettuceCommand.of(() -> async.cfInsertNx(marshaller.encode(key), lettuceArgs, marshaller.encodeAsArray(values)));
+        return LettuceCommand.of(
+                () -> async.cfInsertNx(marshaller.encode(key), lettuceArgs, marshaller.encodeAsArray(values)),
+                AbstractLettuceCommands::nullsToFalse);
     }
 
     @SafeVarargs
