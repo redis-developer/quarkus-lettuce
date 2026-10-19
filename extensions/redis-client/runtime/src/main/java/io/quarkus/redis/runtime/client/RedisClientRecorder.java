@@ -43,8 +43,8 @@ public class RedisClientRecorder {
     private final RuntimeValue<RedisConfig> runtimeConfig;
     private static final Map<String, RedisClientAndApi> clients = new HashMap<>();
     private static final Map<String, ReactiveRedisDataSourceImpl> dataSources = new HashMap<>();
-    private Vertx vertx;
-    private ObservableRedisMetrics metrics;
+    private static volatile Vertx vertx;
+    private static volatile ObservableRedisMetrics metrics;
 
     public RedisClientRecorder(RuntimeValue<RedisConfig> runtimeConfig) {
         this.runtimeConfig = runtimeConfig;
@@ -55,12 +55,12 @@ public class RedisClientRecorder {
             Supplier<ProxyConfigurationRegistry> proxyRegistrySupplier) {
         Instance<ObservableRedisMetrics> instance = CDI.current().select(ObservableRedisMetrics.class);
         if (instance.isResolvable()) {
-            this.metrics = instance.get();
+            metrics = instance.get();
         } else {
-            this.metrics = null;
+            metrics = null;
         }
 
-        this.vertx = Vertx.newInstance(vertx.getValue());
+        RedisClientRecorder.vertx = Vertx.newInstance(vertx.getValue());
 
         TlsConfigurationRegistry tlsRegistry = tlsRegistrySupplier.get();
         ProxyConfigurationRegistry proxyRegistry = proxyRegistrySupplier.get();

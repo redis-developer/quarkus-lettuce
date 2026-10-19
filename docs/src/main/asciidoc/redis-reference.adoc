@@ -1062,7 +1062,9 @@ The host provider can be used to configure the redis client like shown below
 quarkus.redis.hosts-provider-name=hosts-provider
 ----
 
-The provider is consulted by the Vert.x client and by the <<lettuce-backend,Lettuce backend>> alike.
+The provider is consulted by the Vert.x client and by the <<lettuce-backend,Lettuce backend>> alike, once the
+beans of the application are initialized at startup: it may inject any bean, the Vert.x instance or a data source
+included, to discover the hosts.
 When both `hosts` and `hosts-provider-name` are set, `hosts` is used and the provider is not called.
 
 == Customize the Redis options programmatically
@@ -1156,9 +1158,9 @@ selects RESP2 without `HELLO`: Lettuce then authenticates with `AUTH`.
 * `max-waiting-handlers` bounds the commands queued on a connection, those awaiting their reply as well as those
 buffered while a lost connection is being re-established; a command beyond the bound fails at once.
 * A lost connection is reconnected until it succeeds. `reconnect-interval` (overridden by `tcp.reconnect-interval`,
-as with the Vert.x client) sets the fixed delay between the attempts when set to something other than its default of
-one second; by default Lettuce backs off exponentially, from 100 milliseconds up to 30 seconds. The initial connection
-is not retried, so `reconnect-attempts` does not apply.
+as with the Vert.x client) sets the fixed delay between the attempts; when neither property is set, Lettuce backs off
+exponentially, from 100 milliseconds up to 30 seconds. The initial connection is not retried, so `reconnect-attempts`
+does not apply.
 * The `tcp.*` socket options of <<lettuce-properties>> are set on the connections, and the TLS handshake uses
 `tcp.secure-transport-protocols`. Only the set properties are applied: the Lettuce defaults (a ten seconds connect
 timeout, keep-alive and no-delay on) hold otherwise, not the Vert.x ones.
@@ -1209,7 +1211,9 @@ supports.
 |Not applied: Lettuce does not route `MULTI`/`EXEC` on a cluster (see <<lettuce-cluster>>).
 
 |`tcp.connection-timeout`, `tcp.keep-alive`, `tcp.no-delay`
-|The connect timeout, `SO_KEEPALIVE` and `TCP_NODELAY` socket options of the connections.
+|The connect timeout, `SO_KEEPALIVE` and `TCP_NODELAY` socket options of the connections. A connect timeout of `0`
+(no timeout, on the Vert.x client) is not applied: Lettuce requires a positive one, so its default of ten seconds
+holds.
 
 |`tcp.receive-buffer-size`, `tcp.send-buffer-size`, `tcp.so-linger`, `tcp.traffic-class`, `tcp.reuse-address`
 |The `SO_RCVBUF`, `SO_SNDBUF`, `SO_LINGER` (in seconds), `IP_TOS` and `SO_REUSEADDR` socket options of the

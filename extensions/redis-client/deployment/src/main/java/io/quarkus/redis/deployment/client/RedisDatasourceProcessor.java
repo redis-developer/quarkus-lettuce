@@ -23,12 +23,15 @@ import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.BeanArchiveIndexBuildItem;
 import io.quarkus.arc.deployment.BeanDiscoveryFinishedBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
+import io.quarkus.arc.deployment.SyntheticBeansRuntimeInitBuildItem;
 import io.quarkus.arc.processor.InjectionPointInfo;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
+import io.quarkus.deployment.annotations.Consume;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
+import io.quarkus.deployment.builditem.ServiceStartBuildItem;
 import io.quarkus.deployment.builditem.ShutdownContextBuildItem;
 import io.quarkus.proxy.deployment.ProxyRegistryBuildItem;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -88,31 +91,18 @@ public class RedisDatasourceProcessor {
     public void init(RedisClientRecorder recorder,
             List<RequestedRedisClientBuildItem> clients,
             Optional<RedisDataSourceProviderBuildItem> dataSourceProvider,
-            ShutdownContextBuildItem shutdown,
-            BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
-            VertxBuildItem vertxBuildItem,
-            TlsRegistryBuildItem tlsRegistryBuildItem,
-            ProxyRegistryBuildItem proxyRegistryBuildItem) {
+            BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
 
         if (clients.isEmpty()) {
             return;
         }
-        Set<String> names = new HashSet<>();
-        for (RequestedRedisClientBuildItem client : clients) {
-            names.add(client.name);
-        }
-        // Inject the creation of the client when the application starts.
-        recorder.initialize(vertxBuildItem.getVertx(), names, tlsRegistryBuildItem.registry(),
-                proxyRegistryBuildItem.registry());
-
         if (dataSourceProvider.isPresent()) {
             // Another backend provides the data source beans; only the Vert.x client beans are kept.
-            recorder.cleanup(shutdown);
             return;
         }
 
         // Create the supplier and define the beans.
-        for (String name : names) {
+        for (String name : requestedClientNames(clients)) {
             Supplier<ActiveResult> checkActive = recorder.checkActive(name);
             // Data sources
             syntheticBeans.produce(configureAndCreateSyntheticBean(name, RedisDataSource.class,
@@ -120,7 +110,33 @@ public class RedisDatasourceProcessor {
             syntheticBeans.produce(configureAndCreateSyntheticBean(name, ReactiveRedisDataSource.class,
                     checkActive, recorder.getReactiveDataSource(name)));
         }
-
-        recorder.cleanup(shutdown);
     }
+
+    @BuildStep
+    @Record(ExecutionTime.RUNTIME_INIT)
+    @Consume(SyntheticBeansRuntimeInitBuildItem.class)
+    public ServiceStartBuildItem initializeClients(RedisClientRecorder recorder,
+            List<RequestedRedisClientBuildItem> clients,
+            ShutdownContextBuildItem shutdown,
+            VertxBuildItem vertxBuildItem,
+            TlsRegistryBuildItem tlsRegistryBuildItem,
+            ProxyRegistryBuildItem proxyRegistryBuildItem) {
+
+        if (!clients.isEmpty()) {
+            // Inject the creation of the client when the application starts.
+            recorder.initialize(vertxBuildItem.getVertx(), requestedClientNames(clients), tlsRegistryBuildItem.registry(),
+                    proxyRegistryBuildItem.registry());
+            recorder.cleanup(shutdown);
+        }
+        return new ServiceStartBuildItem("redis-client-data-sources");
+    }
+
+    private static Set<String> requestedClientNames(List<RequestedRedisClientBuildItem> clients) {
+        Set<String> names = new HashSet<>();
+        for (RequestedRedisClientBuildItem client : clients) {
+            names.add(client.name);
+        }
+        return names;
+    }
+
 }

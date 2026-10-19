@@ -19,6 +19,7 @@ import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.test.QuarkusExtensionTest;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.smallrye.common.annotation.Identifier;
+import io.vertx.core.Vertx;
 import io.vertx.redis.client.Command;
 
 /**
@@ -56,7 +57,9 @@ public class LettuceHostsProviderTest {
 
     /**
      * Provides the test server, database 2, so that the connections can be told from ones made through
-     * {@code hosts}.
+     * {@code hosts}. Injects the Vert.x instance, a bean initialized at runtime like a data source or a Vert.x Redis
+     * client, as a provider discovering the hosts would: the backend must only call the provider once such beans are
+     * usable.
      */
     @ApplicationScoped
     @Identifier("database-two")
@@ -65,8 +68,12 @@ public class LettuceHostsProviderTest {
         @ConfigProperty(name = "quarkus.redis.tr")
         String endpoint;
 
+        @Inject
+        Vertx vertx;
+
         @Override
         public Set<URI> getHosts() {
+            assertThat(vertx).isNotNull();
             return Set.of(URI.create(endpoint + "/2"));
         }
     }

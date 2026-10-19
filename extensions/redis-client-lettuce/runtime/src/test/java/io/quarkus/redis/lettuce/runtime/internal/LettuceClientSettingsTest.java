@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.eclipse.microprofile.config.spi.ConfigProviderResolver;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 
 import io.lettuce.core.CredentialsProvider;
@@ -282,29 +284,45 @@ class LettuceClientSettingsTest {
                 .orElseThrow();
         assertThat(socket.isKeepAlive()).isTrue();
         assertThat(socket.isTcpNoDelay()).isTrue();
+
+        // a connect timeout of zero (no timeout, on the Vert.x client) is not applied: Lettuce requires a positive one
+        assertThat(LettuceClientSettings.socketOptions(config(Map.of("quarkus.redis.tcp.connection-timeout", "0")).tcp()))
+                .isEmpty();
+        socket = LettuceClientSettings.socketOptions(config(Map.of(
+                "quarkus.redis.tcp.connection-timeout", "0",
+                "quarkus.redis.tcp.keep-alive", "false")).tcp()).orElseThrow();
+        assertThat(socket.getConnectTimeout()).isEqualTo(SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION);
+        assertThat(socket.isKeepAlive()).isFalse();
     }
 
     @Test
     void mapsTheReconnectIntervalOntoAConstantDelay() {
-        // the default interval cannot be told from an unset property: Lettuce keeps its exponential backoff
-        assertThat(LettuceClientSettings.reconnectDelay(config(Map.of()))).isEmpty();
-        assertThat(LettuceClientSettings.reconnectDelay(config(Map.of("quarkus.redis.reconnect-interval", "1s")))).isEmpty();
+        // neither property set: Lettuce keeps its exponential backoff, whatever the mapped defaults say
+        assertThat(reconnectDelay(config(Map.of()))).isEmpty();
 
-        Delay delay = LettuceClientSettings.reconnectDelay(config(Map.of("quarkus.redis.reconnect-interval", "2s")))
-                .orElseThrow();
+        // set, even to the default interval: a constant delay
+        Delay delay = reconnectDelay(config(Map.of("quarkus.redis.reconnect-interval", "1s"))).orElseThrow();
+        assertThat(delay.createDelay(1)).isEqualTo(Duration.ofSeconds(1));
+        delay = reconnectDelay(config(Map.of("quarkus.redis.reconnect-interval", "2s"))).orElseThrow();
         assertThat(delay.createDelay(1)).isEqualTo(Duration.ofSeconds(2));
         assertThat(delay.createDelay(10)).isEqualTo(Duration.ofSeconds(2));
 
-        // tcp.reconnect-interval overrides the client-level property, as with the Vert.x client
-        delay = LettuceClientSettings.reconnectDelay(config(Map.of(
+        // tcp.reconnect-interval overrides the client-level property, as with the Vert.x client, even when set to
+        // the default interval
+        delay = reconnectDelay(config(Map.of(
                 "quarkus.redis.reconnect-interval", "2s",
                 "quarkus.redis.tcp.reconnect-interval", "500ms"))).orElseThrow();
         assertThat(delay.createDelay(1)).isEqualTo(Duration.ofMillis(500));
-        // ... unless it has its default, which the default client always sees (see reconnectDelay)
-        delay = LettuceClientSettings.reconnectDelay(config(Map.of(
+        delay = reconnectDelay(config(Map.of(
                 "quarkus.redis.reconnect-interval", "2s",
                 "quarkus.redis.tcp.reconnect-interval", "1s"))).orElseThrow();
-        assertThat(delay.createDelay(1)).isEqualTo(Duration.ofSeconds(2));
+        assertThat(delay.createDelay(1)).isEqualTo(Duration.ofSeconds(1));
+        delay = reconnectDelay(config(Map.of("quarkus.redis.tcp.reconnect-interval", "3s"))).orElseThrow();
+        assertThat(delay.createDelay(1)).isEqualTo(Duration.ofSeconds(3));
+    }
+
+    private static Optional<Delay> reconnectDelay(RedisClientConfig config) {
+        return LettuceClientSettings.reconnectDelay(RedisConfig.DEFAULT_CLIENT_NAME, config);
     }
 
     @Test
@@ -385,7 +403,8 @@ class LettuceClientSettingsTest {
     /**
      * The configuration of the default client, mapped from the given {@code quarkus.redis.*} properties the way the
      * application configuration is (with the Quarkus duration format, {@code 10s}, which SmallRye Config alone does
-     * not read).
+     * not read). The configuration is also registered as the one of the class loader, replacing the previous one:
+     * the settings ask it which properties are set (see {@code LettuceClientSettings.isSet}).
      */
     private static RedisClientConfig config(Map<String, String> properties) {
         SmallRyeConfig config = new SmallRyeConfigBuilder()
@@ -393,7 +412,16 @@ class LettuceClientSettingsTest {
                 .withMapping(RedisConfig.class)
                 .withSources(new PropertiesConfigSource(properties, "test", 100))
                 .build();
+        releaseConfig();
+        ConfigProviderResolver.instance().registerConfig(config, Thread.currentThread().getContextClassLoader());
         return config.getConfigMapping(RedisConfig.class).clients().get(RedisConfig.DEFAULT_CLIENT_NAME);
+    }
+
+    /** Releases the configuration registered for the class loader, a default one included. */
+    @AfterAll
+    static void releaseConfig() {
+        ConfigProviderResolver resolver = ConfigProviderResolver.instance();
+        resolver.releaseConfig(resolver.getConfig(Thread.currentThread().getContextClassLoader()));
     }
 
     private static RedisCredentials credentialsOf(RedisURI uri) {

@@ -1,5 +1,6 @@
 package io.quarkus.redis.lettuce.runtime.internal;
 
+import static io.quarkus.redis.runtime.client.config.RedisConfig.getPropertyName;
 import static io.quarkus.vertx.core.runtime.SSLConfigHelper.configureJksKeyCertOptions;
 import static io.quarkus.vertx.core.runtime.SSLConfigHelper.configureJksTrustOptions;
 import static io.quarkus.vertx.core.runtime.SSLConfigHelper.configurePemKeyCertOptions;
@@ -26,6 +27,8 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
+import org.eclipse.microprofile.config.ConfigProvider;
+import org.eclipse.microprofile.config.ConfigValue;
 import org.jboss.logging.Logger;
 
 import io.lettuce.core.ClientOptions;
@@ -47,6 +50,7 @@ import io.quarkus.redis.runtime.client.config.RedisClientConfig;
 import io.quarkus.tls.TlsConfiguration;
 import io.quarkus.tls.TlsConfigurationRegistry;
 import io.quarkus.tls.runtime.config.TlsConfigUtils;
+import io.smallrye.config.DefaultValuesConfigSource;
 import io.vertx.core.Vertx;
 import io.vertx.core.net.NetClientOptions;
 import io.vertx.core.net.TrustOptions;
@@ -88,9 +92,6 @@ public final class LettuceClientSettings {
 
     /** The default of {@code topology-cache-ttl}. */
     public static final Duration DEFAULT_TOPOLOGY_CACHE_TTL = Duration.ofSeconds(1);
-
-    /** The default of {@code reconnect-interval} and of {@code tcp.reconnect-interval}. */
-    public static final Duration DEFAULT_RECONNECT_INTERVAL = Duration.ofSeconds(1);
 
     /** The Vert.x query parameter naming the connection ({@code redis://host?client=name}). */
     static final String CLIENT_QUERY_PARAMETER = "client";
@@ -184,7 +185,7 @@ public final class LettuceClientSettings {
             }
             redisUris.add(redisUri);
         }
-        return new LettuceClientSettings(List.copyOf(redisUris), options.build(), reconnectDelay(config),
+        return new LettuceClientSettings(List.copyOf(redisUris), options.build(), reconnectDelay(name, config),
                 nettyCustomizer(config.tcp()));
     }
 
@@ -192,7 +193,7 @@ public final class LettuceClientSettings {
      * The URI of the first configured host: the one the standalone client connects to.
      */
     public RedisURI redisUri() {
-        return redisUris.get(0);
+        return redisUris.getFirst();
     }
 
     /**
@@ -216,7 +217,7 @@ public final class LettuceClientSettings {
     }
 
     static RedisURI sentinelUri(List<RedisURI> sentinels, String masterName) {
-        RedisURI first = sentinels.get(0);
+        RedisURI first = sentinels.getFirst();
         RedisURI.Builder master = RedisURI.builder()
                 .withSentinelMasterId(masterName)
                 .withSsl(first)
@@ -306,18 +307,21 @@ public final class LettuceClientSettings {
 
     /**
      * Maps {@code tcp.connection-timeout}, {@code tcp.keep-alive} and {@code tcp.no-delay} onto the Lettuce
-     * {@link SocketOptions}. Only the set properties are applied: the Lettuce defaults (a ten seconds connect timeout,
-     * keep-alive and no-delay on) hold otherwise, not the Vert.x ones.
+     * {@link SocketOptions}. Only the set properties are applied: the Lettuce defaults (ten seconds connect timeout,
+     * keep-alive and no-delay on) hold otherwise, not the Vert.x ones. A connect timeout that is not positive (zero
+     * is no timeout on the Vert.x client) is not applied either, Lettuce requiring a positive one; the recorder
+     * reports it.
      *
-     * @return the socket options, empty when none of the three properties is set
+     * @return the socket options, empty when none of the three properties is applied
      */
     static Optional<SocketOptions> socketOptions(NetConfig tcp) {
-        if (tcp.connectionTimeout().isEmpty() && tcp.keepAlive().isEmpty() && tcp.noDelay().isEmpty()) {
+        Optional<Duration> connectTimeout = tcp.connectionTimeout().filter(LettuceClientSettings::isPositive);
+        if (connectTimeout.isEmpty() && tcp.keepAlive().isEmpty() && tcp.noDelay().isEmpty()) {
             return Optional.empty();
         }
         SocketOptions.Builder socket = SocketOptions.builder();
-        if (tcp.connectionTimeout().isPresent()) {
-            socket.connectTimeout(tcp.connectionTimeout().get());
+        if (connectTimeout.isPresent()) {
+            socket.connectTimeout(connectTimeout.get());
         }
         if (tcp.keepAlive().isPresent()) {
             socket.keepAlive(tcp.keepAlive().get());
@@ -332,25 +336,34 @@ public final class LettuceClientSettings {
      * Maps {@code reconnect-interval}, overridden by {@code tcp.reconnect-interval} as with the Vert.x client, onto
      * the delay between the attempts Lettuce makes to reconnect a lost connection. Lettuce reconnects until it
      * succeeds and does not retry the initial connection, so {@code reconnect-attempts} has no equivalent (the
-     * recorder reports it). The configuration cannot tell the default interval (one second) from an unset property,
-     * so the interval is applied when set to anything else: by default, Lettuce backs off exponentially, from 100
-     * milliseconds up to 30 seconds, instead of retrying every second. For the same reason the {@code tcp} property
-     * only overrides the client-level one when it differs from the default (the default of
-     * {@code quarkus.redis.*.reconnect-interval} is registered for every client and also matches
-     * {@code quarkus.redis.tcp.reconnect-interval}, so the default client always sees the {@code tcp} property).
+     * recorder reports it). The mapped values cannot tell a property set to the default interval (one second) from
+     * an unset one, so the configuration is asked which of the two properties is set (see {@link #isSet}); the delay
+     * is constant only then, and by default Lettuce backs off exponentially, from 100 milliseconds up to 30 seconds,
+     * instead of retrying every second. (The default of {@code quarkus.redis.*.reconnect-interval} is registered for
+     * every client and also matches {@code quarkus.redis.tcp.reconnect-interval}, so the mapped {@code tcp} property
+     * of the default client is always present, with the default: another reason not to trust the mapped values.)
      *
-     * @return the constant delay, empty when the interval has its default
+     * @return the constant delay, empty when neither property is set
      */
-    static Optional<Delay> reconnectDelay(RedisClientConfig config) {
-        Duration interval = config.reconnectInterval();
+    static Optional<Delay> reconnectDelay(String name, RedisClientConfig config) {
         Optional<Duration> tcpInterval = config.tcp().reconnectInterval();
-        if (tcpInterval.isPresent() && !tcpInterval.get().equals(DEFAULT_RECONNECT_INTERVAL)) {
-            interval = tcpInterval.get();
+        if (tcpInterval.isPresent() && isSet(getPropertyName(name, "tcp.reconnect-interval"))) {
+            return Optional.of(Delay.constant(tcpInterval.get()));
         }
-        if (interval.equals(DEFAULT_RECONNECT_INTERVAL)) {
-            return Optional.empty();
+        if (isSet(getPropertyName(name, "reconnect-interval"))) {
+            return Optional.of(Delay.constant(config.reconnectInterval()));
         }
-        return Optional.of(Delay.constant(interval));
+        return Optional.empty();
+    }
+
+    static boolean isSet(String property) {
+        ConfigValue value = ConfigProvider.getConfig().getConfigValue(property);
+        return value.getValue() != null && !value.getValue().isEmpty()
+                && value.getSourceOrdinal() > DefaultValuesConfigSource.ORDINAL;
+    }
+
+    static boolean isPositive(Duration duration) {
+        return duration != null && !duration.isNegative() && !duration.isZero();
     }
 
     /**
@@ -413,13 +426,6 @@ public final class LettuceClientSettings {
             }
         }
 
-        Map<ChannelOption<?>, Object> options() {
-            return options;
-        }
-
-        SocketAddress localAddress() {
-            return localAddress;
-        }
     }
 
     /**
@@ -430,11 +436,11 @@ public final class LettuceClientSettings {
      * go to the upstream nodes.
      */
     public static ReadFrom readFrom(Optional<RedisReplicas> replicas) {
-        return switch (replicas.orElse(RedisReplicas.NEVER)) {
+        return replicas.map(redisReplicas -> switch (redisReplicas) {
             case NEVER -> ReadFrom.UPSTREAM;
             case SHARE -> ReadFrom.ANY;
             case ALWAYS -> ReadFrom.REPLICA_PREFERRED;
-        };
+        }).orElse(ReadFrom.UPSTREAM);
     }
 
     /**
@@ -445,7 +451,7 @@ public final class LettuceClientSettings {
      * {@code role=sentinel} is rejected before this is called: a sentinel has no data commands.
      */
     public static ReadFrom readFrom(Optional<RedisRole> role, Optional<RedisReplicas> replicas) {
-        if (role.orElse(RedisRole.MASTER) == RedisRole.REPLICA) {
+        if (role.isPresent() && role.get() == RedisRole.REPLICA) {
             return ReadFrom.REPLICA_PREFERRED;
         }
         return readFrom(replicas);
@@ -476,8 +482,8 @@ public final class LettuceClientSettings {
 
     /**
      * Combines the credentials of the URI with the {@code username} and {@code password} properties. Like with the
-     * Vert.x Redis client, the properties are the defaults: a user name or a password encoded in the URI takes
-     * precedence over the corresponding property. A user name without password does not authenticate.
+     * Vert.x Redis client, the properties are the defaults: a username or a password encoded in the URI takes
+     * precedence over the corresponding property. A username without password does not authenticate.
      *
      * @param userInfo the credentials encoded in the URI
      * @param usernameProperty the {@code username} property, {@code null} when not set
@@ -491,7 +497,7 @@ public final class LettuceClientSettings {
 
     /**
      * The credentials encoded in a Redis URI, interpreted as the Vert.x Redis client does: {@code user:password@},
-     * {@code :password@} or {@code user@} (a lone user info is the user name, not the password as in Lettuce), each
+     * {@code :password@} or {@code user@} (a lone user info is the username, not the password as in Lettuce), each
      * part URL-decoded, with the {@code user} and {@code password} query parameters as fallbacks. Empty parts count
      * as absent.
      * <p>
@@ -500,7 +506,7 @@ public final class LettuceClientSettings {
      * and does not decode the values, so a percent-encoded {@code &} or {@code =} in a value truncates the value
      * there, and a {@code +} stays a plus sign there while it is a space here.
      *
-     * @param username the user name, {@code null} when the URI does not carry one
+     * @param username the username, {@code null} when the URI does not carry one
      * @param password the password, {@code null} when the URI does not carry one
      */
     record UserInfo(String username, String password) {
@@ -665,4 +671,5 @@ public final class LettuceClientSettings {
         ssl.handshakeTimeout(Duration.of(net.getSslHandshakeTimeout(), net.getSslHandshakeTimeoutUnit().toChronoUnit()));
         return ssl.build();
     }
+
 }

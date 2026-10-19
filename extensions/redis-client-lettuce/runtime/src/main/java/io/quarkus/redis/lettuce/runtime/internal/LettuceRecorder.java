@@ -89,7 +89,9 @@ public class LettuceRecorder {
 
     /**
      * Initializes shared client resources and creates a Lettuce client for each requested client name.
-     * Only creates clients that pass the {@link #checkActive(String)} check.
+     * Only creates clients that pass the {@link #checkActive(String)} check. Called once the synthetic beans are
+     * initialized (see {@code LettuceProcessor}): the hosts may come from a {@code RedisHostsProvider} bean (see
+     * {@link #hosts}), which may itself inject beans that are only usable from then on.
      */
     public void initialize(RuntimeValue<Vertx> vertx, Supplier<TlsConfigurationRegistry> tlsRegistry, Set<String> names) {
         EventLoopGroup eventLoopGroup = ((VertxInternal) vertx.getValue()).eventLoopGroup();
@@ -105,7 +107,9 @@ public class LettuceRecorder {
                         tlsRegistry.get());
                 LettuceConnectionFactory factory = factories.computeIfAbsent(name,
                         k -> createFactory(name, clientConfig, settings));
-                pools.putIfAbsent(name, new LettuceConnectionPool(factory::connectAsync,
+                // computeIfAbsent, like the factories: a pool schedules its cleaner when it is built, and a pool built
+                // only to be discarded by putIfAbsent would leave that timer running for good
+                pools.computeIfAbsent(name, k -> new LettuceConnectionPool(factory::connectAsync,
                         clientConfig.maxPoolSize(), clientConfig.maxPoolWaiting(), factory.getDatabase(), vertx.getValue(),
                         clientConfig.poolRecycleTimeout().orElse(DEFAULT_POOL_RECYCLE_TIMEOUT),
                         clientConfig.poolCleanerInterval().orElse(DEFAULT_POOL_CLEANER_INTERVAL)));
@@ -276,13 +280,18 @@ public class LettuceRecorder {
 
     /**
      * The {@code tcp.*} properties that are set and have no Lettuce equivalent, each with the reason, except
-     * {@code secure-transport-protocols} (applied to the TLS handshake), {@code connection-timeout},
+     * {@code secure-transport-protocols} (applied to the TLS handshake), {@code connection-timeout} (when positive),
      * {@code keep-alive}, {@code no-delay}, {@code reconnect-interval}, {@code receive-buffer-size},
      * {@code send-buffer-size}, {@code so-linger}, {@code traffic-class}, {@code reuse-address} and
      * {@code local-address}, which are applied (see {@link LettuceClientSettings}).
      */
     private static List<String> unsupportedTcpProperties(NetConfig tcp) {
         Map<String, Boolean> present = new LinkedHashMap<>();
+        // the Vert.x client takes a connect timeout of zero as no timeout; Lettuce requires a positive one (see
+        // LettuceClientSettings.socketOptions)
+        present.put("connection-timeout (Lettuce requires a positive connect timeout, so its default of ten seconds"
+                + " applies)",
+                tcp.connectionTimeout().isPresent() && !LettuceClientSettings.isPositive(tcp.connectionTimeout().get()));
         String noAlpn = " (the Redis protocol has no ALPN)";
         present.put("alpn" + noAlpn, tcp.alpn().isPresent());
         present.put("application-layer-protocols" + noAlpn, tcp.applicationLayerProtocols().isPresent());
