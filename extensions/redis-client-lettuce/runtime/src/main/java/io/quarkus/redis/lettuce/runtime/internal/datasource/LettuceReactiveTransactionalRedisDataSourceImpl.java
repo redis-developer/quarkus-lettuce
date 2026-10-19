@@ -33,6 +33,8 @@ import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveAuto
 import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveTransactionalAutoSuggestCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveTransactionalBitMapCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.bloom.LettuceReactiveBloomCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.bloom.LettuceReactiveTransactionalBloomCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveCountMinCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveTransactionalCountMinCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.cuckoo.LettuceReactiveCuckooCommandsImpl;
@@ -220,7 +222,11 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalBloomCommands<K, V> bloom(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("bloom");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        LettuceReactiveBloomCommandsImpl<K, V> reactiveBloom = (LettuceReactiveBloomCommandsImpl<K, V>) reactive
+                .bloom(redisKeyType, valueType);
+        return new LettuceReactiveTransactionalBloomCommandsImpl<>(this, reactiveBloom, tx);
     }
 
     @Override

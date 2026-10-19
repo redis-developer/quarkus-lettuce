@@ -49,6 +49,7 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveAutoSuggestCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.bloom.LettuceReactiveBloomCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveCountMinCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.cuckoo.LettuceReactiveCuckooCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveGeoCommandsImpl;
@@ -585,12 +586,16 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K, V> ReactiveBloomCommands<K, V> bloom(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("bloom");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        return new LettuceReactiveBloomCommandsImpl<>(this, connection, redisKeyType, valueType);
     }
 
     @Override
     public <K, V> ReactiveBloomCommands<K, V> bloom(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("bloom");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        return new LettuceReactiveBloomCommandsImpl<>(this, connection, redisKeyType.getType(), valueType.getType());
     }
 
     @Override
