@@ -31,10 +31,12 @@ import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.BeanArchiveIndexBuildItem;
 import io.quarkus.arc.deployment.BeanDiscoveryFinishedBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
+import io.quarkus.arc.deployment.SyntheticBeansRuntimeInitBuildItem;
 import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
 import io.quarkus.arc.processor.InjectionPointInfo;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
+import io.quarkus.deployment.annotations.Consume;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.ApplicationArchivesBuildItem;
@@ -42,6 +44,7 @@ import io.quarkus.deployment.builditem.ExtensionSslNativeSupportBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.HotDeploymentWatchedFileBuildItem;
 import io.quarkus.deployment.builditem.LaunchModeBuildItem;
+import io.quarkus.deployment.builditem.ServiceStartBuildItem;
 import io.quarkus.deployment.builditem.ShutdownContextBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
@@ -124,8 +127,42 @@ public class RedisClientProcessor {
             RedisBuildTimeConfig buildTimeConfig,
             BeanArchiveIndexBuildItem indexBuildItem,
             BeanDiscoveryFinishedBuildItem beans,
+            BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
+
+        // Create the supplier and define the beans.
+        for (String name : usedClientNames(clients, buildTimeConfig, indexBuildItem, beans)) {
+            Supplier<ActiveResult> checkActive = recorder.checkActive(name);
+
+            // Redis objects
+            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.mutiny.redis.client.Redis.class,
+                    checkActive, recorder.getRedisClient(name)));
+            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.redis.client.Redis.class,
+                    checkActive, recorder.getBareRedisClient(name)));
+
+            // Redis API objects
+            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.mutiny.redis.client.RedisAPI.class,
+                    checkActive, recorder.getRedisAPI(name)));
+            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.redis.client.RedisAPI.class,
+                    checkActive, recorder.getBareRedisAPI(name)));
+
+            // Legacy clients
+            syntheticBeans.produce(configureAndCreateSyntheticBean(name, RedisClient.class,
+                    checkActive, recorder.getLegacyRedisClient(name)));
+            syntheticBeans.produce(configureAndCreateSyntheticBean(name, ReactiveRedisClient.class,
+                    checkActive, recorder.getLegacyReactiveRedisClient(name)));
+        }
+    }
+
+    @BuildStep
+    @Record(ExecutionTime.RUNTIME_INIT)
+    @Consume(SyntheticBeansRuntimeInitBuildItem.class)
+    public ServiceStartBuildItem initializeClients(
+            List<RequestedRedisClientBuildItem> clients,
+            RedisClientRecorder recorder,
+            RedisBuildTimeConfig buildTimeConfig,
+            BeanArchiveIndexBuildItem indexBuildItem,
+            BeanDiscoveryFinishedBuildItem beans,
             ShutdownContextBuildItem shutdown,
-            BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
             VertxBuildItem vertxBuildItem,
             ApplicationArchivesBuildItem applicationArchivesBuildItem, LaunchModeBuildItem launchMode,
             BuildProducer<NativeImageResourceBuildItem> nativeImageResources,
@@ -133,6 +170,25 @@ public class RedisClientProcessor {
             TlsRegistryBuildItem tlsRegistryBuildItem,
             ProxyRegistryBuildItem proxyRegistryBuildItem) {
 
+        Set<String> names = usedClientNames(clients, buildTimeConfig, indexBuildItem, beans);
+
+        // Inject the creation of the client when the application starts.
+        recorder.initialize(vertxBuildItem.getVertx(), names, tlsRegistryBuildItem.registry(),
+                proxyRegistryBuildItem.registry());
+
+        recorder.cleanup(shutdown);
+
+        // Handle data import
+        for (String name : buildTimeConfig.clientsNames()) {
+            preloadRedisData(name, buildTimeConfig.clients().get(name), applicationArchivesBuildItem,
+                    launchMode.getLaunchMode(),
+                    nativeImageResources, hotDeploymentWatchedFiles, recorder);
+        }
+        return new ServiceStartBuildItem(FEATURE);
+    }
+
+    static Set<String> usedClientNames(List<RequestedRedisClientBuildItem> clients, RedisBuildTimeConfig buildTimeConfig,
+            BeanArchiveIndexBuildItem indexBuildItem, BeanDiscoveryFinishedBuildItem beans) {
         // Collect the used redis clients, the unused clients will not be instantiated.
         Set<String> names = new HashSet<>();
 
@@ -158,42 +214,7 @@ public class RedisClientProcessor {
                 .filter(InjectionPointInfo::isProgrammaticLookup)
                 .findAny()
                 .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, ConfigProvider.getConfig())));
-
-        // Inject the creation of the client when the application starts.
-        recorder.initialize(vertxBuildItem.getVertx(), names, tlsRegistryBuildItem.registry(),
-                proxyRegistryBuildItem.registry());
-
-        // Create the supplier and define the beans.
-        for (String name : names) {
-            Supplier<ActiveResult> checkActive = recorder.checkActive(name);
-
-            // Redis objects
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.mutiny.redis.client.Redis.class,
-                    checkActive, recorder.getRedisClient(name)));
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.redis.client.Redis.class,
-                    checkActive, recorder.getBareRedisClient(name)));
-
-            // Redis API objects
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.mutiny.redis.client.RedisAPI.class,
-                    checkActive, recorder.getRedisAPI(name)));
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.redis.client.RedisAPI.class,
-                    checkActive, recorder.getBareRedisAPI(name)));
-
-            // Legacy clients
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, RedisClient.class,
-                    checkActive, recorder.getLegacyRedisClient(name)));
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, ReactiveRedisClient.class,
-                    checkActive, recorder.getLegacyReactiveRedisClient(name)));
-        }
-
-        recorder.cleanup(shutdown);
-
-        // Handle data import
-        for (String name : buildTimeConfig.clientsNames()) {
-            preloadRedisData(name, buildTimeConfig.clients().get(name), applicationArchivesBuildItem,
-                    launchMode.getLaunchMode(),
-                    nativeImageResources, hotDeploymentWatchedFiles, recorder);
-        }
+        return names;
     }
 
     static Set<String> configuredClientNames(RedisBuildTimeConfig buildTimeConfig, Config config) {
