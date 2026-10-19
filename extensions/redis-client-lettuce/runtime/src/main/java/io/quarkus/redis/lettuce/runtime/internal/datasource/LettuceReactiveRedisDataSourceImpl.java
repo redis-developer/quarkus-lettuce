@@ -60,6 +60,7 @@ import io.quarkus.redis.lettuce.runtime.internal.list.LettuceReactiveListCommand
 import io.quarkus.redis.lettuce.runtime.internal.pubsub.LettuceReactivePubSubCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSortedSetCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.topk.LettuceReactiveTopKCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveValueCommandsImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
 import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
@@ -622,12 +623,16 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K, V> ReactiveTopKCommands<K, V> topk(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("topk");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        return new LettuceReactiveTopKCommandsImpl<>(this, connection, redisKeyType, valueType);
     }
 
     @Override
     public <K, V> ReactiveTopKCommands<K, V> topk(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("topk");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        return new LettuceReactiveTopKCommandsImpl<>(this, connection, redisKeyType.getType(), valueType.getType());
     }
 
     @Override

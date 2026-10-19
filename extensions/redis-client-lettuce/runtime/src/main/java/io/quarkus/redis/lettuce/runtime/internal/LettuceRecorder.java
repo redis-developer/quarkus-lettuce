@@ -7,6 +7,7 @@ import static io.quarkus.redis.runtime.client.config.RedisConfig.getPropertyName
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,7 @@ import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionFactory.MasterReplicaMode;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceBlockingRedisDataSourceImpl;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceReactiveRedisDataSourceImpl;
+import io.quarkus.redis.runtime.client.VertxRedisClientFactory;
 import io.quarkus.redis.runtime.client.config.NetConfig;
 import io.quarkus.redis.runtime.client.config.RedisClientConfig;
 import io.quarkus.redis.runtime.client.config.RedisConfig;
@@ -51,7 +53,8 @@ import io.vertx.redis.client.RedisTopology;
  * a {@link io.lettuce.core.cluster.RedisClusterClient} for a {@code cluster} one. Also
  * creates, per client, the shared {@link LettuceConnection} of the data sources and a bounded
  * {@link LettuceConnectionPool} used for blocking commands and scoped connections
- * ({@code withConnection}/{@code withTransaction}) so they never occupy the shared connection.
+ * ({@code withConnection}/{@code withTransaction}) so they never occupy the shared connection, its idle connections
+ * recycled as configured by {@code pool-recycle-timeout} and {@code pool-cleaner-interval}.
  * <p>
  * Shutdown ordering: connections → pools → clients → resources (before Vert.x event loops).
  */
@@ -62,6 +65,13 @@ public class LettuceRecorder {
     private static final Duration POOL_CLOSE_TIMEOUT = Duration.ofSeconds(10);
     /** The default of {@code master-name}, as documented for the Vert.x client. */
     private static final String DEFAULT_MASTER_NAME = "mymaster";
+    /** The default of {@code pool-recycle-timeout}. */
+    private static final Duration DEFAULT_POOL_RECYCLE_TIMEOUT = Duration.ofMinutes(3);
+    /** The default of the Vert.x client's pool cleaner interval, applied when {@code pool-cleaner-interval} is unset. */
+    private static final Duration DEFAULT_POOL_CLEANER_INTERVAL = Duration.ofSeconds(30);
+    /** Why {@code reconnect-attempts} and {@code tcp.reconnect-attempts} are not applied. */
+    private static final String RECONNECT_ATTEMPTS_REASON = " (Lettuce reconnects a lost connection until it succeeds"
+            + " and does not retry the initial connection)";
 
     private final RuntimeValue<RedisConfig> runtimeConfig;
 
@@ -79,7 +89,9 @@ public class LettuceRecorder {
 
     /**
      * Initializes shared client resources and creates a Lettuce client for each requested client name.
-     * Only creates clients that pass the {@link #checkActive(String)} check.
+     * Only creates clients that pass the {@link #checkActive(String)} check. Called once the synthetic beans are
+     * initialized (see {@code LettuceProcessor}): the hosts may come from a {@code RedisHostsProvider} bean (see
+     * {@link #hosts}), which may itself inject beans that are only usable from then on.
      */
     public void initialize(RuntimeValue<Vertx> vertx, Supplier<TlsConfigurationRegistry> tlsRegistry, Set<String> names) {
         EventLoopGroup eventLoopGroup = ((VertxInternal) vertx.getValue()).eventLoopGroup();
@@ -89,15 +101,18 @@ public class LettuceRecorder {
         for (String name : names) {
             if (checkActive(name).get().value()) {
                 RedisClientConfig clientConfig = runtimeConfig.getValue().clients().get(name);
-                // checkActive() guarantees at least one host for an active client
-                List<URI> hosts = clientConfig.hosts().orElseThrow();
+                List<URI> hosts = hosts(name, clientConfig);
                 warnAboutUnsupportedConfiguration(name, clientConfig, hosts);
                 LettuceClientSettings settings = LettuceClientSettings.create(name, clientConfig, hosts, vertx.getValue(),
                         tlsRegistry.get());
                 LettuceConnectionFactory factory = factories.computeIfAbsent(name,
                         k -> createFactory(name, clientConfig, settings));
-                pools.putIfAbsent(name, new LettuceConnectionPool(factory::connectAsync,
-                        clientConfig.maxPoolSize(), clientConfig.maxPoolWaiting(), factory.getDatabase()));
+                // computeIfAbsent, like the factories: a pool schedules its cleaner when it is built, and a pool built
+                // only to be discarded by putIfAbsent would leave that timer running for good
+                pools.computeIfAbsent(name, k -> new LettuceConnectionPool(factory::connectAsync,
+                        clientConfig.maxPoolSize(), clientConfig.maxPoolWaiting(), factory.getDatabase(), vertx.getValue(),
+                        clientConfig.poolRecycleTimeout().orElse(DEFAULT_POOL_RECYCLE_TIMEOUT),
+                        clientConfig.poolCleanerInterval().orElse(DEFAULT_POOL_CLEANER_INTERVAL)));
             }
         }
     }
@@ -115,7 +130,8 @@ public class LettuceRecorder {
      */
     private static LettuceConnectionFactory createFactory(String name, RedisClientConfig config,
             LettuceClientSettings settings) {
-        ClientResources resources = sharedResources.clientResources();
+        ClientResources resources = sharedResources.clientResources(name, settings.reconnectDelay(),
+                settings.nettyCustomizer());
         return switch (config.clientType()) {
             case CLUSTER -> new LettuceConnectionFactory(name, resources, settings.redisUris(), settings.clientOptions(),
                     LettuceClientSettings.topologyRefreshOptions(LettuceClientSettings.topologyCacheTtl(config)),
@@ -158,14 +174,40 @@ public class LettuceRecorder {
     }
 
     /**
-     * The Lettuce backend applies the hosts, client-type, timeout, active, username, password, TLS,
-     * {@code tcp.secure-transport-protocols}, {@code max-pool-size} and {@code max-pool-waiting} properties; for a
-     * cluster also {@code replicas} and {@code topology-cache-ttl}, but not the database of a host URI (a cluster
-     * only has database 0); for a Sentinel client {@code master-name}, {@code role}, {@code auto-failover} (a
-     * failover is always followed) and {@code replicas}, unless {@code role=replica} already decides where the reads
-     * go; for a replication client {@code topology} and {@code replicas}. A standalone client only uses the first
-     * host. Tell users at startup which other configured properties are not applied, instead of silently connecting
-     * differently than configured. Properties with a default value are reported only when set to something else.
+     * The hosts of an active client: {@code hosts} when set, else those of the {@code RedisHostsProvider} bean
+     * {@code hosts-provider-name} names, resolved as the Vert.x client resolves it (the same lookup and the same
+     * failure when the bean is missing). {@code hosts} wins when both are set, as with the Vert.x client.
+     * {@link #checkActive(String)} guarantees one of the two is set.
+     *
+     * @throws ConfigurationException if the provider bean is missing or returns no host
+     */
+    private static List<URI> hosts(String name, RedisClientConfig config) {
+        if (hasHosts(config)) {
+            return config.hosts().get();
+        }
+        String providerName = config.hostsProviderName().orElseThrow();
+        Collection<URI> hosts = VertxRedisClientFactory.findProvider(providerName).getHosts();
+        if (hosts == null || hosts.isEmpty()) {
+            throw new ConfigurationException(String.format(
+                    "The Redis hosts provider '%s' of the Lettuce Redis client '%s' (configuration property '%s') "
+                            + "returned no host",
+                    providerName, name, getPropertyName(name, HOSTS_PROVIDER_NAME)));
+        }
+        return new ArrayList<>(hosts);
+    }
+
+    /**
+     * The Lettuce backend applies the hosts (or {@code hosts-provider-name}), client-type, timeout, active, username,
+     * password,
+     * TLS, client name, protocol, command queue and TCP socket properties (see {@link LettuceClientSettings}),
+     * {@code max-pool-size}, {@code max-pool-waiting}, {@code pool-recycle-timeout} and {@code pool-cleaner-interval}
+     * (see {@link LettuceConnectionPool}); for a cluster also {@code replicas} and {@code topology-cache-ttl}, but not the
+     * database of a host URI (a cluster only has database 0); for a Sentinel client {@code master-name},
+     * {@code role}, {@code auto-failover} (a failover is always followed) and {@code replicas}, unless
+     * {@code role=replica} already decides where the reads go; for a replication client {@code topology} and
+     * {@code replicas}. A standalone client only uses the first host. Tell users at startup which other configured
+     * properties are not applied, and why, instead of silently connecting differently than configured. Properties
+     * with a default value are reported only when set to something else.
      */
     private static void warnAboutUnsupportedConfiguration(String name, RedisClientConfig config, List<URI> hosts) {
         List<String> ignored = new ArrayList<>();
@@ -213,79 +255,63 @@ public class LettuceRecorder {
             ignored.add(getPropertyName(name, "topology"));
         }
         if (config.clusterTransactions().isPresent()) {
-            ignored.add(getPropertyName(name, "cluster-transactions"));
-        }
-        if (config.poolCleanerInterval().isPresent()) {
-            ignored.add(getPropertyName(name, "pool-cleaner-interval"));
-        }
-        if (config.poolRecycleTimeout().isPresent() && !config.poolRecycleTimeout().get().equals(Duration.ofMinutes(3))) {
-            ignored.add(getPropertyName(name, "pool-recycle-timeout"));
-        }
-        if (config.maxWaitingHandlers() != 2048) {
-            ignored.add(getPropertyName(name, "max-waiting-handlers"));
+            ignored.add(getPropertyName(name, "cluster-transactions")
+                    + " (Lettuce does not route MULTI/EXEC on a cluster, so transactions are not supported there)");
         }
         if (config.maxNestedArrays() != 32) {
-            ignored.add(getPropertyName(name, "max-nested-arrays"));
+            ignored.add(getPropertyName(name, "max-nested-arrays") + " (Lettuce does not limit the nesting of replies)");
         }
         if (config.reconnectAttempts() != 0) {
-            ignored.add(getPropertyName(name, "reconnect-attempts"));
+            ignored.add(getPropertyName(name, "reconnect-attempts") + RECONNECT_ATTEMPTS_REASON);
         }
-        if (!config.reconnectInterval().equals(Duration.ofSeconds(1))) {
-            ignored.add(getPropertyName(name, "reconnect-interval"));
+        // applied only with configure-client-name, as with the Vert.x client (see LettuceClientSettings.clientName)
+        if (config.clientName().isPresent() && !config.configureClientName()) {
+            ignored.add(getPropertyName(name, "client-name") + " (applied only with "
+                    + getPropertyName(name, "configure-client-name") + "=true, as with the Vert.x client)");
         }
-        if (!config.protocolNegotiation()) {
-            ignored.add(getPropertyName(name, "protocol-negotiation"));
-        }
-        if (config.preferredProtocolVersion().isPresent()) {
-            ignored.add(getPropertyName(name, "preferred-protocol-version"));
-        }
-        if (config.clientName().isPresent()) {
-            ignored.add(getPropertyName(name, "client-name"));
-        }
-        if (config.configureClientName()) {
-            ignored.add(getPropertyName(name, "configure-client-name"));
-        }
-        for (String tcpProperty : configuredTcpProperties(config.tcp())) {
+        for (String tcpProperty : unsupportedTcpProperties(config.tcp())) {
             ignored.add(getPropertyName(name, "tcp." + tcpProperty));
         }
         if (!ignored.isEmpty()) {
-            LOGGER.warnf("Lettuce Redis client '%s': the following configuration is not applied by the Lettuce backend yet: %s",
+            LOGGER.warnf("Lettuce Redis client '%s': the following configuration is not applied by the Lettuce backend: %s",
                     name, String.join(", ", ignored));
         }
     }
 
     /**
-     * The names of the {@code tcp.*} properties that are set, except {@code secure-transport-protocols} which is
-     * applied to the TLS handshake.
+     * The {@code tcp.*} properties that are set and have no Lettuce equivalent, each with the reason, except
+     * {@code secure-transport-protocols} (applied to the TLS handshake), {@code connection-timeout} (when positive),
+     * {@code keep-alive}, {@code no-delay}, {@code reconnect-interval}, {@code receive-buffer-size},
+     * {@code send-buffer-size}, {@code so-linger}, {@code traffic-class}, {@code reuse-address} and
+     * {@code local-address}, which are applied (see {@link LettuceClientSettings}).
      */
-    private static List<String> configuredTcpProperties(NetConfig tcp) {
+    private static List<String> unsupportedTcpProperties(NetConfig tcp) {
         Map<String, Boolean> present = new LinkedHashMap<>();
-        present.put("alpn", tcp.alpn().isPresent());
-        present.put("application-layer-protocols", tcp.applicationLayerProtocols().isPresent());
-        present.put("idle-timeout", tcp.idleTimeout().isPresent());
-        present.put("connection-timeout", tcp.connectionTimeout().isPresent());
-        present.put("proxy-configuration-name", tcp.proxyConfigurationName().isPresent());
-        present.put("read-idle-timeout", tcp.readIdleTimeout().isPresent());
-        present.put("receive-buffer-size", tcp.receiveBufferSize().isPresent());
-        // The defaults of the client-level reconnect-attempts (0) and reconnect-interval (1s) are registered for every
-        // client as quarkus.redis.*.reconnect-attempts and quarkus.redis.*.reconnect-interval, which the tcp group of
-        // the default client (quarkus.redis.tcp.*) also matches: both tcp properties are always present for that
-        // client. Treat them like defaulted properties and report them only when set to something else.
-        present.put("reconnect-attempts", tcp.reconnectAttempts().isPresent() && tcp.reconnectAttempts().getAsInt() != 0);
-        present.put("reconnect-interval",
-                tcp.reconnectInterval().isPresent() && !tcp.reconnectInterval().get().equals(Duration.ofSeconds(1)));
-        present.put("reuse-address", tcp.reuseAddress().isPresent());
-        present.put("reuse-port", tcp.reusePort().isPresent());
-        present.put("send-buffer-size", tcp.sendBufferSize().isPresent());
-        present.put("so-linger", tcp.soLinger().isPresent());
-        present.put("cork", tcp.cork().isPresent());
-        present.put("fast-open", tcp.fastOpen().isPresent());
-        present.put("keep-alive", tcp.keepAlive().isPresent());
-        present.put("no-delay", tcp.noDelay().isPresent());
-        present.put("quick-ack", tcp.quickAck().isPresent());
-        present.put("traffic-class", tcp.trafficClass().isPresent());
-        present.put("write-idle-timeout", tcp.writeIdleTimeout().isPresent());
-        present.put("local-address", tcp.localAddress().isPresent());
+        // the Vert.x client takes a connect timeout of zero as no timeout; Lettuce requires a positive one (see
+        // LettuceClientSettings.socketOptions)
+        present.put("connection-timeout (Lettuce requires a positive connect timeout, so its default of ten seconds"
+                + " applies)",
+                tcp.connectionTimeout().isPresent() && !LettuceClientSettings.isPositive(tcp.connectionTimeout().get()));
+        String noAlpn = " (the Redis protocol has no ALPN)";
+        present.put("alpn" + noAlpn, tcp.alpn().isPresent());
+        present.put("application-layer-protocols" + noAlpn, tcp.applicationLayerProtocols().isPresent());
+        String noIdleHandler = " (Lettuce does not close idle connections)";
+        present.put("idle-timeout" + noIdleHandler, tcp.idleTimeout().isPresent());
+        present.put("read-idle-timeout" + noIdleHandler, tcp.readIdleTimeout().isPresent());
+        present.put("write-idle-timeout" + noIdleHandler, tcp.writeIdleTimeout().isPresent());
+        String noProxy = " (Lettuce does not connect through a proxy)";
+        present.put("proxy-configuration-name" + noProxy, tcp.proxyConfigurationName().isPresent());
+        // The default of the client-level reconnect-attempts (0) is registered for every client as
+        // quarkus.redis.*.reconnect-attempts, which the tcp group of the default client (quarkus.redis.tcp.*) also
+        // matches: the tcp property is always present for that client. Treat it like a defaulted property and report
+        // it only when set to something else.
+        present.put("reconnect-attempts" + RECONNECT_ATTEMPTS_REASON,
+                tcp.reconnectAttempts().isPresent() && tcp.reconnectAttempts().getAsInt() != 0);
+        String nativeTransport = " (an option of the Linux native transport)";
+        present.put("reuse-port" + nativeTransport, tcp.reusePort().isPresent());
+        present.put("cork" + nativeTransport, tcp.cork().isPresent());
+        present.put("fast-open" + nativeTransport, tcp.fastOpen().isPresent());
+        present.put("quick-ack" + nativeTransport, tcp.quickAck().isPresent());
         List<String> configured = new ArrayList<>();
         for (Map.Entry<String, Boolean> entry : present.entrySet()) {
             if (entry.getValue()) {
@@ -357,23 +383,15 @@ public class LettuceRecorder {
                                 """,
                         name, getPropertyName(name, "active"), name));
             }
-            if (!hasHosts(redisClientConfig)) {
-                if (redisClientConfig.hostsProviderName().isPresent()) {
-                    return ActiveResult.inactive(String.format(
-                            """
-                                    Lettuce Redis Client '%s' was deactivated automatically because it is configured through '%s', \
-                                    which the Lettuce backend does not support yet. Set the configuration property '%s' instead. \
-                                    Refer to https://quarkus.io/guides/redis-reference for guidance.
-                                    """,
-                            name, getPropertyName(name, HOSTS_PROVIDER_NAME), getPropertyName(name, HOSTS)));
-                }
+            if (!hasHosts(redisClientConfig) && redisClientConfig.hostsProviderName().isEmpty()) {
                 return ActiveResult.inactive(String.format(
                         """
                                 Lettuce Redis Client '%s' was deactivated automatically because the hosts are not set. \
-                                To activate the Redis Client, set the configuration property '%s'. \
+                                To activate the Redis Client, set the configuration property '%s', or '%s' together with \
+                                a RedisHostsProvider bean of that name. \
                                 Refer to https://quarkus.io/guides/redis-reference for guidance.
                                 """,
-                        name, getPropertyName(name, HOSTS)));
+                        name, getPropertyName(name, HOSTS), getPropertyName(name, HOSTS_PROVIDER_NAME)));
             }
             return ActiveResult.active();
         };
