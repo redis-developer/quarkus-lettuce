@@ -11,14 +11,13 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.topk.ReactiveTopKCommands;
 import io.quarkus.redis.datasource.topk.TopKCommands;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
 import io.quarkus.redis.lettuce.runtime.internal.Person;
+import tools.jackson.core.type.TypeReference;
 
 class LettuceTopKCommandsTest extends CommandsTestBase {
 
