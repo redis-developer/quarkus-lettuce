@@ -1155,8 +1155,10 @@ first host, a Sentinel client the sentinels, the master and the replicas alike.
 * RESP3 is negotiated by default, falling back to RESP2 when the server does not know `HELLO`, which is also what
 `preferred-protocol-version=resp3` does. `preferred-protocol-version=resp2`, or `protocol-negotiation=false`,
 selects RESP2 without `HELLO`: Lettuce then authenticates with `AUTH`.
-* `max-waiting-handlers` bounds the commands queued on a connection, those awaiting their reply as well as those
-buffered while a lost connection is being re-established; a command beyond the bound fails at once.
+* `max-waiting-handlers`, when set, bounds the commands queued on a connection, those awaiting their reply as well as
+those buffered while a lost connection is being re-established; a command beyond the bound fails at once. The Vert.x
+client applies its default of 2048 to each pooled connection, whereas the ordinary commands share one connection
+here, so the default is not applied: the queue is unbounded unless the property is set.
 * A lost connection is reconnected until it succeeds. `reconnect-interval` (overridden by `tcp.reconnect-interval`,
 as with the Vert.x client) sets the fixed delay between the attempts; when neither property is set, Lettuce backs off
 exponentially, from 100 milliseconds up to 30 seconds. The initial connection is not retried, so `reconnect-attempts`
@@ -1186,7 +1188,7 @@ supports.
 <<configure-redis-hosts-programmatically>>).
 
 |`max-waiting-handlers`
-|The request queue size of a connection (see above).
+|The request queue size of a connection, when set (see above).
 
 |`protocol-negotiation`, `preferred-protocol-version`
 |The protocol version requested in the handshake (see above).
@@ -1371,7 +1373,7 @@ lighter load needs.
 Because `max-pool-size` bounds only blocking commands and scoped connections on this backend — rather than
 every command, as on the Vert.x backend — the same configured value gives noticeably higher effective
 capacity here. The ordinary commands share one connection, whose command queue `quarkus.redis.max-waiting-handlers`
-bounds (see <<lettuce-properties>>).
+bounds when set (see <<lettuce-properties>>).
 
 Pub/Sub subscribers do not use the pool either. Each subscriber (one `subscribe(...)` or `subscribeToPattern(...)`
 call) opens its own dedicated Pub/Sub connection, keeps it for as long as at least one of its channels or patterns

@@ -374,9 +374,10 @@ class LettuceClientSettingsTest {
         assertThat(settings.reconnectDelay()).isPresent();
         assertThat(settings.nettyCustomizer()).isPresent();
 
-        // the defaults: the Vert.x queue bound of 2048 commands, the Lettuce protocol negotiation, no name
+        // the defaults: no queue bound (the Vert.x default of 2048 would bound the single shared connection), the
+        // Lettuce protocol negotiation, no name
         settings = LettuceClientSettings.create(RedisConfig.DEFAULT_CLIENT_NAME, config(Map.of()), hosts, null, NO_TLS);
-        assertThat(settings.clientOptions().getRequestQueueSize()).isEqualTo(2048);
+        assertThat(settings.clientOptions().getRequestQueueSize()).isEqualTo(Integer.MAX_VALUE);
         assertThat(settings.clientOptions().getConfiguredProtocolVersion()).isNull();
         assertThat(settings.redisUri().getClientName()).isNull();
         assertThat(settings.reconnectDelay()).isEmpty();
