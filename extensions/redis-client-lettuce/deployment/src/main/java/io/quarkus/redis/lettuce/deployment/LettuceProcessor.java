@@ -21,12 +21,15 @@ import org.jboss.jandex.Type;
 import io.quarkus.arc.ActiveResult;
 import io.quarkus.arc.deployment.BeanDiscoveryFinishedBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
+import io.quarkus.arc.deployment.SyntheticBeansRuntimeInitBuildItem;
 import io.quarkus.arc.processor.InjectionPointInfo;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
+import io.quarkus.deployment.annotations.Consume;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
+import io.quarkus.deployment.builditem.ServiceStartBuildItem;
 import io.quarkus.deployment.builditem.ShutdownContextBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ExcludeConfigBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
@@ -183,10 +186,7 @@ public class LettuceProcessor {
     public void init(LettuceRecorder recorder,
             List<RequestedLettuceClientBuildItem> lettuceClients,
             List<RequestedRedisClientBuildItem> dataSourceClients,
-            ShutdownContextBuildItem shutdown,
-            BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
-            VertxBuildItem vertxBuildItem,
-            TlsRegistryBuildItem tlsRegistryBuildItem) {
+            BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
 
         Set<String> lettuceNames = new HashSet<>();
         for (RequestedLettuceClientBuildItem client : lettuceClients) {
@@ -196,14 +196,9 @@ public class LettuceProcessor {
         for (RequestedRedisClientBuildItem client : dataSourceClients) {
             dataSourceNames.add(client.name);
         }
-        Set<String> names = new HashSet<>(lettuceNames);
-        names.addAll(dataSourceNames);
-        if (names.isEmpty()) {
+        if (lettuceNames.isEmpty() && dataSourceNames.isEmpty()) {
             return;
         }
-
-        // Initialize shared resources and per-client factories
-        recorder.initialize(vertxBuildItem.getVertx(), tlsRegistryBuildItem.registry(), names);
 
         for (String name : lettuceNames) {
             // The client type is runtime configuration: the standalone, cluster and master/replica beans are all
@@ -249,9 +244,29 @@ public class LettuceProcessor {
         syntheticBeans.produce(createLettuceBean(DEFAULT_CLIENT_NAME, LETTUCE_CLIENT_RESOURCES,
                 ClassType.create(LETTUCE_CLIENT_RESOURCES),
                 null, recorder.getClientResources()));
+    }
 
-        // Register shutdown in correct order: connections → clients → resources
-        recorder.cleanup(shutdown);
+    @BuildStep
+    @Record(ExecutionTime.RUNTIME_INIT)
+    @Consume(SyntheticBeansRuntimeInitBuildItem.class)
+    ServiceStartBuildItem initializeClients(LettuceRecorder recorder,
+            List<RequestedLettuceClientBuildItem> lettuceClients,
+            List<RequestedRedisClientBuildItem> dataSourceClients,
+            ShutdownContextBuildItem shutdown,
+            VertxBuildItem vertxBuildItem,
+            TlsRegistryBuildItem tlsRegistryBuildItem) {
+        Set<String> names = new HashSet<>();
+        for (RequestedLettuceClientBuildItem client : lettuceClients) {
+            names.add(client.name);
+        }
+        for (RequestedRedisClientBuildItem client : dataSourceClients) {
+            names.add(client.name);
+        }
+        if (!names.isEmpty()) {
+            recorder.initialize(vertxBuildItem.getVertx(), tlsRegistryBuildItem.registry(), names);
+            recorder.cleanup(shutdown);
+        }
+        return new ServiceStartBuildItem(FEATURE);
     }
 
     /**

@@ -438,6 +438,115 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         assertThat(pool.getIdle()).isEqualTo(1);
     }
 
+    @Test
+    void idleConnectionIsRecycledAfterTheRecycleTimeout() {
+        LettuceConnectionPool pool = pool(2, 1, Duration.ofMillis(300), Duration.ofMillis(50));
+        try {
+            LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
+            long id = sync(conn).clientId();
+            pool.release(conn).await().atMost(TIMEOUT);
+            assertThat(pool.getIdle()).isEqualTo(1);
+
+            // the cleaner closes it once it has been idle for the recycle timeout...
+            await().atMost(TIMEOUT).until(() -> pool.getObjectCount() == 0);
+            assertThat(pool.getIdle()).isZero();
+            await().atMost(TIMEOUT).until(() -> !connection.sync().clientList().contains("id=" + id + " "));
+            assertThat(conn.isOpen()).isFalse();
+
+            // ...and the next borrower gets a fresh one
+            LettuceConnection fresh = pool.acquireBlocking(TIMEOUT);
+            assertThat(sync(fresh).clientId()).isNotEqualTo(id);
+            pool.release(fresh).await().atMost(TIMEOUT);
+        } finally {
+            pool.close().await().atMost(TIMEOUT);
+        }
+    }
+
+    @Test
+    void checkedOutConnectionIsNotRecycled() throws Exception {
+        LettuceConnectionPool pool = pool(1, 1, Duration.ofMillis(200), Duration.ofMillis(50));
+        try {
+            LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
+            // several cleaner runs past the recycle timeout while the connection is checked out
+            Thread.sleep(600);
+            assertThat(conn.isOpen()).isTrue();
+            assertThat(sync(conn).ping()).isEqualTo("PONG");
+            assertThat(pool.getObjectCount()).isEqualTo(1);
+            pool.release(conn).await().atMost(TIMEOUT);
+            // released, it is recycled like any idle connection
+            await().atMost(TIMEOUT).until(() -> pool.getObjectCount() == 0);
+        } finally {
+            pool.close().await().atMost(TIMEOUT);
+        }
+    }
+
+    @Test
+    void mostRecentlyReleasedConnectionIsReusedSoTheOthersAgeOut() throws Exception {
+        LettuceConnectionPool pool = pool(2, 1, Duration.ofMillis(400), Duration.ofMillis(50));
+        try {
+            LettuceConnection first = pool.acquireBlocking(TIMEOUT);
+            LettuceConnection second = pool.acquireBlocking(TIMEOUT);
+            pool.release(first).await().atMost(TIMEOUT);
+            pool.release(second).await().atMost(TIMEOUT);
+
+            // a borrower every 60 ms gets the most recently released connection back each time, so the other
+            // one stays idle from its release on
+            for (int i = 0; i < 10; i++) {
+                LettuceConnection borrowed = pool.acquireBlocking(TIMEOUT);
+                assertThat(borrowed).isSameAs(second);
+                pool.release(borrowed).await().atMost(TIMEOUT);
+                Thread.sleep(60);
+            }
+
+            // well past the recycle timeout: the idle one is gone, the busy one is kept
+            await().atMost(TIMEOUT).until(() -> pool.getObjectCount() == 1);
+            assertThat(first.isOpen()).isFalse();
+            assertThat(second.isOpen()).isTrue();
+            assertThat(pool.getIdle()).isEqualTo(1);
+        } finally {
+            pool.close().await().atMost(TIMEOUT);
+        }
+    }
+
+    @Test
+    void recyclingIsOffWithoutAPositiveCleanerInterval() throws Exception {
+        LettuceConnectionPool pool = pool(1, 1, Duration.ofMillis(100), Duration.ZERO);
+        try {
+            LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
+            pool.release(conn).await().atMost(TIMEOUT);
+            Thread.sleep(300);
+            assertThat(pool.getIdle()).isEqualTo(1);
+            assertThat(conn.isOpen()).isTrue();
+        } finally {
+            pool.close().await().atMost(TIMEOUT);
+        }
+    }
+
+    @Test
+    void closeClosesTheIdleConnections() {
+        LettuceConnectionPool pool = pool(2, 1);
+        LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
+        pool.release(conn).await().atMost(TIMEOUT);
+
+        pool.close().await().atMost(TIMEOUT);
+
+        assertThat(conn.isOpen()).isFalse();
+        assertThat(pool.getObjectCount()).isZero();
+        assertThat(pool.getIdle()).isZero();
+    }
+
+    @Test
+    void connectionReleasedAfterCloseIsClosed() {
+        LettuceConnectionPool pool = pool(1, 1);
+        LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
+        pool.close().await().atMost(TIMEOUT);
+
+        pool.release(conn).await().atMost(TIMEOUT);
+
+        assertThat(conn.isOpen()).isFalse();
+        assertThat(pool.getObjectCount()).isZero();
+    }
+
     private static void rawPush(String key, String value) {
         connection.sync().rpush(key.getBytes(StandardCharsets.UTF_8), value.getBytes(StandardCharsets.UTF_8));
     }

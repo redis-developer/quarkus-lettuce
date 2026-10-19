@@ -21,6 +21,7 @@ import io.quarkus.redis.datasource.autosuggest.ReactiveAutoSuggestCommands;
 import io.quarkus.redis.datasource.bitmap.BitMapCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
 import io.quarkus.redis.datasource.bloom.BloomCommands;
+import io.quarkus.redis.datasource.bloom.ReactiveBloomCommands;
 import io.quarkus.redis.datasource.countmin.CountMinCommands;
 import io.quarkus.redis.datasource.countmin.ReactiveCountMinCommands;
 import io.quarkus.redis.datasource.cuckoo.CuckooCommands;
@@ -47,6 +48,7 @@ import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
 import io.quarkus.redis.datasource.stream.StreamCommands;
 import io.quarkus.redis.datasource.string.StringCommands;
 import io.quarkus.redis.datasource.timeseries.TimeSeriesCommands;
+import io.quarkus.redis.datasource.topk.ReactiveTopKCommands;
 import io.quarkus.redis.datasource.topk.TopKCommands;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
@@ -57,6 +59,7 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.BlockingAutoSuggestCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingBitmapCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingBloomCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingCountMinCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingGeoCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingHashCommandsImpl;
@@ -69,6 +72,7 @@ import io.quarkus.redis.runtime.datasource.BlockingSetCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingSortedSetCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingStreamCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingStringCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingTopKCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingTransactionalRedisDataSourceImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
 import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
@@ -465,12 +469,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, V> BloomCommands<K, V> bloom(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("bloom");
+        ReactiveBloomCommands<K, V> r = reactive.bloom(redisKeyType, valueType);
+        return new BlockingBloomCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> BloomCommands<K, V> bloom(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("bloom");
+        ReactiveBloomCommands<K, V> r = reactive.bloom(redisKeyType, valueType);
+        return new BlockingBloomCommandsImpl<>(this, r, timeout);
     }
 
     @Override
@@ -497,12 +503,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K, V> TopKCommands<K, V> topk(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("topk");
+        ReactiveTopKCommands<K, V> r = reactive.topk(redisKeyType, valueType);
+        return new BlockingTopKCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K, V> TopKCommands<K, V> topk(TypeReference<K> redisKeyType, TypeReference<V> valueType) {
-        throw groupNotImplemented("topk");
+        ReactiveTopKCommands<K, V> r = reactive.topk(redisKeyType, valueType);
+        return new BlockingTopKCommandsImpl<>(this, r, timeout);
     }
 
     @Override

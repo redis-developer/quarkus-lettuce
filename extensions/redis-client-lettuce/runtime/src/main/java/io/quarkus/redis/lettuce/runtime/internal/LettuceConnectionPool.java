@@ -20,12 +20,10 @@ import java.util.function.Supplier;
 
 import org.jboss.logging.Logger;
 
-import io.lettuce.core.support.AsyncObjectFactory;
-import io.lettuce.core.support.BoundedAsyncPool;
-import io.lettuce.core.support.BoundedPoolConfig;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.Cancellable;
 import io.vertx.core.Context;
+import io.vertx.core.Vertx;
 
 /**
  * Bounded pool of {@link LettuceConnection}s (to a standalone server or to a cluster, see
@@ -33,9 +31,13 @@ import io.vertx.core.Context;
  * ({@code withConnection}/{@code withTransaction}) so that they never occupy the shared multiplexed
  * connection used by ordinary commands.
  * <p>
- * {@link BoundedAsyncPool#acquire()} fails immediately with a {@link NoSuchElementException}
- * once {@code maxTotal} connections are checked out — it has no waiting queue. This class adds
- * one, bounded by {@code maxWaiting}, mirroring the Vert.x backend's {@code max-pool-waiting}.
+ * At most {@code maxPoolSize} connections exist at a time, those being opened included; once they are all
+ * checked out, further requests queue, up to {@code maxWaiting} of them, mirroring the Vert.x backend's
+ * {@code max-pool-size} and {@code max-pool-waiting}. Idle connections are handed out most recently
+ * released first, so that the ones a lighter load no longer needs age out: a cleaner, running every
+ * {@code cleanerInterval}, closes the connections idle for longer than {@code recycleTimeout}, as the
+ * Vert.x client does with {@code pool-cleaner-interval} and {@code pool-recycle-timeout}. A connection
+ * that is checked out is never recycled.
  * <p>
  * Pooled connections must come back in the state a fresh connection has, or the next borrower
  * inherits it. {@code MULTI}/{@code WATCH} are undone by the transaction paths; {@code SELECT} is
@@ -50,7 +52,8 @@ public final class LettuceConnectionPool {
 
     private static final Logger LOGGER = Logger.getLogger(LettuceConnectionPool.class);
 
-    private final BoundedAsyncPool<LettuceConnection> pool;
+    private final Supplier<CompletionStage<LettuceConnection>> connector;
+    private final int maxPoolSize;
     private final int maxWaiting;
     /** Database a fresh connection is on ({@code RedisURI.getDatabase()}), restored on release. */
     private final int defaultDatabase;
@@ -58,20 +61,30 @@ public final class LettuceConnectionPool {
     private final Set<LettuceConnection> dirty = ConcurrentHashMap.newKeySet();
 
     /**
-     * Serializes "connection available, else queue me" against "anyone queued, else return the
-     * connection to the idle cache", so a release cannot slip between an acquire seeing the pool
-     * exhausted and that acquire being queued (a lost wake-up). This relies on {@link BoundedAsyncPool}
-     * deciding {@code acquire()} and adding to the idle cache in {@code release()} synchronously, which
-     * holds only while {@code testOnAcquire}/{@code testOnRelease} stay off. Nothing that can run user
-     * code — completing a request, subscribing a body — may happen while it is held.
+     * Serializes "connection available, else queue me" against "anyone queued, else keep the connection
+     * idle", so a release cannot slip between an acquire seeing the pool exhausted and that acquire being
+     * queued (a lost wake-up), and guards the idle connections and the connection count. Nothing that can
+     * run user code or I/O — completing a request, subscribing a body, opening or closing a connection —
+     * happens while it is held.
      */
     private final Object lock = new Object();
+    /** Guarded by {@link #lock}. The idle connections, the most recently released first. */
+    private final Deque<Idle> idle = new ArrayDeque<>();
+    /** Guarded by {@link #lock}. The connections that exist or are being opened: idle, checked out or connecting. */
+    private int total;
     /** Guarded by {@link #lock}. Every queued request is live: not yet completed, failed or abandoned. */
     private final Deque<Request> waiters = new ArrayDeque<>();
     /** Guarded by {@link #lock}. */
     private boolean closed;
 
+    /** Schedules the cleaner; {@code null} when the pool does not recycle its connections. */
+    private final Vertx vertx;
+    private final long recycleTimeoutNanos;
+    private final long cleanerTimerId;
+
     /**
+     * A pool that never recycles its idle connections.
+     *
      * @param connector opens a new connection; the connection must start on {@code defaultDatabase}
      * @param maxPoolSize maximum number of connections
      * @param maxWaiting maximum number of requests queued once {@code maxPoolSize} are checked out
@@ -80,13 +93,35 @@ public final class LettuceConnectionPool {
      */
     public LettuceConnectionPool(Supplier<CompletionStage<LettuceConnection>> connector,
             int maxPoolSize, int maxWaiting, int defaultDatabase) {
-        BoundedPoolConfig poolConfig = BoundedPoolConfig.builder()
-                .maxTotal(maxPoolSize)
-                .maxIdle(maxPoolSize)
-                .build();
-        this.pool = new BoundedAsyncPool<>(new PooledConnectionFactory(connector), poolConfig);
+        this(connector, maxPoolSize, maxWaiting, defaultDatabase, null, null, null);
+    }
+
+    /**
+     * @param connector opens a new connection; the connection must start on {@code defaultDatabase}
+     * @param maxPoolSize maximum number of connections
+     * @param maxWaiting maximum number of requests queued once {@code maxPoolSize} are checked out
+     * @param defaultDatabase database of a fresh connection, restored before a connection is reused
+     *        after a borrower changed it
+     * @param vertx schedules the cleaner; {@code null} for a pool that never recycles its connections
+     * @param recycleTimeout how long a connection may stay idle before the cleaner closes it; recycling is
+     *        off when {@code null} or not positive
+     * @param cleanerInterval how often the cleaner runs; recycling is off when {@code null} or not positive
+     */
+    public LettuceConnectionPool(Supplier<CompletionStage<LettuceConnection>> connector,
+            int maxPoolSize, int maxWaiting, int defaultDatabase,
+            Vertx vertx, Duration recycleTimeout, Duration cleanerInterval) {
+        this.connector = connector;
+        this.maxPoolSize = maxPoolSize;
         this.maxWaiting = maxWaiting;
         this.defaultDatabase = defaultDatabase;
+        boolean recycling = vertx != null && isPositive(recycleTimeout) && isPositive(cleanerInterval);
+        this.vertx = recycling ? vertx : null;
+        this.recycleTimeoutNanos = recycling ? recycleTimeout.toNanos() : 0;
+        this.cleanerTimerId = recycling ? vertx.setPeriodic(Math.max(1, cleanerInterval.toMillis()), id -> recycle()) : -1;
+    }
+
+    private static boolean isPositive(Duration duration) {
+        return duration != null && !duration.isNegative() && !duration.isZero();
     }
 
     /**
@@ -141,7 +176,7 @@ public final class LettuceConnectionPool {
      * Releases a connection back to the pool, handing it straight to the next waiter if any. A
      * connection marked by {@link #markDirty(LettuceConnection)} is first put back on
      * {@link #defaultDatabase}; if that fails it is handed on still marked, and the reset is
-     * retried before the next borrower gets it.
+     * retried before the next borrower gets it. A connection released after {@link #close()} is closed.
      */
     public Uni<Void> release(LettuceConnection connection) {
         if (!dirty.contains(connection)) {
@@ -161,8 +196,16 @@ public final class LettuceConnectionPool {
             synchronized (lock) {
                 waiter = waiters.poll();
                 if (waiter == null) {
-                    return Uni.createFrom().completionStage(pool.release(connection));
+                    if (!closed) {
+                        idle.addFirst(new Idle(connection, System.nanoTime()));
+                        return Uni.createFrom().voidItem();
+                    }
+                    total--;
                 }
+            }
+            if (waiter == null) {
+                // the pool was closed while the connection was checked out
+                return Uni.createFrom().completionStage(destroy(connection));
             }
             if (waiter.deliver(connection)) {
                 return Uni.createFrom().voidItem();
@@ -202,6 +245,55 @@ public final class LettuceConnectionPool {
     private void returnToPool(LettuceConnection connection) {
         releaseQuietly(connection).subscribe().with(ignored -> {
         });
+    }
+
+    /**
+     * Opens a connection for a request that found none idle. Never called while holding the lock.
+     */
+    private CompletableFuture<LettuceConnection> open() {
+        try {
+            return connector.get().toCompletableFuture();
+        } catch (RuntimeException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    /**
+     * Closes a connection that left the pool. Never called while holding the lock.
+     */
+    private CompletableFuture<Void> destroy(LettuceConnection connection) {
+        dirty.remove(connection);
+        return connection.closeAsync().exceptionally(failure -> {
+            LOGGER.debugf(failure, "Failed to close a pooled Redis connection");
+            return null;
+        });
+    }
+
+    /**
+     * The cleaner: closes the connections idle for longer than the recycle timeout. The idle connections are
+     * ordered by their release, so the stale ones are at the tail.
+     */
+    private void recycle() {
+        long now = System.nanoTime();
+        List<LettuceConnection> stale = new ArrayList<>();
+        synchronized (lock) {
+            if (closed) {
+                return;
+            }
+            Idle oldest;
+            while ((oldest = idle.peekLast()) != null && now - oldest.since() >= recycleTimeoutNanos) {
+                idle.pollLast();
+                total--;
+                stale.add(oldest.connection());
+            }
+        }
+        if (!stale.isEmpty()) {
+            LOGGER.debugf("Closing %d pooled Redis connection(s) idle for longer than %d ms", stale.size(),
+                    TimeUnit.NANOSECONDS.toMillis(recycleTimeoutNanos));
+            for (LettuceConnection connection : stale) {
+                destroy(connection);
+            }
+        }
     }
 
     /**
@@ -250,34 +342,58 @@ public final class LettuceConnectionPool {
     }
 
     /**
-     * Closes the pool. Requests still queued for a connection fail with an
+     * Closes the pool: the cleaner stops and the idle connections are closed; the checked-out ones are
+     * closed as they are released. Requests still queued for a connection fail with an
      * {@link IllegalStateException}, as do any made afterward.
      */
     public Uni<Void> close() {
         List<Request> queued;
+        List<Idle> released;
         synchronized (lock) {
             closed = true;
             queued = new ArrayList<>(waiters);
             waiters.clear();
+            released = new ArrayList<>(idle);
+            idle.clear();
+            total -= released.size();
+        }
+        if (vertx != null) {
+            vertx.cancelTimer(cleanerTimerId);
         }
         for (Request waiter : queued) {
             waiter.completeExceptionally(new IllegalStateException("Redis connection pool is closed"));
         }
-        return LettuceResult.toUni(pool::closeAsync).replaceWithVoid();
+        List<CompletableFuture<Void>> closing = new ArrayList<>(released.size());
+        for (Idle entry : released) {
+            closing.add(destroy(entry.connection()));
+        }
+        return Uni.createFrom().completionStage(CompletableFuture.allOf(closing.toArray(CompletableFuture[]::new)));
     }
 
+    /**
+     * The connections that exist or are being opened: idle, checked out or connecting.
+     */
     public int getObjectCount() {
-        return pool.getObjectCount();
+        synchronized (lock) {
+            return total;
+        }
     }
 
     public int getIdle() {
-        return pool.getIdle();
+        synchronized (lock) {
+            return idle.size();
+        }
+    }
+
+    /** An idle connection and when it became idle ({@link System#nanoTime()}). */
+    private record Idle(LettuceConnection connection, long since) {
     }
 
     private final class Request extends CompletableFuture<LettuceConnection> {
 
         void start() {
-            CompletableFuture<LettuceConnection> acquired = null;
+            LettuceConnection available = null;
+            boolean opening = false;
             RuntimeException rejection = null;
             synchronized (lock) {
                 if (isDone()) {
@@ -286,12 +402,16 @@ public final class LettuceConnectionPool {
                 if (closed) {
                     rejection = new IllegalStateException("Redis connection pool is closed");
                 } else {
-                    acquired = pool.acquire();
-                    if (isExhausted(acquired)) {
-                        if (waiters.size() < maxWaiting) {
-                            waiters.add(this);
-                            return;
-                        }
+                    Idle entry = idle.pollFirst();
+                    if (entry != null) {
+                        available = entry.connection();
+                    } else if (total < maxPoolSize) {
+                        total++;
+                        opening = true;
+                    } else if (waiters.size() < maxWaiting) {
+                        waiters.add(this);
+                        return;
+                    } else {
                         rejection = new NoSuchElementException("Redis connection pool exhausted, too many waiting requests");
                     }
                 }
@@ -300,12 +420,21 @@ public final class LettuceConnectionPool {
                 completeExceptionally(rejection);
                 return;
             }
-            acquired.whenComplete((conn, failure) -> {
+            if (!opening) {
+                if (!deliver(available)) {
+                    returnToPool(available);
+                }
+                return;
+            }
+            open().whenComplete((conn, failure) -> {
                 if (failure == null) {
                     if (!deliver(conn)) {
                         returnToPool(conn);
                     }
                 } else {
+                    synchronized (lock) {
+                        total--;
+                    }
                     completeExceptionally(failure);
                     redrive();
                 }
@@ -344,47 +473,6 @@ public final class LettuceConnectionPool {
                 waiters.remove(this);
             }
             cancel(false);
-        }
-
-        private static boolean isExhausted(CompletableFuture<?> acquired) {
-            if (!acquired.isCompletedExceptionally()) {
-                return false;
-            }
-            try {
-                acquired.join();
-                return false;
-            } catch (CompletionException e) {
-                return e.getCause() instanceof NoSuchElementException;
-            }
-        }
-
-    }
-
-    /**
-     * Opens, validates and closes the pooled connections: the equivalent of the factory Lettuce's own
-     * {@code AsyncConnectionPoolSupport} uses, for a {@link LettuceConnection} rather than a Lettuce connection.
-     */
-    private static final class PooledConnectionFactory implements AsyncObjectFactory<LettuceConnection> {
-
-        private final Supplier<CompletionStage<LettuceConnection>> connector;
-
-        PooledConnectionFactory(Supplier<CompletionStage<LettuceConnection>> connector) {
-            this.connector = connector;
-        }
-
-        @Override
-        public CompletableFuture<LettuceConnection> create() {
-            return connector.get().toCompletableFuture();
-        }
-
-        @Override
-        public CompletableFuture<Void> destroy(LettuceConnection connection) {
-            return connection.closeAsync();
-        }
-
-        @Override
-        public CompletableFuture<Boolean> validate(LettuceConnection connection) {
-            return CompletableFuture.completedFuture(connection.isOpen());
         }
 
     }
