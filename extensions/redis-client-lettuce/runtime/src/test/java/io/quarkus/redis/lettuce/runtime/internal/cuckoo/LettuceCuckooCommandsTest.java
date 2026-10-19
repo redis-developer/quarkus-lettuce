@@ -8,8 +8,6 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.cuckoo.CfInsertArgs;
@@ -18,6 +16,7 @@ import io.quarkus.redis.datasource.cuckoo.CuckooCommands;
 import io.quarkus.redis.datasource.cuckoo.ReactiveCuckooCommands;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
 import io.quarkus.redis.lettuce.runtime.internal.Person;
+import tools.jackson.core.type.TypeReference;
 
 class LettuceCuckooCommandsTest extends CommandsTestBase {
 
