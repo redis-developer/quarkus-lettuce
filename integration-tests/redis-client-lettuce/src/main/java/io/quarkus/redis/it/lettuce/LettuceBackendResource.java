@@ -40,6 +40,10 @@ import io.quarkus.redis.datasource.autosuggest.Suggestion;
 import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
 import io.quarkus.redis.datasource.bitmap.BitMapCommands;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
+import io.quarkus.redis.datasource.bloom.BfInsertArgs;
+import io.quarkus.redis.datasource.bloom.BfReserveArgs;
+import io.quarkus.redis.datasource.bloom.BloomCommands;
+import io.quarkus.redis.datasource.bloom.ReactiveBloomCommands;
 import io.quarkus.redis.datasource.countmin.CountMinCommands;
 import io.quarkus.redis.datasource.countmin.ReactiveCountMinCommands;
 import io.quarkus.redis.datasource.geo.GeoCommands;
@@ -86,6 +90,8 @@ import io.quarkus.redis.datasource.sortedset.ScoreRange;
 import io.quarkus.redis.datasource.sortedset.ScoredValue;
 import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
+import io.quarkus.redis.datasource.topk.ReactiveTopKCommands;
+import io.quarkus.redis.datasource.topk.TopKCommands;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
@@ -111,6 +117,7 @@ public class LettuceBackendResource {
     private final RedisClusterClient clusterClient;
     private final RedisDataSource sentinel;
     private final RedisDataSource replication;
+    private final RedisDataSource provided;
     private final ValueCommands<String, String> values;
     private final ReactiveValueCommands<String, String> reactiveValues;
     private final KeyCommands<String> keys;
@@ -137,8 +144,12 @@ public class LettuceBackendResource {
     private final ReactiveSearchCommands<String> reactiveSearch;
     private final AutoSuggestCommands<String> autosuggest;
     private final ReactiveAutoSuggestCommands<String> reactiveAutoSuggest;
+    private final BloomCommands<String, String> bloom;
+    private final ReactiveBloomCommands<String, String> reactiveBloom;
     private final CountMinCommands<String, String> countmin;
     private final ReactiveCountMinCommands<String, String> reactiveCountMin;
+    private final TopKCommands<String, String> topk;
+    private final ReactiveTopKCommands<String, String> reactiveTopK;
 
     private final Map<String, Subscription> subscriptions = new ConcurrentHashMap<>();
     private final AtomicInteger subscriptionIds = new AtomicInteger();
@@ -149,7 +160,8 @@ public class LettuceBackendResource {
             @RedisClientName("cluster") RedisDataSource clusterDs,
             @RedisClientName("cluster") RedisClusterClient clusterClient,
             @RedisClientName("sentinel") RedisDataSource sentinelDs,
-            @RedisClientName("replication") RedisDataSource replicationDs) {
+            @RedisClientName("replication") RedisDataSource replicationDs,
+            @RedisClientName("provided") RedisDataSource providedDs) {
         this.blocking = ds;
         this.reactive = reactiveDs;
         this.secure = secureDs;
@@ -157,6 +169,7 @@ public class LettuceBackendResource {
         this.clusterClient = clusterClient;
         this.sentinel = sentinelDs;
         this.replication = replicationDs;
+        this.provided = providedDs;
         this.values = ds.value(String.class);
         this.reactiveValues = reactiveDs.value(String.class);
         this.keys = ds.key(String.class);
@@ -183,8 +196,12 @@ public class LettuceBackendResource {
         this.reactiveSearch = reactiveDs.search();
         this.autosuggest = ds.autosuggest(String.class);
         this.reactiveAutoSuggest = reactiveDs.autosuggest(String.class);
+        this.bloom = ds.bloom(String.class);
+        this.reactiveBloom = reactiveDs.bloom(String.class);
         this.countmin = ds.countmin(String.class);
         this.reactiveCountMin = reactiveDs.countmin(String.class);
+        this.topk = ds.topk(String.class);
+        this.reactiveTopK = reactiveDs.topk(String.class);
     }
 
     @GET
@@ -337,6 +354,31 @@ public class LettuceBackendResource {
     @Path("/replication/value/{key}")
     public String replicationGetValue(@PathParam("key") String key) {
         return replication.value(String.class).get(key);
+    }
+
+    /**
+     * Pings the {@code provided} client, whose hosts come from the {@link LettuceHostsProvider} bean named by
+     * {@code hosts-provider-name}.
+     */
+    @GET
+    @Path("/provided/ping")
+    public String providedPing() {
+        return provided.execute("PING").toString();
+    }
+
+    /**
+     * The database the {@code provided} client is on, from {@code CLIENT INFO}: {@code 3}, the one of the provided URI.
+     */
+    @GET
+    @Path("/provided/database")
+    public String providedDatabase() {
+        String info = provided.execute("CLIENT", "INFO").toString();
+        for (String field : info.trim().split(" ")) {
+            if (field.startsWith("db=")) {
+                return field.substring("db=".length());
+            }
+        }
+        return "unknown";
     }
 
     private static String role(RedisDataSource ds) {
@@ -675,6 +717,80 @@ public class LettuceBackendResource {
     }
 
     @POST
+    @Path("/bloom/bfadd/{key}")
+    public boolean bloomBfAdd(@PathParam("key") String key, String value) {
+        return bloom.bfadd(key, value);
+    }
+
+    @GET
+    @Path("/bloom/bfexists/{key}/{value}")
+    public boolean bloomBfExists(@PathParam("key") String key, @PathParam("value") String value) {
+        return bloom.bfexists(key, value);
+    }
+
+    @POST
+    @Path("/bloom/bfmadd/{key}")
+    public List<Boolean> bloomBfMAdd(@PathParam("key") String key, String values) {
+        return bloom.bfmadd(key, values.split(","));
+    }
+
+    @GET
+    @Path("/bloom/bfmexists/{key}")
+    public List<Boolean> bloomBfMExists(@PathParam("key") String key, @QueryParam("values") String values) {
+        return bloom.bfmexists(key, values.split(","));
+    }
+
+    @POST
+    @Path("/bloom/bfreserve/{key}/{errorRate}/{capacity}")
+    public void bloomBfReserve(@PathParam("key") String key, @PathParam("errorRate") double errorRate,
+            @PathParam("capacity") long capacity, @QueryParam("nonScaling") boolean nonScaling) {
+        BfReserveArgs args = new BfReserveArgs();
+        if (nonScaling) {
+            args.nonScaling();
+        }
+        bloom.bfreserve(key, errorRate, capacity, args);
+    }
+
+    @POST
+    @Path("/bloom/bfinsert/{key}")
+    public List<Boolean> bloomBfInsert(@PathParam("key") String key, @QueryParam("capacity") Long capacity,
+            @QueryParam("nocreate") boolean nocreate, String values) {
+        BfInsertArgs args = new BfInsertArgs();
+        if (capacity != null) {
+            args.capacity(capacity);
+        }
+        if (nocreate) {
+            args.nocreate();
+        }
+        return bloom.bfinsert(key, args, values.split(","));
+    }
+
+    @POST
+    @Path("/bloom/reactive/bfadd/{key}")
+    public Uni<Boolean> bloomBfAddReactive(@PathParam("key") String key, String value) {
+        return reactiveBloom.bfadd(key, value);
+    }
+
+    @GET
+    @Path("/bloom/reactive/bfexists/{key}/{value}")
+    public Uni<Boolean> bloomBfExistsReactive(@PathParam("key") String key, @PathParam("value") String value) {
+        return reactiveBloom.bfexists(key, value);
+    }
+
+    @POST
+    @Path("/bloom/reactive/bfmadd/{key}")
+    public Uni<List<Boolean>> bloomBfMAddReactive(@PathParam("key") String key, String values) {
+        return reactiveBloom.bfmadd(key, values.split(","));
+    }
+
+    @GET
+    @Path("/bloom/reactive/bfmexists/{key}")
+    public Uni<List<Boolean>> bloomBfMExistsReactive(@PathParam("key") String key,
+            @QueryParam("values") String values) {
+        return reactiveBloom.bfmexists(key, values.split(","));
+    }
+
+    @POST
     @Path("/countmin/init/{key}/{width}/{depth}")
     public void countMinInitByDim(@PathParam("key") String key, @PathParam("width") long width,
             @PathParam("depth") long depth) {
@@ -738,6 +854,101 @@ public class LettuceBackendResource {
     @Path("/countmin/reactive/query/{key}/{item}")
     public Uni<Long> countMinQueryReactive(@PathParam("key") String key, @PathParam("item") String item) {
         return reactiveCountMin.cmsQuery(key, item);
+    }
+
+    @POST
+    @Path("/topk/reserve/{key}/{topk}")
+    public void topKReserve(@PathParam("key") String key, @PathParam("topk") int topk) {
+        this.topk.topkReserve(key, topk);
+    }
+
+    @POST
+    @Path("/topk/reserve/{key}/{topk}/{width}/{depth}/{decay}")
+    public void topKReserve(@PathParam("key") String key, @PathParam("topk") int topk, @PathParam("width") int width,
+            @PathParam("depth") int depth, @PathParam("decay") double decay) {
+        this.topk.topkReserve(key, topk, width, depth, decay);
+    }
+
+    /**
+     * Returns the item evicted by this addition, or the literal {@code "null"} when nothing was evicted.
+     */
+    @POST
+    @Path("/topk/add/{key}/{item}")
+    public String topKAdd(@PathParam("key") String key, @PathParam("item") String item) {
+        return String.valueOf(topk.topkAdd(key, item).orElse(null));
+    }
+
+    /**
+     * Body: {@code item,item,...}. Replies with one entry per item: the evicted item or {@code null}.
+     */
+    @POST
+    @Path("/topk/add/{key}")
+    public List<String> topKAddMany(@PathParam("key") String key, String items) {
+        return topk.topkAdd(key, items.split(","));
+    }
+
+    @POST
+    @Path("/topk/incrby/{key}/{item}/{increment}")
+    public String topKIncrBy(@PathParam("key") String key, @PathParam("item") String item,
+            @PathParam("increment") int increment) {
+        return String.valueOf(topk.topkIncrBy(key, item, increment).orElse(null));
+    }
+
+    /**
+     * Body: {@code item=increment,item=increment,...}. Uses an insertion-ordered map so the reply order is deterministic.
+     * The reply maps each item to the item it evicted, or to {@code null}.
+     */
+    @POST
+    @Path("/topk/incrby/{key}")
+    public Map<String, String> topKIncrByMany(@PathParam("key") String key, String couples) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        for (String couple : couples.split(",")) {
+            String[] parts = couple.split("=");
+            map.put(parts[0], Integer.parseInt(parts[1]));
+        }
+        return topk.topkIncrBy(key, map);
+    }
+
+    @GET
+    @Path("/topk/list/{key}")
+    public List<String> topKList(@PathParam("key") String key) {
+        return topk.topkList(key);
+    }
+
+    @GET
+    @Path("/topk/list/{key}/withcount")
+    public Map<String, Integer> topKListWithCount(@PathParam("key") String key) {
+        return topk.topkListWithCount(key);
+    }
+
+    @GET
+    @Path("/topk/query/{key}/{item}")
+    public boolean topKQuery(@PathParam("key") String key, @PathParam("item") String item) {
+        return topk.topkQuery(key, item);
+    }
+
+    @GET
+    @Path("/topk/query/{key}")
+    public List<Boolean> topKQueryMany(@PathParam("key") String key, @QueryParam("items") String items) {
+        return topk.topkQuery(key, items.split(","));
+    }
+
+    @POST
+    @Path("/topk/reactive/add/{key}/{item}")
+    public Uni<String> topKAddReactive(@PathParam("key") String key, @PathParam("item") String item) {
+        return reactiveTopK.topkAdd(key, item).map(String::valueOf);
+    }
+
+    @GET
+    @Path("/topk/reactive/list/{key}/withcount")
+    public Uni<Map<String, Integer>> topKListWithCountReactive(@PathParam("key") String key) {
+        return reactiveTopK.topkListWithCount(key);
+    }
+
+    @GET
+    @Path("/topk/reactive/query/{key}/{item}")
+    public Uni<Boolean> topKQueryReactive(@PathParam("key") String key, @PathParam("item") String item) {
+        return reactiveTopK.topkQuery(key, item);
     }
 
     @POST
@@ -1404,6 +1615,35 @@ public class LettuceBackendResource {
     }
 
     @POST
+    @Path("/with-transaction/topk/{key}")
+    public String withTransactionTopK(@PathParam("key") String key) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var t = tx.topk(String.class, String.class);
+            t.topkReserve(key, 3);
+            t.topkAdd(key, "a", "a", "b", "b", "a", "c", "a", "b", "c", "d", "d", "d");
+            t.topkIncrBy(key, "c", 10);
+            Map<String, Integer> couples = new LinkedHashMap<>();
+            couples.put("d", 2);
+            couples.put("e", 20);
+            t.topkIncrBy(key, couples);
+            t.topkQuery(key, "a");
+            t.topkQuery(key, "a", "b", "e");
+            t.topkList(key);
+            t.topkListWithCount(key);
+        });
+        Object reserve = result.get(0);
+        List<String> added = result.get(1);
+        String evicted = result.get(2);
+        Map<String, String> evictedByCouples = result.get(3);
+        boolean queried = result.get(4);
+        List<Boolean> queriedMany = result.get(5);
+        List<String> list = result.get(6);
+        Map<String, Integer> withCount = result.get(7);
+        return result.discarded() + "," + result.size() + "," + (reserve == null) + "," + added + "," + evicted + ","
+                + evictedByCouples + "," + queried + "," + queriedMany + "," + list + "," + withCount;
+    }
+
+    @POST
     @Path("/with-transaction/autosuggest/{key}")
     public String withTransactionAutoSuggest(@PathParam("key") String key) {
         TransactionResult result = blocking.withTransaction(tx -> {
@@ -1748,6 +1988,38 @@ public class LettuceBackendResource {
         return result.discarded() + "," + result.size() + "," + indexes.contains(index) + "," + new TreeSet<>(genres) + ","
                 + (aliasAdded == null) + "," + synonyms.groups() + ","
                 + synonyms.synonym("greetings").stream().sorted().toList() + "," + dictionary + "," + (dropped == null);
+    }
+
+    @POST
+    @Path("/with-transaction/bloom/{key}")
+    public String withTransactionBloom(@PathParam("key") String key) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var b = tx.bloom(String.class, String.class);
+            b.bfmadd(key, "a", "b", "c", "d", "a");
+            b.bfadd(key, "x");
+            b.bfexists(key, "a");
+            b.bfmexists(key, "a", "b", "z");
+            b.bfinsert(key, new BfInsertArgs(), "v", "w", "b");
+        });
+        List<Boolean> madd = result.get(0);
+        boolean added = result.get(1);
+        boolean exists = result.get(2);
+        List<Boolean> mexists = result.get(3);
+        List<Boolean> inserted = result.get(4);
+        return result.discarded() + ";" + result.size() + ";" + madd + ";" + added + ";" + exists + ";" + mexists + ";"
+                + inserted;
+    }
+
+    @POST
+    @Path("/with-transaction/reactive/bloom/{key}")
+    public Uni<String> withTransactionBloomReactive(@PathParam("key") String key) {
+        return reactive.withTransaction(tx -> {
+            var b = tx.bloom(String.class, String.class);
+            return b.bfmadd(key, "a", "b", "c")
+                    .chain(() -> b.bfexists(key, "a"))
+                    .chain(() -> b.bfexists(key, "z"));
+        }).map(result -> result.discarded() + ";" + result.size() + ";" + result.get(0) + ";" + result.get(1) + ";"
+                + result.get(2));
     }
 
 }

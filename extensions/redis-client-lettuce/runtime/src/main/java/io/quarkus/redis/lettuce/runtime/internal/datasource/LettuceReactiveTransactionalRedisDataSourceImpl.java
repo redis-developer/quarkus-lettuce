@@ -33,6 +33,8 @@ import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveAuto
 import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveTransactionalAutoSuggestCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveTransactionalBitMapCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.bloom.LettuceReactiveBloomCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.bloom.LettuceReactiveTransactionalBloomCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveCountMinCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.countmin.LettuceReactiveTransactionalCountMinCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.geo.LettuceReactiveGeoCommandsImpl;
@@ -53,6 +55,8 @@ import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveSetCommandsI
 import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveTransactionalSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSortedSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveTransactionalSortedSetCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.topk.LettuceReactiveTopKCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.topk.LettuceReactiveTransactionalTopKCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveTransactionalValueCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveValueCommandsImpl;
 import io.smallrye.mutiny.Uni;
@@ -109,7 +113,11 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalStringCommands<K, V> string(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("string");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        LettuceReactiveValueCommandsImpl<K, V> reactiveValue = (LettuceReactiveValueCommandsImpl<K, V>) reactive
+                .value(redisKeyType, valueType);
+        return new LettuceReactiveTransactionalValueCommandsImpl<>(this, reactiveValue, tx);
     }
 
     @Override
@@ -214,7 +222,11 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalBloomCommands<K, V> bloom(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("bloom");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        LettuceReactiveBloomCommandsImpl<K, V> reactiveBloom = (LettuceReactiveBloomCommandsImpl<K, V>) reactive
+                .bloom(redisKeyType, valueType);
+        return new LettuceReactiveTransactionalBloomCommandsImpl<>(this, reactiveBloom, tx);
     }
 
     @Override
@@ -233,7 +245,11 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalTopKCommands<K, V> topk(Class<K> redisKeyType, Class<V> valueType) {
-        throw groupNotImplemented("topk");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(valueType, "valueType");
+        LettuceReactiveTopKCommandsImpl<K, V> reactiveTopK = (LettuceReactiveTopKCommandsImpl<K, V>) reactive
+                .topk(redisKeyType, valueType);
+        return new LettuceReactiveTransactionalTopKCommandsImpl<>(this, reactiveTopK, tx);
     }
 
     @Override

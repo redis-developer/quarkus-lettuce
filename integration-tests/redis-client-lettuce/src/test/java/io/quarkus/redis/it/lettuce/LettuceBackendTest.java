@@ -116,6 +116,18 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void providedPing() {
+        RestAssured.given().when().get("/lettuce/provided/ping").then()
+                .statusCode(200).body(CoreMatchers.is("PONG"));
+    }
+
+    @Test
+    public void providedClientConnectsToTheProvidedDatabase() {
+        RestAssured.given().when().get("/lettuce/provided/database").then()
+                .statusCode(200).body(CoreMatchers.is("3"));
+    }
+
+    @Test
     public void sentinelPing() {
         RestAssured.given().when().get("/lettuce/sentinel/ping").then()
                 .statusCode(200).body(CoreMatchers.is("PONG"));
@@ -794,6 +806,81 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void bloomAddExists() {
+        String key = getKey("bloom-sync");
+
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+
+        RestAssured.given().body("a").when().post("/lettuce/bloom/bfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        // an item already in the filter is not added again
+        RestAssured.given().body("a").when().post("/lettuce/bloom/bfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/z").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().when().get("/lettuce/key/exists/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
+    public void bloomMAddMExists() {
+        String key = getKey("bloom-multi");
+
+        // the duplicate "a" within the same call is reported as not added
+        RestAssured.given().body("a,b,c,a").when().post("/lettuce/bloom/bfmadd/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, true, false)));
+        RestAssured.given().queryParam("values", "a,b,z").when().get("/lettuce/bloom/bfmexists/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+    }
+
+    @Test
+    public void bloomReserveInsert() {
+        String key = getKey("bloom-reserve");
+
+        RestAssured.given().queryParam("nonScaling", true).when()
+                .post("/lettuce/bloom/bfreserve/" + key + "/0.01/100").then()
+                .statusCode(204);
+        // NOCREATE is fine because the filter was reserved above
+        RestAssured.given().queryParam("nocreate", true).body("a,b,a").when()
+                .post("/lettuce/bloom/bfinsert/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/b").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+
+        // insert into a brand-new key creates the filter with the given capacity
+        String created = getKey("bloom-insert-create");
+        RestAssured.given().queryParam("capacity", 50).body("x,y").when()
+                .post("/lettuce/bloom/bfinsert/" + created).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true)));
+        RestAssured.given().queryParam("values", "x,y,q").when().get("/lettuce/bloom/bfmexists/" + created).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+    }
+
+    @Test
+    public void bloomReactive() {
+        String key = getKey("bloom-reactive");
+
+        RestAssured.given().when().get("/lettuce/bloom/reactive/bfexists/" + key + "/a").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("a").when().post("/lettuce/bloom/reactive/bfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().body("a").when().post("/lettuce/bloom/reactive/bfadd/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().body("b,c,a").when().post("/lettuce/bloom/reactive/bfmadd/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, false)));
+        RestAssured.given().queryParam("values", "a,b,c,z").when()
+                .get("/lettuce/bloom/reactive/bfmexists/" + key).then()
+                .statusCode(200).body("$", CoreMatchers.equalTo(List.of(true, true, true, false)));
+        // blocking and reactive views agree on the same key
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/c").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
     public void withConnectionBlockingClientIds() {
         String body = RestAssured.given().when().get("/lettuce/with-connection/client-ids")
                 .then().statusCode(200).extract().asString();
@@ -1283,6 +1370,84 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void topKAddAndList() {
+        String key = getKey("topk-sync");
+        String customKey = getKey("topk-custom");
+
+        // adding to a key that was not reserved is a server-side error
+        RestAssured.given().when().post("/lettuce/topk/add/" + key + "/luke").then().statusCode(500);
+
+        RestAssured.given().when().post("/lettuce/topk/reserve/" + key + "/2").then().statusCode(204);
+        RestAssured.given().when().post("/lettuce/topk/reserve/" + customKey + "/100/2/4/0.5").then().statusCode(204);
+        // re-reserving an existing key is a server-side error
+        RestAssured.given().when().post("/lettuce/topk/reserve/" + key + "/2").then().statusCode(500);
+
+        RestAssured.given().when().post("/lettuce/topk/add/" + key + "/luke").then()
+                .statusCode(200).body(CoreMatchers.is("null"));
+        RestAssured.given().when().post("/lettuce/topk/add/" + key + "/luke").then()
+                .statusCode(200).body(CoreMatchers.is("null"));
+        RestAssured.given().when().post("/lettuce/topk/add/" + key + "/leia").then()
+                .statusCode(200).body(CoreMatchers.is("null"));
+        // the list is full (k=2): anakin evicts leia
+        RestAssured.given().when().post("/lettuce/topk/add/" + key + "/anakin").then()
+                .statusCode(200).body(CoreMatchers.is("leia"));
+        RestAssured.given().body("luke,luke,leia,leia,leia,luke").when().post("/lettuce/topk/add/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[null,null,\"anakin\",null,null,null]"));
+
+        // TOPK.LIST replies most frequent first
+        RestAssured.given().when().get("/lettuce/topk/list/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[\"luke\",\"leia\"]"));
+        RestAssured.given().when().get("/lettuce/topk/list/" + key + "/withcount").then()
+                .statusCode(200).body(CoreMatchers.is("{\"luke\":5,\"leia\":4}"));
+
+        RestAssured.given().when().post("/lettuce/topk/incrby/" + key + "/anakin/6").then()
+                .statusCode(200).body(CoreMatchers.is("leia"));
+        RestAssured.given().when().get("/lettuce/topk/list/" + key + "/withcount").then()
+                .statusCode(200).body(CoreMatchers.is("{\"anakin\":7,\"luke\":5}"));
+        // leia (20) evicts luke (5), then luke (25) evicts anakin (7)
+        RestAssured.given().body("leia=20,luke=20").when().post("/lettuce/topk/incrby/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("{\"leia\":\"luke\",\"luke\":\"anakin\"}"));
+
+        RestAssured.given().when().get("/lettuce/topk/query/" + key + "/anakin").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+        RestAssured.given().when().get("/lettuce/topk/query/" + key + "/luke").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().queryParam("items", "luke,leia,anakin").when().get("/lettuce/topk/query/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[true,true,false]"));
+    }
+
+    @Test
+    public void topKReactive() {
+        String key = getKey("topk-reactive");
+
+        RestAssured.given().when().post("/lettuce/topk/reserve/" + key + "/1").then().statusCode(204);
+        RestAssured.given().when().post("/lettuce/topk/reactive/add/" + key + "/x").then()
+                .statusCode(200).body(CoreMatchers.is("null"));
+        RestAssured.given().when().post("/lettuce/topk/reactive/add/" + key + "/x").then()
+                .statusCode(200).body(CoreMatchers.is("null"));
+        RestAssured.given().when().get("/lettuce/topk/reactive/list/" + key + "/withcount").then()
+                .statusCode(200).body(CoreMatchers.is("{\"x\":2}"));
+        RestAssured.given().when().get("/lettuce/topk/reactive/query/" + key + "/x").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+        RestAssured.given().when().get("/lettuce/topk/reactive/query/" + key + "/y").then()
+                .statusCode(200).body(CoreMatchers.is("false"));
+    }
+
+    @Test
+    public void withTransactionTopK() {
+        String key = getKey("tx-topk");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/topk/" + key)
+                .then().statusCode(200).extract().asString();
+        // reserve(3) -> null, add(12 items) -> "c" evicted by the third "d", incrby(c,10) -> "c" re-enters and evicts "b",
+        // incrby(d=2,e=20) -> "d" (5) stays, "e" evicts the least frequent "a" (4), query(a) -> false,
+        // query(a,b,e) -> [false,false,true], list -> [e, c, d], listWithCount -> {e=20, c=12, d=5}
+        assertEquals("false,8,true,[null, null, null, null, null, null, null, null, null, null, c, null],b,"
+                + "{d=null, e=a},false,[false, false, true],[e, c, d],{e=20, c=12, d=5}", body);
+        RestAssured.given().when().get("/lettuce/topk/list/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("[\"e\",\"c\",\"d\"]"));
+    }
+
+    @Test
     public void autoSuggestAddGetDel() {
         String key = getKey("sug-sync");
 
@@ -1663,6 +1828,27 @@ class LettuceBackendTest {
         await(() -> RestAssured.given().when().get("/lettuce/key/exists/" + prefix + "11002")
                 .then().statusCode(200).extract().asString().equals("false"),
                 () -> "expected the documents of " + index + " to be deleted with it");
+    }
+
+    @Test
+    public void withTransactionBloom() {
+        String key = getKey("tx-bloom");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/bloom/" + key)
+                .then().statusCode(200).extract().asString();
+        // bfmadd(a,b,c,d,a) -> 4 true + 1 false, bfadd(x) -> true, bfexists(a) -> true,
+        // bfmexists(a,b,z) -> true,true,false, bfinsert(v,w,b) -> true,true,false
+        assertEquals("false;5;[true, true, true, true, false];true;true;[true, true, false];[true, true, false]", body);
+        RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/v").then()
+                .statusCode(200).body(CoreMatchers.is("true"));
+    }
+
+    @Test
+    public void withTransactionBloomReactive() {
+        String key = getKey("tx-bloom-reactive");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/reactive/bloom/" + key)
+                .then().statusCode(200).extract().asString();
+        // bfmadd(a,b,c) -> 3 true, bfexists(a) -> true, bfexists(z) -> false
+        assertEquals("false;3;[true, true, true];true;false", body);
     }
 
 }
