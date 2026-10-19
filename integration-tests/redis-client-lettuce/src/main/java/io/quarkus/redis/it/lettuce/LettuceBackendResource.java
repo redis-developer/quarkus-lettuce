@@ -46,6 +46,10 @@ import io.quarkus.redis.datasource.bloom.BloomCommands;
 import io.quarkus.redis.datasource.bloom.ReactiveBloomCommands;
 import io.quarkus.redis.datasource.countmin.CountMinCommands;
 import io.quarkus.redis.datasource.countmin.ReactiveCountMinCommands;
+import io.quarkus.redis.datasource.cuckoo.CfInsertArgs;
+import io.quarkus.redis.datasource.cuckoo.CfReserveArgs;
+import io.quarkus.redis.datasource.cuckoo.CuckooCommands;
+import io.quarkus.redis.datasource.cuckoo.ReactiveCuckooCommands;
 import io.quarkus.redis.datasource.geo.GeoCommands;
 import io.quarkus.redis.datasource.geo.GeoPosition;
 import io.quarkus.redis.datasource.geo.GeoSearchArgs;
@@ -144,6 +148,8 @@ public class LettuceBackendResource {
     private final ReactiveSearchCommands<String> reactiveSearch;
     private final AutoSuggestCommands<String> autosuggest;
     private final ReactiveAutoSuggestCommands<String> reactiveAutoSuggest;
+    private final CuckooCommands<String, String> cuckoo;
+    private final ReactiveCuckooCommands<String, String> reactiveCuckoo;
     private final BloomCommands<String, String> bloom;
     private final ReactiveBloomCommands<String, String> reactiveBloom;
     private final CountMinCommands<String, String> countmin;
@@ -196,6 +202,8 @@ public class LettuceBackendResource {
         this.reactiveSearch = reactiveDs.search();
         this.autosuggest = ds.autosuggest(String.class);
         this.reactiveAutoSuggest = reactiveDs.autosuggest(String.class);
+        this.cuckoo = ds.cuckoo(String.class);
+        this.reactiveCuckoo = reactiveDs.cuckoo(String.class);
         this.bloom = ds.bloom(String.class);
         this.reactiveBloom = reactiveDs.bloom(String.class);
         this.countmin = ds.countmin(String.class);
@@ -714,6 +722,116 @@ public class LettuceBackendResource {
     @Path("/hyperloglog/reactive/pfcount/{key}")
     public Uni<Long> hyperloglogPfCountReactive(@PathParam("key") String key) {
         return reactiveHyperLogLog.pfcount(key);
+    }
+
+    @POST
+    @Path("/cuckoo/cfadd/{key}")
+    public void cuckooCfAdd(@PathParam("key") String key, String value) {
+        cuckoo.cfadd(key, value);
+    }
+
+    @POST
+    @Path("/cuckoo/cfaddnx/{key}")
+    public boolean cuckooCfAddNx(@PathParam("key") String key, String value) {
+        return cuckoo.cfaddnx(key, value);
+    }
+
+    @GET
+    @Path("/cuckoo/cfexists/{key}/{value}")
+    public boolean cuckooCfExists(@PathParam("key") String key, @PathParam("value") String value) {
+        return cuckoo.cfexists(key, value);
+    }
+
+    @GET
+    @Path("/cuckoo/cfcount/{key}/{value}")
+    public long cuckooCfCount(@PathParam("key") String key, @PathParam("value") String value) {
+        return cuckoo.cfcount(key, value);
+    }
+
+    @DELETE
+    @Path("/cuckoo/cfdel/{key}/{value}")
+    public boolean cuckooCfDel(@PathParam("key") String key, @PathParam("value") String value) {
+        return cuckoo.cfdel(key, value);
+    }
+
+    @GET
+    @Path("/cuckoo/cfmexists/{key}")
+    public List<Boolean> cuckooCfMExists(@PathParam("key") String key, @QueryParam("values") String values) {
+        return cuckoo.cfmexists(key, values.split(","));
+    }
+
+    @POST
+    @Path("/cuckoo/cfreserve/{key}/{capacity}")
+    public void cuckooCfReserve(@PathParam("key") String key, @PathParam("capacity") long capacity,
+            @QueryParam("bucketSize") Long bucketSize, @QueryParam("maxIterations") Integer maxIterations,
+            @QueryParam("expansion") Integer expansion) {
+        CfReserveArgs args = new CfReserveArgs();
+        if (bucketSize != null) {
+            args.bucketSize(bucketSize);
+        }
+        if (maxIterations != null) {
+            args.maxIterations(maxIterations);
+        }
+        if (expansion != null) {
+            args.expansion(expansion);
+        }
+        cuckoo.cfreserve(key, capacity, args);
+    }
+
+    @POST
+    @Path("/cuckoo/cfinsert/{key}")
+    public void cuckooCfInsert(@PathParam("key") String key, @QueryParam("capacity") Long capacity,
+            @QueryParam("nocreate") boolean nocreate, String values) {
+        cuckoo.cfinsert(key, cfInsertArgs(capacity, nocreate), values.split(","));
+    }
+
+    @POST
+    @Path("/cuckoo/cfinsertnx/{key}")
+    public List<Boolean> cuckooCfInsertNx(@PathParam("key") String key, @QueryParam("capacity") Long capacity,
+            @QueryParam("nocreate") boolean nocreate, String values) {
+        return cuckoo.cfinsertnx(key, cfInsertArgs(capacity, nocreate), values.split(","));
+    }
+
+    private static CfInsertArgs cfInsertArgs(Long capacity, boolean nocreate) {
+        CfInsertArgs args = new CfInsertArgs();
+        if (capacity != null) {
+            args.capacity(capacity);
+        }
+        if (nocreate) {
+            args.nocreate();
+        }
+        return args;
+    }
+
+    @POST
+    @Path("/cuckoo/reactive/cfadd/{key}")
+    public Uni<Void> cuckooCfAddReactive(@PathParam("key") String key, String value) {
+        return reactiveCuckoo.cfadd(key, value);
+    }
+
+    @POST
+    @Path("/cuckoo/reactive/cfaddnx/{key}")
+    public Uni<Boolean> cuckooCfAddNxReactive(@PathParam("key") String key, String value) {
+        return reactiveCuckoo.cfaddnx(key, value);
+    }
+
+    @GET
+    @Path("/cuckoo/reactive/cfexists/{key}/{value}")
+    public Uni<Boolean> cuckooCfExistsReactive(@PathParam("key") String key, @PathParam("value") String value) {
+        return reactiveCuckoo.cfexists(key, value);
+    }
+
+    @GET
+    @Path("/cuckoo/reactive/cfcount/{key}/{value}")
+    public Uni<Long> cuckooCfCountReactive(@PathParam("key") String key, @PathParam("value") String value) {
+        return reactiveCuckoo.cfcount(key, value);
+    }
+
+    @GET
+    @Path("/cuckoo/reactive/cfmexists/{key}")
+    public Uni<List<Boolean>> cuckooCfMExistsReactive(@PathParam("key") String key,
+            @QueryParam("values") String values) {
+        return reactiveCuckoo.cfmexists(key, values.split(","));
     }
 
     @POST
@@ -1612,6 +1730,46 @@ public class LettuceBackendResource {
         List<Long> queried = result.get(6);
         return result.discarded() + "," + result.size() + "," + (init == null) + "," + incremented + "," + counts + ","
                 + (mergeResult == null) + "," + queried;
+    }
+
+    @POST
+    @Path("/with-transaction/cuckoo/{key}")
+    public String withTransactionCuckoo(@PathParam("key") String key) {
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var c = tx.cuckoo(String.class, String.class);
+            c.cfinsertnx(key, "a", "b", "c", "d", "a");
+            c.cfadd(key, "x");
+            c.cfexists(key, "a");
+            c.cfmexists(key, "a", "b", "z");
+            c.cfinsert(key, new CfInsertArgs(), "v", "w", "b");
+            c.cfadd(key, "a");
+            c.cfcount(key, "a");
+            c.cfdel(key, "a");
+            c.cfcount(key, "a");
+        });
+        List<Boolean> inserted = result.get(0);
+        Object added = result.get(1);
+        boolean exists = result.get(2);
+        List<Boolean> mexists = result.get(3);
+        Object insert = result.get(4);
+        long countBefore = result.get(6);
+        boolean deleted = result.get(7);
+        long countAfter = result.get(8);
+        return result.discarded() + ";" + result.size() + ";" + inserted + ";" + (added == null) + ";" + exists + ";"
+                + mexists + ";" + (insert == null) + ";" + countBefore + ";" + deleted + ";" + countAfter;
+    }
+
+    @POST
+    @Path("/with-transaction/reactive/cuckoo/{key}")
+    public Uni<String> withTransactionCuckooReactive(@PathParam("key") String key) {
+        return reactive.withTransaction(tx -> {
+            var c = tx.cuckoo(String.class, String.class);
+            return c.cfinsertnx(key, "a", "b", "c")
+                    .chain(() -> c.cfadd(key, "a"))
+                    .chain(() -> c.cfcount(key, "a"))
+                    .chain(() -> c.cfexists(key, "z"));
+        }).map(result -> result.discarded() + ";" + result.size() + ";" + result.get(0) + ";" + (result.get(1) == null)
+                + ";" + result.get(2) + ";" + result.get(3));
     }
 
     @POST
