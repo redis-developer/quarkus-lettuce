@@ -107,6 +107,35 @@ class LettuceBloomCommandsTest extends CommandsTestBase {
     }
 
     @Test
+    void bfmaddOnFullNonScalingFilterNeverReturnsNull() {
+        blockingBloom.bfreserve(key, 0.01, 2, new BfReserveArgs().nonScaling());
+
+        List<Boolean> added = blockingBloom.bfmadd(key, people(8));
+        assertThat(added).isNotEmpty().doesNotContainNull().contains(true, false);
+        assertThat(added.get(added.size() - 1)).isFalse();
+    }
+
+    @Test
+    void bfinsertOnFullNonScalingFilterNeverReturnsNull() {
+        List<Boolean> added = blockingBloom.bfinsert(key, new BfInsertArgs().capacity(2).errorRate(0.01).nonScaling(),
+                people(8));
+        assertThat(added).isNotEmpty().doesNotContainNull().contains(true, false);
+        assertThat(added.get(added.size() - 1)).isFalse();
+
+        List<Boolean> again = reactiveBloom.bfinsert(key, new BfInsertArgs().nonScaling(), people(3))
+                .await().atMost(TIMEOUT);
+        assertThat(again).isNotEmpty().doesNotContainNull().containsOnly(false);
+    }
+
+    private static Person[] people(int count) {
+        Person[] people = new Person[count];
+        for (int i = 0; i < count; i++) {
+            people[i] = new Person("person-" + i, "nonscaling");
+        }
+        return people;
+    }
+
+    @Test
     void bloomWithTypeReference() {
         var bloom = blockingDs.bloom(new TypeReference<List<Person>>() {
             // Empty on purpose.

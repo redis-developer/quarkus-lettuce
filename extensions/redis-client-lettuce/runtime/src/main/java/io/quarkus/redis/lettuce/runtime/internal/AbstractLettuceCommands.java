@@ -5,6 +5,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,6 +76,17 @@ public abstract class AbstractLettuceCommands<K, V> {
 
     public static Boolean asBoolean(Long added) {
         return added != null && added == 1L;
+    }
+
+    public static List<Boolean> nullsToFalse(List<Boolean> reply) {
+        if (reply == null) {
+            return Collections.emptyList();
+        }
+        List<Boolean> result = new ArrayList<>(reply.size());
+        for (Boolean b : reply) {
+            result.add(b != null && b);
+        }
+        return result;
     }
 
     public static Long orZero(Long value) {

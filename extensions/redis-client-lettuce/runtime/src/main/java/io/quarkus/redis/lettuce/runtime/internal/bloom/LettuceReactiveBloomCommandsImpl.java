@@ -73,7 +73,8 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
         if (values.length == 0) {
             return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
-        return LettuceCommand.of(() -> async.bfMAdd(marshaller.encode(key), marshaller.encodeAsArray(values)));
+        return LettuceCommand.of(() -> async.bfMAdd(marshaller.encode(key), marshaller.encodeAsArray(values)),
+                AbstractLettuceCommands::nullsToFalse);
     }
 
     @SafeVarargs
@@ -126,7 +127,8 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
         }
         io.lettuce.core.probabilistic.arguments.BfInsertArgs lettuceArgs = LettuceBloomCommandsConverters
                 .toLettuceBfInsertArgs(args);
-        return LettuceCommand.of(() -> async.bfInsert(marshaller.encode(key), lettuceArgs, marshaller.encodeAsArray(values)));
+        return LettuceCommand.of(() -> async.bfInsert(marshaller.encode(key), lettuceArgs, marshaller.encodeAsArray(values)),
+                AbstractLettuceCommands::nullsToFalse);
     }
 
 }
