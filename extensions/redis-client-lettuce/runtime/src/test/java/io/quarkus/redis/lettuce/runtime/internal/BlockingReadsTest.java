@@ -10,29 +10,30 @@ import io.lettuce.core.protocol.CommandArgs;
 class BlockingReadsTest {
 
     @Test
-    void aMarkIsConsumedByTheFirstUnmark() {
+    void aMarkSurvivesRepeatedLookups() {
+        // a cluster redirect writes the same command twice, and each write asks for the timeout again
         CommandArgs<String, String> args = args();
         BlockingReads.mark(args);
-        assertThat(BlockingReads.unmark(args)).isTrue();
-        assertThat(BlockingReads.unmark(args)).isFalse();
+        assertThat(BlockingReads.isMarked(args)).isTrue();
+        assertThat(BlockingReads.isMarked(args)).isTrue();
     }
 
     @Test
     void marksArePerInstanceNotPerContent() {
-        // two reads with identical arguments are two commands: consuming one mark must leave the other
+        // two reads with identical arguments are two commands: marking one must not mark the other
         CommandArgs<String, String> first = args();
         CommandArgs<String, String> second = args();
         BlockingReads.mark(first);
+        assertThat(BlockingReads.isMarked(first)).isTrue();
+        assertThat(BlockingReads.isMarked(second)).isFalse();
         BlockingReads.mark(second);
-        assertThat(BlockingReads.unmark(first)).isTrue();
-        assertThat(BlockingReads.unmark(second)).isTrue();
-        assertThat(BlockingReads.unmark(second)).isFalse();
+        assertThat(BlockingReads.isMarked(second)).isTrue();
     }
 
     @Test
     void unmarkedAndNullArgumentsAreNotBlocking() {
-        assertThat(BlockingReads.unmark(args())).isFalse();
-        assertThat(BlockingReads.unmark(null)).isFalse();
+        assertThat(BlockingReads.isMarked(args())).isFalse();
+        assertThat(BlockingReads.isMarked(null)).isFalse();
     }
 
     private static CommandArgs<String, String> args() {

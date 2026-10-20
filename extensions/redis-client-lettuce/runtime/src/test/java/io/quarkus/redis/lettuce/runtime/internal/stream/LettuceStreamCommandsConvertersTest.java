@@ -84,15 +84,15 @@ class LettuceStreamCommandsConvertersTest {
     void xReadArgsMarkTheCommandArgsOnlyWithBlock() {
         CommandArgs<String, String> plain = new CommandArgs<>(StringCodec.UTF8);
         LettuceStreamCommandsConverters.toXReadArgs(new XReadArgs().count(2)).build(plain);
-        assertThat(BlockingReads.unmark(plain)).isFalse();
+        assertThat(BlockingReads.isMarked(plain)).isFalse();
 
         CommandArgs<String, String> blocking = new CommandArgs<>(StringCodec.UTF8);
         LettuceStreamCommandsConverters.toXReadArgs(new XReadArgs().block(Duration.ofSeconds(1))).build(blocking);
-        assertThat(BlockingReads.unmark(blocking)).isTrue();
+        assertThat(BlockingReads.isMarked(blocking)).isTrue();
 
         CommandArgs<String, String> group = new CommandArgs<>(StringCodec.UTF8);
         LettuceStreamCommandsConverters.toXReadArgs(new XReadGroupArgs().block(Duration.ZERO)).build(group);
-        assertThat(BlockingReads.unmark(group)).isTrue();
+        assertThat(BlockingReads.isMarked(group)).isTrue();
     }
 
     @Test

@@ -23,9 +23,9 @@ public final class BlockingReads {
         MARKED.add(new IdentityKey(args, CLEARED));
     }
 
-    public static boolean unmark(CommandArgs<?, ?> args) {
+    public static boolean isMarked(CommandArgs<?, ?> args) {
         expunge();
-        return args != null && MARKED.remove(new IdentityKey(args, null));
+        return args != null && MARKED.contains(new IdentityKey(args, null));
     }
 
     private static void expunge() {

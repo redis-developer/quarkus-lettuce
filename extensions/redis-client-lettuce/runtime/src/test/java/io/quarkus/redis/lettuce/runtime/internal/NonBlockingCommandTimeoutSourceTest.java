@@ -60,18 +60,19 @@ class NonBlockingCommandTimeoutSourceTest {
     }
 
     @Test
-    void theBlockMarkIsConsumedByTheFirstLookup() {
+    void theBlockMarkHoldsForEveryLookupOfTheSameCommand() {
+        // a cluster MOVED/ASK redirect writes the command again, and Lettuce asks for the timeout on each write
         Command<byte[], byte[], String> read = command(CommandType.XREAD, xread(new XReadArgs().block(Duration.ofSeconds(1))));
         assertThat(source.getTimeout(read)).isEqualTo(-1);
-        assertThat(source.getTimeout(read)).isEqualTo(TIMEOUT);
-        assertThat(BlockingReads.unmark(read.getArgs())).isFalse();
+        assertThat(source.getTimeout(read)).isEqualTo(-1);
+        assertThat(source.getTimeout(read)).isEqualTo(-1);
     }
 
     @Test
     void aBlockMarkDoesNotLeakOntoOtherCommandTypes() {
         CommandArgs<byte[], byte[]> args = xread(new XReadArgs().block(Duration.ofSeconds(1)));
         assertThat(source.getTimeout(command(CommandType.XRANGE, args))).isEqualTo(TIMEOUT);
-        assertThat(BlockingReads.unmark(args)).isTrue();
+        assertThat(BlockingReads.isMarked(args)).isTrue();
     }
 
     /**

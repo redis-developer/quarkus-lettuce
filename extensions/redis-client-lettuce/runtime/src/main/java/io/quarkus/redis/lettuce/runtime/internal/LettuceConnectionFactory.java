@@ -590,7 +590,7 @@ public class LettuceConnectionFactory {
                 if (BLOCKING_COMMANDS.contains(type)) {
                     return -1;
                 }
-                if (OPTIONAL_BLOCKING_COMMANDS.contains(type) && BlockingReads.unmark(command.getArgs())) {
+                if (OPTIONAL_BLOCKING_COMMANDS.contains(type) && BlockingReads.isMarked(command.getArgs())) {
                     return -1; // bounded by its own BLOCK duration
                 }
             }
