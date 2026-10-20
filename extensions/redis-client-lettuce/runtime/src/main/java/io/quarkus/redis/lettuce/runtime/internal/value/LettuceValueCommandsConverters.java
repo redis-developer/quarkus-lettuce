@@ -8,13 +8,13 @@ import io.quarkus.redis.datasource.value.GetExArgs;
 import io.quarkus.redis.datasource.value.SetArgs;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 
-public final class LettuceValueCommandsConverters {
+final class LettuceValueCommandsConverters {
 
     private LettuceValueCommandsConverters() {
         // Utility class
     }
 
-    public static io.lettuce.core.SetArgs toLettuceSetArgs(SetArgs quarkus) {
+    static io.lettuce.core.SetArgs toLettuceSetArgs(SetArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.SetArgs() {
             @Override
@@ -24,7 +24,7 @@ public final class LettuceValueCommandsConverters {
         };
     }
 
-    public static io.lettuce.core.GetExArgs toLettuceGetExArgs(GetExArgs quarkus) {
+    static io.lettuce.core.GetExArgs toLettuceGetExArgs(GetExArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.GetExArgs() {
             @Override

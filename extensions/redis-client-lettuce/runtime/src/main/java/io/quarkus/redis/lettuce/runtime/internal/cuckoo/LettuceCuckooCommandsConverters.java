@@ -7,7 +7,7 @@ import io.quarkus.redis.datasource.cuckoo.CfInsertArgs;
 import io.quarkus.redis.datasource.cuckoo.CfReserveArgs;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 
-class LettuceCuckooCommandsConverters {
+final class LettuceCuckooCommandsConverters {
 
     private LettuceCuckooCommandsConverters() {
         // Utility class
