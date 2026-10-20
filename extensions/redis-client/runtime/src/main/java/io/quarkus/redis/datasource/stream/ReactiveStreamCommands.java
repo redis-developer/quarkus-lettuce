@@ -4,7 +4,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
-import io.quarkus.redis.datasource.ReactiveRedisCommands;
 import io.smallrye.mutiny.Uni;
 
 /**
@@ -19,7 +18,7 @@ import io.smallrye.mutiny.Uni;
  * @param <F> the key type of the messages, generally {@link String}
  * @param <V> the value type of the messages
  */
-public interface ReactiveStreamCommands<K, F, V> extends ReactiveRedisCommands {
+public interface ReactiveStreamCommands<K, F, V> {
 
     /**
      * Execute the command <a href="https://redis.io/commands/xack">XACK</a>.

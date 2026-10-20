@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import io.quarkus.redis.datasource.ReactiveRedisCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.stream.PendingMessage;
@@ -54,7 +55,9 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
 
     @Test
     void getDataSource() {
-        assertThat(reactiveDs).isEqualTo(reactiveStream.getDataSource());
+        // ReactiveStreamCommands does not expose getDataSource upstream; the Lettuce impl adds ReactiveRedisCommands
+        assertThat(reactiveStream).isInstanceOfSatisfying(ReactiveRedisCommands.class,
+                commands -> assertThat(commands.getDataSource()).isEqualTo(reactiveDs));
         assertThat(blockingDs).isEqualTo(blockingStream.getDataSource());
     }
 

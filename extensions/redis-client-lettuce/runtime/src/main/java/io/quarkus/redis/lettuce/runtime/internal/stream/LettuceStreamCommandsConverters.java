@@ -7,6 +7,7 @@ import java.util.List;
 import io.lettuce.core.Range;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandArgs;
+import io.quarkus.redis.datasource.RedisCommandExtraArguments;
 import io.quarkus.redis.datasource.stream.StreamRange;
 import io.quarkus.redis.datasource.stream.XAddArgs;
 import io.quarkus.redis.datasource.stream.XClaimArgs;
@@ -64,9 +65,13 @@ public final class LettuceStreamCommandsConverters {
         return args;
     }
 
+    public static boolean blocks(RedisCommandExtraArguments args) {
+        return args != null && args.toArgs().contains("BLOCK");
+    }
+
     public static io.lettuce.core.XReadArgs toXReadArgs(XReadArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
-        boolean blocking = quarkus.block() != null;
+        boolean blocking = tokens.contains("BLOCK");
         return new io.lettuce.core.XReadArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
@@ -80,7 +85,7 @@ public final class LettuceStreamCommandsConverters {
 
     public static io.lettuce.core.XReadArgs toXReadArgs(XReadGroupArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
-        boolean blocking = quarkus.block() != null;
+        boolean blocking = tokens.contains("BLOCK");
         return new io.lettuce.core.XReadArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {
