@@ -57,6 +57,8 @@ import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveSetCommandsI
 import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveTransactionalSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSortedSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveTransactionalSortedSetCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.stream.LettuceReactiveStreamCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.stream.LettuceReactiveTransactionalStreamCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.topk.LettuceReactiveTopKCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.topk.LettuceReactiveTransactionalTopKCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveTransactionalValueCommandsImpl;
@@ -211,7 +213,12 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     @Override
     public <K, F, V> ReactiveTransactionalStreamCommands<K, F, V> stream(Class<K> redisKeyType, Class<F> typeOfField,
             Class<V> typeOfValue) {
-        throw groupNotImplemented("stream");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(typeOfField, "typeOfField");
+        nonNull(typeOfValue, "typeOfValue");
+        LettuceReactiveStreamCommandsImpl<K, F, V> reactiveStream = (LettuceReactiveStreamCommandsImpl<K, F, V>) reactive
+                .stream(redisKeyType, typeOfField, typeOfValue);
+        return new LettuceReactiveTransactionalStreamCommandsImpl<>(this, reactiveStream, tx);
     }
 
     @Override

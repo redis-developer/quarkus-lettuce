@@ -62,6 +62,7 @@ import io.quarkus.redis.lettuce.runtime.internal.pubsub.LettuceReactivePubSubCom
 import io.quarkus.redis.lettuce.runtime.internal.search.LettuceReactiveSearchCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSortedSetCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.stream.LettuceReactiveStreamCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.topk.LettuceReactiveTopKCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveValueCommandsImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
@@ -552,13 +553,20 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K, F, V> ReactiveStreamCommands<K, F, V> stream(Class<K> redisKeyType, Class<F> fieldType, Class<V> valueType) {
-        throw groupNotImplemented("stream");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(fieldType, "fieldType");
+        nonNull(valueType, "valueType");
+        return new LettuceReactiveStreamCommandsImpl<>(this, connection, blockingPool(), redisKeyType, fieldType, valueType);
     }
 
     @Override
     public <K, F, V> ReactiveStreamCommands<K, F, V> stream(TypeReference<K> redisKeyType, TypeReference<F> fieldType,
             TypeReference<V> valueType) {
-        throw groupNotImplemented("stream");
+        nonNull(redisKeyType, "redisKeyType");
+        nonNull(fieldType, "fieldType");
+        nonNull(valueType, "valueType");
+        return new LettuceReactiveStreamCommandsImpl<>(this, connection, blockingPool(), redisKeyType.getType(),
+                fieldType.getType(), valueType.getType());
     }
 
     @Override

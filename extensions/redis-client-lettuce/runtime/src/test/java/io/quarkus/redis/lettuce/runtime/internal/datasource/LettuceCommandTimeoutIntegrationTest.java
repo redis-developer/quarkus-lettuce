@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,6 +12,10 @@ import org.junit.jupiter.api.Test;
 
 import io.lettuce.core.RedisCommandTimeoutException;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.stream.StreamMessage;
+import io.quarkus.redis.datasource.stream.XGroupCreateArgs;
+import io.quarkus.redis.datasource.stream.XReadArgs;
+import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
@@ -72,6 +77,25 @@ class LettuceCommandTimeoutIntegrationTest extends CommandsTestBase {
         // API's own 5s bound.
         assertThatThrownBy(() -> ds.execute("WAIT", "1", "0"))
                 .isInstanceOf(RedisCommandTimeoutException.class);
+    }
+
+    @Test
+    void blockingStreamReadOutlivingTheCommandTimeoutStillCompletes() {
+        // XREAD/XREADGROUP with BLOCK are bounded by their own BLOCK duration, like BLPOP by its timeout:
+        // the client-side timer must not fire first.
+        Duration block = COMMAND_TIMEOUT.multipliedBy(2);
+        var stream = ds.stream(String.class);
+        stream.xgroupCreate(key, "g1", "$", new XGroupCreateArgs().mkstream());
+
+        long start = System.nanoTime();
+        List<StreamMessage<String, String, String>> read = stream.xread(key, "$", new XReadArgs().block(block));
+        assertThat(read).isEmpty();
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(block.minusMillis(50));
+
+        start = System.nanoTime();
+        read = stream.xreadgroup("g1", "c1", key, ">", new XReadGroupArgs().block(block));
+        assertThat(read).isEmpty();
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(block.minusMillis(50));
     }
 
     private static void sleep(Duration duration) {

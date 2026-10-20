@@ -1340,9 +1340,9 @@ than trusting the configured order, so the master need not be the first host.
 * The topology is discovered when a connection is opened and kept for its lifetime: it is not refreshed
 periodically, and `topology-cache-ttl` has no effect. Use a Sentinel client when the master can change.
 
-The key, value (string), hash, list, set, sorted set, bitmap, hyperloglog, geo, pub/sub, JSON, search, autosuggest, bloom, cuckoo,
+The key, value (string), hash, list, set, sorted set, bitmap, hyperloglog, geo, stream, pub/sub, JSON, search, autosuggest, bloom, cuckoo,
 count-min and top-k command groups are implemented on the Lettuce backend, including their transactional variants (excluding pub/sub).
-The other groups (stream, graph and time series) are not implemented yet and throw an
+The other groups (graph and time series) are not implemented yet and throw an
 `UnsupportedOperationException` when requested from a data source.
 
 The search commands are translated to the Lettuce search API, which does not expose every option of the Vert.x
@@ -1374,7 +1374,8 @@ metrics keep using it. This is transitional; a Lettuce-based health check and me
 === Connection pooling and blocking commands
 
 Ordinary commands share one multiplexed, pipelined connection per client, Lettuce's intended design.
-Blocking commands instead borrow a connection, for their duration, from a bounded pool
+Blocking commands (`BLPOP`, `BZPOPMIN` and the other blocking list and sorted set commands, and `XREAD` and
+`XREADGROUP` when `BLOCK` is set) instead borrow a connection, for their duration, from a bounded pool
 sized by `quarkus.redis.max-pool-size` (default `6`), with up to `quarkus.redis.max-pool-waiting` (default
 `24`) additional callers allowed to queue before a further caller fails immediately. This keeps a blocked
 consumer from starving every other command on the same data source. `withConnection(...)` and
@@ -1414,6 +1415,15 @@ subscriber, but the subscription goes on and `onEnd` is not called, where the Ve
 A blocking command issued from inside `withConnection(...)` runs on that pinned connection directly: it
 does not borrow a second connection from the pool, and it blocks that connection for its own duration, as
 it would without pooling.
+
+As on the Vert.x backend, a borrowed connection goes back to the pool only when Redis answers the blocking
+command, not when the caller stops waiting: the blocking API gives up after `quarkus.redis.timeout` and a
+reactive subscriber can cancel, but neither unblocks the command on the server, so the connection stays out
+of the pool until the command's own duration elapses or a value arrives. Keep that duration (the `BLPOP`
+timeout, the `BLOCK` of `XREAD`) below `quarkus.redis.timeout` when using the blocking API, and only block
+indefinitely (a zero duration) from the reactive API, where the subscriber keeps waiting for the value: a
+blocked command nobody waits for holds its connection until a value arrives, and `max-pool-size` of them
+exhaust the pool.
 
 The extension also exposes the Lettuce client itself as CDI beans for every client that is injected through a
 Lettuce type (using `@RedisClientName` for named clients): `io.lettuce.core.RedisClient` and
