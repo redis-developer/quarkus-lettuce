@@ -467,29 +467,23 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     }
 
     static List<JsonArray> decodeJsonArrays(List<String> raw) {
-        List<JsonArray> list = new ArrayList<>();
-        for (String item : orEmpty(raw)) {
-            list.add(item == null ? null : new JsonArray(item));
-        }
-        return list;
+        return decodeList(raw, item -> item == null ? null : new JsonArray(item));
     }
 
     static <T> List<T> decodeJsonValues(List<String> raw, Class<T> clazz) {
-        List<T> list = new ArrayList<>();
-        for (String item : orEmpty(raw)) {
-            list.add(item == null ? null : Json.decodeValue(item, clazz));
-        }
-        return list;
+        return decodeList(raw, item -> item == null ? null : Json.decodeValue(item, clazz));
     }
 
     static List<List<String>> decodeObjKeys(List<byte[]> raw) {
         List<List<String>> list = new ArrayList<>();
         List<String> keys = new ArrayList<>();
-        for (byte[] item : orEmpty(raw)) {
-            if (item == null) {
-                list.add(null);
-            } else {
-                keys.add(new String(item, StandardCharsets.UTF_8));
+        if (raw != null) {
+            for (byte[] item : raw) {
+                if (item == null) {
+                    list.add(null);
+                } else {
+                    keys.add(new String(item, StandardCharsets.UTF_8));
+                }
             }
         }
         list.add(keys);

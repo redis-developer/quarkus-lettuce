@@ -16,12 +16,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveBloomCommands}.
- *
- * @param <K> the key type
- * @param <V> the value type
- */
 public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveBloomCommands<K, V> {
 

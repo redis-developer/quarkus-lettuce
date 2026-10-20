@@ -84,7 +84,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
 
     LettuceCommand<byte[], V> _get(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.get(marshaller.encode(key)), this::decodeV);
+        return LettuceCommand.of(() -> async.get(marshaller.encode(key)), this::decodeValue);
     }
 
     @Override
@@ -94,7 +94,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
 
     LettuceCommand<byte[], V> _getdel(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.getdel(marshaller.encode(key)), this::decodeV);
+        return LettuceCommand.of(() -> async.getdel(marshaller.encode(key)), this::decodeValue);
     }
 
     @Override
@@ -111,7 +111,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         nonNull(key, "key");
         nonNull(args, "args");
         io.lettuce.core.GetExArgs lettuceArgs = LettuceValueCommandsConverters.toLettuceGetExArgs(args);
-        return LettuceCommand.of(() -> async.getex(marshaller.encode(key), lettuceArgs), this::decodeV);
+        return LettuceCommand.of(() -> async.getex(marshaller.encode(key), lettuceArgs), this::decodeValue);
     }
 
     @Override
@@ -134,7 +134,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     LettuceCommand<byte[], V> _getset(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return LettuceCommand.of(() -> async.getset(marshaller.encode(key), marshaller.encode(value)), this::decodeV);
+        return LettuceCommand.of(() -> async.getset(marshaller.encode(key), marshaller.encode(value)), this::decodeValue);
     }
 
     @Override
@@ -201,7 +201,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     final LettuceCommand<List<KeyValue<byte[], byte[]>>, Map<K, V>> _mget(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return LettuceCommand.of(() -> async.mget(marshaller.encodeAsArray(keys)), r -> decodeAsOrderedMap(keys, r));
+        return LettuceCommand.of(() -> async.mget(marshaller.encodeAsArray(keys)), r -> decodeOrderedMap(keys, r));
     }
 
     @Override
@@ -286,7 +286,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     LettuceCommand<byte[], V> _setGet(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return LettuceCommand.of(() -> async.setGet(marshaller.encode(key), marshaller.encode(value)), this::decodeV);
+        return LettuceCommand.of(() -> async.setGet(marshaller.encode(key), marshaller.encode(value)), this::decodeValue);
     }
 
     @Override
@@ -306,7 +306,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         nonNull(setArgs, "setArgs");
         io.lettuce.core.SetArgs lettuceArgs = LettuceValueCommandsConverters.toLettuceSetArgs(setArgs);
         return LettuceCommand.of(() -> async.setGet(marshaller.encode(key), marshaller.encode(value), lettuceArgs),
-                this::decodeV);
+                this::decodeValue);
     }
 
     @Override

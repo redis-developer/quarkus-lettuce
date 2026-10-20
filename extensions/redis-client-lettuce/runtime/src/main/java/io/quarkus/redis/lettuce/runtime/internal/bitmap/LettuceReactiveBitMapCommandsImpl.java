@@ -16,11 +16,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveBitMapCommands}.
- *
- * @param <K> the key type
- */
 public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommands<K, K>
         implements ReactiveBitMapCommands<K> {
 
@@ -76,7 +71,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
         nonNull(key, "key");
         nonNull(bitFieldArgs, "bitFieldArgs");
         return LettuceCommand.of(() -> async.bitfield(marshaller.encode(key),
-                LettuceBitMapCommandsConverters.toLettuceBitFieldArgs(bitFieldArgs)));
+                LettuceBitMapCommandsConverters.toLettuceBitFieldArgs(bitFieldArgs)), AbstractLettuceCommands::decodeList);
     }
 
     @Override

@@ -53,7 +53,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(key, "key");
         nonNull(item, "item");
         return LettuceCommand.of(() -> async.topKAdd(marshaller.encode(key), marshaller.encode(item)),
-                list -> decodeV(list.get(0)));
+                list -> decodeValue(list.get(0)));
     }
 
     @SafeVarargs
@@ -83,7 +83,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(item, "item");
         positive(increment, "increment");
         return LettuceCommand.of(() -> async.topKIncrBy(marshaller.encode(key), marshaller.encode(item), increment),
-                list -> decodeV(list.get(0)));
+                list -> decodeValue(list.get(0)));
     }
 
     @Override
@@ -174,8 +174,8 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         return LettuceCommand.discarding(() -> async.topKReserve(marshaller.encode(key), topk, args));
     }
 
-    private V decodeV(String item) {
-        return item == null ? null : decodeV(item.getBytes(StandardCharsets.UTF_8));
+    private V decodeValue(String item) {
+        return item == null ? null : decodeValue(item.getBytes(StandardCharsets.UTF_8));
     }
 
     @SuppressWarnings("unchecked")
@@ -193,7 +193,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
     private Map<V, V> zipDropped(List<V> items, List<String> dropped) {
         Map<V, V> result = new LinkedHashMap<>();
         for (int i = 0; i < items.size(); i++) {
-            result.put(items.get(i), decodeV(dropped.get(i)));
+            result.put(items.get(i), decodeValue(dropped.get(i)));
         }
         return result;
     }
@@ -201,7 +201,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
     private List<V> decodeListOfStrings(List<String> items) {
         List<V> result = new ArrayList<>(items.size());
         for (String item : items) {
-            result.add(decodeV(item));
+            result.add(decodeValue(item));
         }
         return result;
     }
@@ -209,7 +209,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
     private Map<V, Integer> decodeTopKListValueList(List<TopKListValue> values) {
         Map<V, Integer> result = new LinkedHashMap<>();
         for (TopKListValue value : values) {
-            result.put(decodeV(value.getName()), value.getCount().intValue());
+            result.put(decodeValue(value.getName()), value.getCount().intValue());
         }
         return result;
     }

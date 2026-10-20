@@ -362,7 +362,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     }
 
     LettuceCommand<byte[], K> _randomkey() {
-        return LettuceCommand.of(async::randomkey, this::decodeK);
+        return LettuceCommand.of(async::randomkey, this::decodeKey);
     }
 
     @Override

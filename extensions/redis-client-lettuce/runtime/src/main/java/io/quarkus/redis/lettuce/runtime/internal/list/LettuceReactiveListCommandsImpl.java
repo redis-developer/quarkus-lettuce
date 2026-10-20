@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Function;
 
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -76,7 +77,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
                 return cmds.blmove(marshaller.encode(source), marshaller.encode(destination), args, timeout.getSeconds());
             }
             return cmds.blmove(marshaller.encode(source), marshaller.encode(destination), args, toFractionalSeconds(timeout));
-        }, this::decodeV);
+        }, this::decodeValue);
     }
 
     @SafeVarargs
@@ -206,7 +207,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
                 return cmds.brpoplpush(timeout.getSeconds(), marshaller.encode(source), marshaller.encode(destination));
             }
             return cmds.brpoplpush(toFractionalSeconds(timeout), marshaller.encode(source), marshaller.encode(destination));
-        }, this::decodeV);
+        }, this::decodeValue);
     }
 
     @Override
@@ -216,7 +217,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     LettuceCommand<byte[], V> _lindex(K key, long index) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.lindex(marshaller.encode(key), index), this::decodeV);
+        return LettuceCommand.of(() -> async.lindex(marshaller.encode(key), index), this::decodeValue);
     }
 
     @Override
@@ -267,7 +268,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(positionInDest, "positionInDest");
         io.lettuce.core.LMoveArgs args = LettuceListCommandsConverters.toLettuceLMoveArgs(positionInSource, positionInDest);
         return LettuceCommand.of(() -> async.lmove(marshaller.encode(source), marshaller.encode(destination), args),
-                this::decodeV);
+                this::decodeValue);
     }
 
     @SafeVarargs
@@ -310,7 +311,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     LettuceCommand<byte[], V> _lpop(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.lpop(marshaller.encode(key)), this::decodeV);
+        return LettuceCommand.of(() -> async.lpop(marshaller.encode(key)), this::decodeValue);
     }
 
     @Override
@@ -321,7 +322,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
     LettuceCommand<List<byte[]>, List<V>> _lpop(K key, int count) {
         nonNull(key, "key");
         positive(count, "count");
-        return LettuceCommand.of(() -> async.lpop(marshaller.encode(key), count), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.lpop(marshaller.encode(key), count), this::decodeListOfValues);
     }
 
     @Override
@@ -357,7 +358,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(element, "element");
         positiveOrZero(count, "count"); // 0 -> All matches
         return LettuceCommand.of(() -> async.lpos(marshaller.encode(key), marshaller.encode(element), count),
-                AbstractLettuceCommands::orEmpty);
+                r -> decodeList(r, Function.identity()));
     }
 
     @Override
@@ -371,7 +372,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         positiveOrZero(count, "count"); // 0 -> All matches
         io.lettuce.core.LPosArgs lettuceArgs = LettuceListCommandsConverters.toLettuceLPosArgs(args);
         return LettuceCommand.of(() -> async.lpos(marshaller.encode(key), marshaller.encode(element), count, lettuceArgs),
-                AbstractLettuceCommands::orEmpty);
+                r -> decodeList(r, Function.identity()));
     }
 
     @SafeVarargs
@@ -409,7 +410,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     LettuceCommand<List<byte[]>, List<V>> _lrange(K key, long start, long stop) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.lrange(marshaller.encode(key), start, stop), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.lrange(marshaller.encode(key), start, stop), this::decodeListOfValues);
     }
 
     @Override
@@ -451,7 +452,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     LettuceCommand<byte[], V> _rpop(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.rpop(marshaller.encode(key)), this::decodeV);
+        return LettuceCommand.of(() -> async.rpop(marshaller.encode(key)), this::decodeValue);
     }
 
     @Override
@@ -461,7 +462,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     LettuceCommand<List<byte[]>, List<V>> _rpop(K key, int count) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.rpop(marshaller.encode(key), count), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.rpop(marshaller.encode(key), count), this::decodeListOfValues);
     }
 
     @Deprecated
@@ -474,7 +475,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(source, "source");
         nonNull(destination, "destination");
         return LettuceCommand.of(() -> async.rpoplpush(marshaller.encode(source), marshaller.encode(destination)),
-                this::decodeV);
+                this::decodeValue);
     }
 
     @SafeVarargs
@@ -519,7 +520,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(key, "key");
         nonNull(sortArguments, "sortArguments");
         io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(sortArguments);
-        return LettuceCommand.of(() -> async.sort(marshaller.encode(key), lettuceArgs), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.sort(marshaller.encode(key), lettuceArgs), this::decodeListOfValues);
     }
 
     @Override
@@ -544,7 +545,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         if (kv == null || kv.isEmpty()) {
             return null;
         }
-        return KeyValue.of(decodeK(kv.getKey()), decodeV(kv.getValueOrElse(null)));
+        return KeyValue.of(decodeKey(kv.getKey()), decodeValue(kv.getValueOrElse(null)));
     }
 
     private KeyValue<K, V> toFirstKeyValue(io.lettuce.core.KeyValue<byte[], List<byte[]>> kv) {
@@ -555,7 +556,7 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         if (values == null || values.isEmpty()) {
             return null;
         }
-        return KeyValue.of(decodeK(kv.getKey()), decodeV(values.get(0)));
+        return KeyValue.of(decodeKey(kv.getKey()), decodeValue(values.get(0)));
     }
 
     private List<KeyValue<K, V>> toKeyValueList(io.lettuce.core.KeyValue<byte[], List<byte[]>> kv) {
@@ -566,10 +567,10 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
         if (values == null) {
             return Collections.emptyList();
         }
-        K key = decodeK(kv.getKey());
+        K key = decodeKey(kv.getKey());
         List<KeyValue<K, V>> result = new ArrayList<>(values.size());
         for (byte[] value : values) {
-            result.add(KeyValue.of(key, decodeV(value)));
+            result.add(KeyValue.of(key, decodeValue(value)));
         }
         return result;
     }

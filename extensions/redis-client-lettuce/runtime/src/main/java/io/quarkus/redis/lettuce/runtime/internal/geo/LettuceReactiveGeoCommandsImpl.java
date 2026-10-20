@@ -42,12 +42,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveGeoCommands}.
- *
- * @param <K> the key type
- * @param <V> the value type
- */
 public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveGeoCommands<K, V> {
 
@@ -116,7 +110,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         validateLatitude(latitude);
         io.lettuce.core.GeoAddArgs lettuceArgs = LettuceGeoCommandsConverters.toGeoAddArgs(args);
         return LettuceCommand.of(() -> async.geoadd(marshaller.encode(key), longitude, latitude, marshaller.encode(member),
-                lettuceArgs), AbstractLettuceCommands::asBoolean);
+                lettuceArgs), AbstractLettuceCommands::toBoolean);
     }
 
     @Override
@@ -367,21 +361,17 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         }
         Set<V> decoded = new LinkedHashSet<>(members.size());
         for (byte[] member : members) {
-            decoded.add(decodeV(member));
+            decoded.add(decodeValue(member));
         }
         return decoded;
     }
 
     private List<GeoValue<V>> decodeGeoValues(List<GeoWithin<byte[]>> values) {
-        List<GeoValue<V>> decoded = new ArrayList<>();
-        for (GeoWithin<byte[]> within : orEmpty(values)) {
-            decoded.add(decodeGeoValue(within));
-        }
-        return decoded;
+        return decodeList(values, this::decodeGeoValue);
     }
 
     private GeoValue<V> decodeGeoValue(GeoWithin<byte[]> within) {
-        V member = decodeV(within.getMember());
+        V member = decodeValue(within.getMember());
         OptionalDouble distance = within.getDistance() == null ? OptionalDouble.empty()
                 : OptionalDouble.of(within.getDistance());
         OptionalLong geohash = within.getGeohash() == null ? OptionalLong.empty() : OptionalLong.of(within.getGeohash());

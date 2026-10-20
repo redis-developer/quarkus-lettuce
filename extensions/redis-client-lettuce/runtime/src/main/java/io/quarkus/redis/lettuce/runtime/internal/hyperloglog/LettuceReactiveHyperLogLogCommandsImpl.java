@@ -48,7 +48,7 @@ public class LettuceReactiveHyperLogLogCommandsImpl<K, V> extends AbstractLettuc
         notNullOrEmpty(values, "values");
         doesNotContainNull(values, "values");
         return LettuceCommand.of(() -> async.pfadd(marshaller.encode(key), marshaller.encodeAsArray(values)),
-                AbstractLettuceCommands::asBoolean);
+                AbstractLettuceCommands::toBoolean);
     }
 
     @SafeVarargs

@@ -4,10 +4,8 @@ import static io.quarkus.redis.runtime.datasource.Validation.notNullOrBlank;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
-import java.util.Collections;
 import java.util.List;
 
-import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.search.arguments.SugAddArgs;
 import io.lettuce.core.search.arguments.SugGetArgs;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -15,17 +13,11 @@ import io.quarkus.redis.datasource.autosuggest.GetArgs;
 import io.quarkus.redis.datasource.autosuggest.ReactiveAutoSuggestCommands;
 import io.quarkus.redis.datasource.autosuggest.Suggestion;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
-import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveAutoSuggestCommands}.
- *
- * @param <K> the key type
- */
 public class LettuceReactiveAutoSuggestCommandsImpl<K> extends AbstractLettuceCommands<K, K>
         implements ReactiveAutoSuggestCommands<K> {
 
@@ -88,7 +80,7 @@ public class LettuceReactiveAutoSuggestCommandsImpl<K> extends AbstractLettuceCo
         nonNull(key, "key");
         notNullOrBlank(prefix, "prefix");
         nonNull(args, "args");
-        SugGetArgs lettuceArgs = toLettuceSugGetArgs(args);
+        SugGetArgs lettuceArgs = LettuceAutoSuggestCommandsConverters.toLettuceSugGetArgs(args);
         return LettuceCommand.of(() -> async.ftSugget(marshaller.encode(key), prefix, lettuceArgs), this::decodeSuggestionList);
     }
 
@@ -102,20 +94,6 @@ public class LettuceReactiveAutoSuggestCommandsImpl<K> extends AbstractLettuceCo
         return LettuceCommand.of(() -> async.ftSuglen(marshaller.encode(key)));
     }
 
-    private SugGetArgs toLettuceSugGetArgs(GetArgs quarkus) {
-        List<Object> tokens = quarkus.toArgs();
-        SugGetArgs lettuceArgs = new SugGetArgs() {
-            @Override
-            public void build(CommandArgs<?, ?> args) {
-                ArgReplay.replay(tokens, args);
-            }
-        };
-        if (quarkus.hasScores()) {
-            lettuceArgs.withScores();
-        }
-        return lettuceArgs;
-    }
-
     private Suggestion decodeSuggestion(io.lettuce.core.search.Suggestion lettuce) {
         if (lettuce.getScore() == null) {
             return new Suggestion(lettuce.getValue());
@@ -124,10 +102,7 @@ public class LettuceReactiveAutoSuggestCommandsImpl<K> extends AbstractLettuceCo
     }
 
     private List<Suggestion> decodeSuggestionList(List<io.lettuce.core.search.Suggestion> suggestions) {
-        if (suggestions == null || suggestions.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return suggestions.stream().map(this::decodeSuggestion).toList();
+        return decodeList(suggestions, this::decodeSuggestion);
     }
 
 }

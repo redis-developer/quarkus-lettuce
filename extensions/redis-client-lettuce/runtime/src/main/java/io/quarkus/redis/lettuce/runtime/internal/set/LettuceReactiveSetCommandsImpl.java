@@ -9,6 +9,7 @@ import java.lang.reflect.Type;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
@@ -203,7 +204,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(members, "members");
         doesNotContainNull(members, "members");
         return LettuceCommand.of(() -> async.smismember(marshaller.encode(key), marshaller.encodeAsArray(members)),
-                AbstractLettuceCommands::orEmpty);
+                r -> decodeList(r, Function.identity()));
     }
 
     @Override
@@ -226,7 +227,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     LettuceCommand<byte[], V> _spop(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.spop(marshaller.encode(key)), this::decodeV);
+        return LettuceCommand.of(() -> async.spop(marshaller.encode(key)), this::decodeValue);
     }
 
     @Override
@@ -247,7 +248,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     LettuceCommand<byte[], V> _srandmember(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.srandmember(marshaller.encode(key)), this::decodeV);
+        return LettuceCommand.of(() -> async.srandmember(marshaller.encode(key)), this::decodeValue);
     }
 
     @Override
@@ -257,7 +258,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     LettuceCommand<List<byte[]>, List<V>> _srandmember(K key, int count) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.srandmember(marshaller.encode(key), count), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.srandmember(marshaller.encode(key), count), this::decodeListOfValues);
     }
 
     @SafeVarargs
@@ -311,7 +312,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     @Override
     public ReactiveSScanCursor<V> sscan(K key) {
         nonNull(key, "key");
-        return new LettuceReactiveSScanCursorImpl<>(async, marshaller.encode(key), this::decodeListOfValue);
+        return new LettuceReactiveSScanCursorImpl<>(async, marshaller.encode(key), this::decodeListOfValues);
     }
 
     @Override
@@ -319,7 +320,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(key, "key");
         nonNull(scanArgs, "scanArgs");
         return new LettuceReactiveSScanCursorImpl<>(async, marshaller.encode(key),
-                LettuceCommonConverters.toLettuceScanArgs(scanArgs), this::decodeListOfValue);
+                LettuceCommonConverters.toLettuceScanArgs(scanArgs), this::decodeListOfValues);
     }
 
     @Override
@@ -336,7 +337,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(key, "key");
         nonNull(sortArguments, "sortArguments");
         io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(sortArguments);
-        return LettuceCommand.of(() -> async.sort(marshaller.encode(key), lettuceArgs), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.sort(marshaller.encode(key), lettuceArgs), this::decodeListOfValues);
     }
 
     @Override
@@ -360,7 +361,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     private Set<V> decodeSetOfValue(Set<byte[]> members) {
         Set<V> decoded = new LinkedHashSet<>(members.size());
         for (byte[] member : members) {
-            decoded.add(decodeV(member));
+            decoded.add(decodeValue(member));
         }
         return decoded;
     }
