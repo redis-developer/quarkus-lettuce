@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -13,10 +14,10 @@ import io.lettuce.core.protocol.Command;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandType;
 import io.lettuce.core.protocol.TransactionalCommand;
+import io.quarkus.redis.datasource.RedisCommandExtraArguments;
 import io.quarkus.redis.datasource.stream.XReadArgs;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionFactory.NonBlockingCommandTimeoutSource;
-import io.quarkus.redis.lettuce.runtime.internal.stream.LettuceStreamCommandsConverters;
 
 class NonBlockingCommandTimeoutSourceTest {
 
@@ -75,19 +76,24 @@ class NonBlockingCommandTimeoutSourceTest {
         assertThat(BlockingReads.isMarked(args)).isTrue();
     }
 
-    /**
-     * The arguments as {@code RedisCommandBuilder.xread} builds them: the converted options, then the streams.
-     */
     private static CommandArgs<byte[], byte[]> xread(XReadArgs quarkus) {
-        CommandArgs<byte[], byte[]> args = args();
-        LettuceStreamCommandsConverters.toXReadArgs(quarkus).build(args);
+        CommandArgs<byte[], byte[]> args = options(args(), quarkus);
         return args.add("STREAMS").addKey(bytes("k")).add("0-0");
     }
 
     private static CommandArgs<byte[], byte[]> xreadgroup(XReadGroupArgs quarkus) {
-        CommandArgs<byte[], byte[]> args = args().add("GROUP").add(bytes("g1")).add(bytes("c1"));
-        LettuceStreamCommandsConverters.toXReadArgs(quarkus).build(args);
+        CommandArgs<byte[], byte[]> args = options(args().add("GROUP").add(bytes("g1")).add(bytes("c1")), quarkus);
         return args.add("STREAMS").addKey(bytes("k")).add(">");
+    }
+
+    private static CommandArgs<byte[], byte[]> options(CommandArgs<byte[], byte[]> args,
+            RedisCommandExtraArguments quarkus) {
+        List<Object> tokens = quarkus.toArgs();
+        ArgReplay.replay(tokens, args);
+        if (tokens.contains("BLOCK")) {
+            BlockingReads.mark(args);
+        }
+        return args;
     }
 
     private static CommandArgs<byte[], byte[]> args() {
