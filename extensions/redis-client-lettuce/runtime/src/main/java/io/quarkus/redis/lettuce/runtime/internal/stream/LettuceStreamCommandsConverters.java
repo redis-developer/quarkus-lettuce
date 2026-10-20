@@ -20,13 +20,13 @@ import io.quarkus.redis.datasource.stream.XTrimArgs;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 import io.quarkus.redis.lettuce.runtime.internal.BlockingReads;
 
-public final class LettuceStreamCommandsConverters {
+final class LettuceStreamCommandsConverters {
 
     private LettuceStreamCommandsConverters() {
         // Utility class
     }
 
-    public static io.lettuce.core.XAddArgs toXAddArgs(XAddArgs quarkus) {
+    static io.lettuce.core.XAddArgs toXAddArgs(XAddArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.XAddArgs() {
             @Override
@@ -36,7 +36,7 @@ public final class LettuceStreamCommandsConverters {
         };
     }
 
-    public static io.lettuce.core.XClaimArgs toXClaimArgs(XClaimArgs quarkus, Duration minIdleTime) {
+    static io.lettuce.core.XClaimArgs toXClaimArgs(XClaimArgs quarkus, Duration minIdleTime) {
         List<Object> tokens = quarkus.toArgs();
         io.lettuce.core.XClaimArgs lettuce = new io.lettuce.core.XClaimArgs() {
             @Override
@@ -47,7 +47,7 @@ public final class LettuceStreamCommandsConverters {
         return lettuce.minIdleTime(minIdleTime);
     }
 
-    public static io.lettuce.core.XGroupCreateArgs toXGroupCreateArgs(XGroupCreateArgs quarkus) {
+    static io.lettuce.core.XGroupCreateArgs toXGroupCreateArgs(XGroupCreateArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.XGroupCreateArgs() {
             @Override
@@ -57,7 +57,7 @@ public final class LettuceStreamCommandsConverters {
         };
     }
 
-    public static CommandArgs<byte[], byte[]> toXGroupSetIdCommandArgs(byte[] key, byte[] group, String from,
+    static CommandArgs<byte[], byte[]> toXGroupSetIdCommandArgs(byte[] key, byte[] group, String from,
             XGroupSetIdArgs quarkus) {
         CommandArgs<byte[], byte[]> args = new CommandArgs<>(ByteArrayCodec.INSTANCE)
                 .add("SETID").addKey(key).addKey(group).add(from);
@@ -65,11 +65,11 @@ public final class LettuceStreamCommandsConverters {
         return args;
     }
 
-    public static boolean blocks(RedisCommandExtraArguments args) {
+    static boolean blocks(RedisCommandExtraArguments args) {
         return args != null && args.toArgs().contains("BLOCK");
     }
 
-    public static io.lettuce.core.XReadArgs toXReadArgs(XReadArgs quarkus) {
+    static io.lettuce.core.XReadArgs toXReadArgs(XReadArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         boolean blocking = tokens.contains("BLOCK");
         return new io.lettuce.core.XReadArgs() {
@@ -83,7 +83,7 @@ public final class LettuceStreamCommandsConverters {
         };
     }
 
-    public static io.lettuce.core.XReadArgs toXReadArgs(XReadGroupArgs quarkus) {
+    static io.lettuce.core.XReadArgs toXReadArgs(XReadGroupArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         boolean blocking = tokens.contains("BLOCK");
         return new io.lettuce.core.XReadArgs() {
@@ -97,7 +97,7 @@ public final class LettuceStreamCommandsConverters {
         };
     }
 
-    public static io.lettuce.core.XTrimArgs toXTrimArgs(XTrimArgs quarkus) {
+    static io.lettuce.core.XTrimArgs toXTrimArgs(XTrimArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.XTrimArgs() {
             @Override
@@ -107,12 +107,12 @@ public final class LettuceStreamCommandsConverters {
         };
     }
 
-    public static Range<String> toRange(StreamRange range) {
+    static Range<String> toRange(StreamRange range) {
         List<Object> tokens = range.toArgs();
         return Range.from(lowerBoundary(tokens.get(0)), upperBoundary(tokens.get(1)));
     }
 
-    public static Range<String> toReverseRange(StreamRange range) {
+    static Range<String> toReverseRange(StreamRange range) {
         List<Object> tokens = range.toArgs();
         return Range.from(lowerBoundary(tokens.get(1)), upperBoundary(tokens.get(0)));
     }
@@ -127,7 +127,7 @@ public final class LettuceStreamCommandsConverters {
         return "+".equals(bound) ? Range.Boundary.unbounded() : Range.Boundary.including(bound);
     }
 
-    public static io.lettuce.core.XPendingArgs<byte[]> toXPendingArgs(byte[] group, StreamRange range, int count,
+    static io.lettuce.core.XPendingArgs<byte[]> toXPendingArgs(byte[] group, StreamRange range, int count,
             XPendingArgs args) {
         List<Object> tokens = new ArrayList<>();
         if (args != null && args.idle() != null) {
