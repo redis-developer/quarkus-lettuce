@@ -22,13 +22,13 @@ import io.quarkus.redis.datasource.geo.GeoUnit;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 
-public final class LettuceGeoCommandsConverters {
+final class LettuceGeoCommandsConverters {
 
     private LettuceGeoCommandsConverters() {
         // Utility class
     }
 
-    public static io.lettuce.core.GeoAddArgs toGeoAddArgs(GeoAddArgs quarkus) {
+    static io.lettuce.core.GeoAddArgs toGeoAddArgs(GeoAddArgs quarkus) {
         // Snapshot the tokens now so the XX/NX validation in toArgs() runs at call time, not when Lettuce builds
         // the command.
         List<Object> tokens = quarkus.toArgs();
@@ -41,7 +41,7 @@ public final class LettuceGeoCommandsConverters {
     }
 
     @SuppressWarnings("unchecked")
-    public static <V> GeoValue<byte[]>[] toGeoValues(GeoItem<V>[] items, Marshaller marshaller) {
+    static <V> GeoValue<byte[]>[] toGeoValues(GeoItem<V>[] items, Marshaller marshaller) {
         GeoValue<byte[]>[] values = new GeoValue[items.length];
         for (int i = 0; i < items.length; i++) {
             GeoItem<V> item = items[i];
@@ -50,7 +50,7 @@ public final class LettuceGeoCommandsConverters {
         return values;
     }
 
-    public static GeoArgs.Unit toUnit(GeoUnit unit) {
+    static GeoArgs.Unit toUnit(GeoUnit unit) {
         return switch (unit) {
             case M -> GeoArgs.Unit.m;
             case KM -> GeoArgs.Unit.km;
@@ -59,7 +59,7 @@ public final class LettuceGeoCommandsConverters {
         };
     }
 
-    public static GeoArgs toGeoArgs(GeoRadiusArgs quarkus) {
+    static GeoArgs toGeoArgs(GeoRadiusArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         GeoArgs lettuce = new GeoArgs() {
             @Override
@@ -80,7 +80,7 @@ public final class LettuceGeoCommandsConverters {
         return lettuce;
     }
 
-    public static <K> CommandArgs<byte[], byte[]> toGeoRadiusStoreCommandArgs(byte[] key, double longitude,
+    static <K> CommandArgs<byte[], byte[]> toGeoRadiusStoreCommandArgs(byte[] key, double longitude,
             double latitude, double radius, GeoUnit unit, GeoRadiusStoreArgs<K> quarkus, Codec keyCodec) {
         CommandArgs<byte[], byte[]> args = new CommandArgs<>(ByteArrayCodec.INSTANCE)
                 .addKey(key).add(longitude).add(latitude).add(radius).add(unit.toString());
@@ -88,7 +88,7 @@ public final class LettuceGeoCommandsConverters {
         return args;
     }
 
-    public static <K> CommandArgs<byte[], byte[]> toGeoRadiusByMemberStoreCommandArgs(byte[] key, byte[] member,
+    static <K> CommandArgs<byte[], byte[]> toGeoRadiusByMemberStoreCommandArgs(byte[] key, byte[] member,
             double distance, GeoUnit unit, GeoRadiusStoreArgs<K> quarkus, Codec keyCodec) {
         CommandArgs<byte[], byte[]> args = new CommandArgs<>(ByteArrayCodec.INSTANCE)
                 .addKey(key).addValue(member).add(distance).add(unit.toString());
@@ -96,14 +96,14 @@ public final class LettuceGeoCommandsConverters {
         return args;
     }
 
-    public static <V> CommandArgs<byte[], byte[]> toGeoSearchCommandArgs(byte[] key, GeoSearchArgs<V> quarkus,
+    static <V> CommandArgs<byte[], byte[]> toGeoSearchCommandArgs(byte[] key, GeoSearchArgs<V> quarkus,
             Codec valueCodec) {
         CommandArgs<byte[], byte[]> args = new CommandArgs<>(ByteArrayCodec.INSTANCE).addKey(key);
         ArgReplay.replay(quarkus.toArgs(valueCodec), args);
         return args;
     }
 
-    public static <V> CommandArgs<byte[], byte[]> toGeoSearchStoreCommandArgs(byte[] destination, byte[] key,
+    static <V> CommandArgs<byte[], byte[]> toGeoSearchStoreCommandArgs(byte[] destination, byte[] key,
             GeoSearchStoreArgs<V> quarkus, Codec valueCodec, boolean storeDist) {
         CommandArgs<byte[], byte[]> args = new CommandArgs<>(ByteArrayCodec.INSTANCE).addKey(destination).addKey(key);
         ArgReplay.replay(quarkus.toArgs(valueCodec), args);
@@ -113,12 +113,12 @@ public final class LettuceGeoCommandsConverters {
         return args;
     }
 
-    public static <V> CommandOutput<byte[], byte[], List<GeoWithin<byte[]>>> toGeoWithinOutput(GeoSearchArgs<V> quarkus) {
+    static <V> CommandOutput<byte[], byte[], List<GeoWithin<byte[]>>> toGeoWithinOutput(GeoSearchArgs<V> quarkus) {
         return new GeoWithinListOutput<>(ByteArrayCodec.INSTANCE, quarkus.hasDistance(), quarkus.hasHash(),
                 quarkus.hasCoordinates());
     }
 
-    public static GeoPosition toGeoPosition(GeoCoordinates coordinates) {
+    static GeoPosition toGeoPosition(GeoCoordinates coordinates) {
         if (coordinates == null) {
             return null;
         }

@@ -8,13 +8,13 @@ import io.quarkus.redis.datasource.keys.ExpireArgs;
 import io.quarkus.redis.datasource.keys.KeyScanArgs;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 
-public final class LettuceKeyCommandsConverters {
+final class LettuceKeyCommandsConverters {
 
     private LettuceKeyCommandsConverters() {
         // Utility class
     }
 
-    public static io.lettuce.core.ExpireArgs toLettuceExpireArgs(ExpireArgs quarkus) {
+    static io.lettuce.core.ExpireArgs toLettuceExpireArgs(ExpireArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.ExpireArgs() {
             @Override
@@ -24,7 +24,7 @@ public final class LettuceKeyCommandsConverters {
         };
     }
 
-    public static io.lettuce.core.CopyArgs toLettuceCopyArgs(CopyArgs quarkus) {
+    static io.lettuce.core.CopyArgs toLettuceCopyArgs(CopyArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.CopyArgs() {
             @Override
@@ -34,7 +34,7 @@ public final class LettuceKeyCommandsConverters {
         };
     }
 
-    public static io.lettuce.core.KeyScanArgs toLettuceKeyScanArgs(KeyScanArgs quarkus) {
+    static io.lettuce.core.KeyScanArgs toLettuceKeyScanArgs(KeyScanArgs quarkus) {
         List<String> tokens = quarkus.toArgs();
         return new io.lettuce.core.KeyScanArgs() {
             @Override
