@@ -7,7 +7,7 @@ import io.quarkus.redis.datasource.bloom.BfInsertArgs;
 import io.quarkus.redis.datasource.bloom.BfReserveArgs;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 
-class LettuceBloomCommandsConverters {
+final class LettuceBloomCommandsConverters {
 
     private LettuceBloomCommandsConverters() {
         // Utility class

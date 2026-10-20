@@ -4,13 +4,13 @@ import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 
-public final class LettuceBitMapCommandsConverters {
+final class LettuceBitMapCommandsConverters {
 
     private LettuceBitMapCommandsConverters() {
         // Utility class
     }
 
-    public static io.lettuce.core.BitFieldArgs toLettuceBitFieldArgs(BitFieldArgs quarkus) {
+    static io.lettuce.core.BitFieldArgs toLettuceBitFieldArgs(BitFieldArgs quarkus) {
         return new io.lettuce.core.BitFieldArgs() {
             @Override
             public <K, V> void build(CommandArgs<K, V> args) {

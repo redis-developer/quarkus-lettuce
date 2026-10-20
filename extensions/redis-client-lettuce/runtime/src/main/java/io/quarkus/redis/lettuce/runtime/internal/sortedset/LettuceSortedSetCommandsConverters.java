@@ -13,13 +13,13 @@ import io.quarkus.redis.datasource.sortedset.ZAggregateArgs;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 
-public final class LettuceSortedSetCommandsConverters {
+final class LettuceSortedSetCommandsConverters {
 
     private LettuceSortedSetCommandsConverters() {
         // Utility class
     }
 
-    public static io.lettuce.core.ZAddArgs toLettuceZAddArgs(ZAddArgs quarkus) {
+    static io.lettuce.core.ZAddArgs toLettuceZAddArgs(ZAddArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.ZAddArgs() {
             @Override
@@ -29,19 +29,10 @@ public final class LettuceSortedSetCommandsConverters {
         };
     }
 
-    public static io.lettuce.core.Range<Number> toLettuceScoreRange(ScoreRange<Double> range) {
+    static io.lettuce.core.Range<Number> toLettuceScoreRange(ScoreRange<Double> range) {
         return toLettuceScoreRange(range, false);
     }
 
-    /**
-     * Converts a score range, optionally swapping its bounds.
-     * <p>
-     * Lettuce writes {@code REV} ranges as {@code max min} on the wire, swapping the bounds itself. The Vert.x
-     * backend swaps unconditionally for {@code ZRANGE ... BYLEX} but for {@code ZRANGE ... BYSCORE} only on an
-     * unbounded range; everywhere else it sends the bounds exactly as the caller ordered them, so callers pass
-     * {@code (max, min)} when reversing. Swapping here lets Lettuce's own swap restore the caller's order, keeping
-     * both backends byte-identical.
-     */
     private static io.lettuce.core.Range<Number> toLettuceScoreRange(ScoreRange<Double> range, boolean swapBounds) {
         String lowerBound = swapBounds ? range.getUpperBound() : range.getLowerBound();
         String upperBound = swapBounds ? range.getLowerBound() : range.getUpperBound();
@@ -61,7 +52,7 @@ public final class LettuceSortedSetCommandsConverters {
         return io.lettuce.core.Range.Boundary.including(Double.parseDouble(bound));
     }
 
-    public static io.lettuce.core.ZAggregateArgs toLettuceZAggregateArgs(ZAggregateArgs quarkus) {
+    static io.lettuce.core.ZAggregateArgs toLettuceZAggregateArgs(ZAggregateArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.ZAggregateArgs() {
             @Override
@@ -71,7 +62,7 @@ public final class LettuceSortedSetCommandsConverters {
         };
     }
 
-    public static io.lettuce.core.ZStoreArgs toLettuceZStoreArgs(ZAggregateArgs quarkus) {
+    static io.lettuce.core.ZStoreArgs toLettuceZStoreArgs(ZAggregateArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         return new io.lettuce.core.ZStoreArgs() {
             @Override
@@ -81,7 +72,7 @@ public final class LettuceSortedSetCommandsConverters {
         };
     }
 
-    public static ZRange.ByIndex toLettuceByIndex(long start, long stop, ZRangeArgs quarkus) {
+    static ZRange.ByIndex toLettuceByIndex(long start, long stop, ZRangeArgs quarkus) {
         if (quarkus.toArgs().contains("LIMIT")) {
             throw new IllegalArgumentException("LIMIT is only supported in combination with either BYSCORE or BYLEX");
         }
@@ -92,7 +83,7 @@ public final class LettuceSortedSetCommandsConverters {
         return range;
     }
 
-    public static io.lettuce.core.Range<byte[]> toLettuceLexRange(Range<String> range) {
+    static io.lettuce.core.Range<byte[]> toLettuceLexRange(Range<String> range) {
         return toLettuceLexRange(range, false);
     }
 
@@ -102,7 +93,7 @@ public final class LettuceSortedSetCommandsConverters {
         return io.lettuce.core.Range.from(toLexBoundary(lowerBound), toLexBoundary(upperBound));
     }
 
-    public static ZRange.ByScore toLettuceByScore(ScoreRange<Double> range, ZRangeArgs quarkus) {
+    static ZRange.ByScore toLettuceByScore(ScoreRange<Double> range, ZRangeArgs quarkus) {
         boolean swapBounds = quarkus.isReverse() && !range.isUnbounded();
         ZRange.ByScore byScore = ZRange.byScore(toLettuceScoreRange(range, swapBounds));
         if (quarkus.isReverse()) {
@@ -111,7 +102,7 @@ public final class LettuceSortedSetCommandsConverters {
         return byScore.limit(toLettuceLimit(quarkus));
     }
 
-    public static ZRange.ByLex<byte[]> toLettuceByLex(Range<String> range, ZRangeArgs quarkus) {
+    static ZRange.ByLex<byte[]> toLettuceByLex(Range<String> range, ZRangeArgs quarkus) {
         // No pre-swap: Vert.x swaps BYLEX REV bounds unconditionally, exactly as Lettuce does on its own.
         ZRange.ByLex<byte[]> byLex = ZRange.byLex(toLettuceLexRange(range));
         if (quarkus.isReverse()) {
@@ -120,22 +111,22 @@ public final class LettuceSortedSetCommandsConverters {
         return byLex.limit(toLettuceLimit(quarkus));
     }
 
-    public static io.lettuce.core.Range<Long> toLettuceIndexRange(long min, long max, ZRangeArgs quarkus) {
+    static io.lettuce.core.Range<Long> toLettuceIndexRange(long min, long max, ZRangeArgs quarkus) {
         if (quarkus.toArgs().contains("LIMIT")) {
             throw new IllegalArgumentException("LIMIT is only supported in combination with either BYSCORE or BYLEX");
         }
         return io.lettuce.core.Range.create(min, max);
     }
 
-    public static io.lettuce.core.Range<Number> toLettuceStoreScoreRange(ScoreRange<Double> range, ZRangeArgs quarkus) {
+    static io.lettuce.core.Range<Number> toLettuceStoreScoreRange(ScoreRange<Double> range, ZRangeArgs quarkus) {
         return toLettuceScoreRange(range, quarkus.isReverse());
     }
 
-    public static io.lettuce.core.Range<byte[]> toLettuceStoreLexRange(Range<String> range, ZRangeArgs quarkus) {
+    static io.lettuce.core.Range<byte[]> toLettuceStoreLexRange(Range<String> range, ZRangeArgs quarkus) {
         return toLettuceLexRange(range, quarkus.isReverse());
     }
 
-    public static Limit toLettuceLimit(ZRangeArgs quarkus) {
+    static Limit toLettuceLimit(ZRangeArgs quarkus) {
         List<Object> tokens = quarkus.toArgs();
         int index = tokens.indexOf("LIMIT");
         if (index < 0) {
