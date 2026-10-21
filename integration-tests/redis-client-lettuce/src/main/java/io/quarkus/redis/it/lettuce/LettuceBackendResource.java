@@ -2252,18 +2252,26 @@ public class LettuceBackendResource {
         if (prefix != null) {
             args.prefixes(prefix);
         }
-        for (IndexedField field : parseFields(fields)) {
-            if (field.getAlias() == null) {
-                args.indexedField(field.getField(), field.getType(), field.getOptions());
+        for (FieldSpec field : parseFields(fields)) {
+            if (field.alias() == null) {
+                args.indexedField(field.name(), field.type(), field.options());
             } else {
-                args.indexedField(field.getField(), field.getAlias(), field.getType(), field.getOptions());
+                args.indexedField(field.name(), field.alias(), field.type(), field.options());
             }
         }
         search.ftCreate(index, args);
     }
 
-    private static List<IndexedField> parseFields(String spec) {
-        List<IndexedField> fields = new ArrayList<>();
+    private record FieldSpec(String name, String alias, FieldType type, FieldOptions options) {
+
+        IndexedField toIndexedField() {
+            return alias == null ? IndexedField.from(name, type, options) : IndexedField.from(name, alias, type, options);
+        }
+
+    }
+
+    private static List<FieldSpec> parseFields(String spec) {
+        List<FieldSpec> fields = new ArrayList<>();
         for (String token : spec.split(",")) {
             String[] parts = token.trim().split(":");
             String[] name = parts[0].split("=");
@@ -2272,8 +2280,7 @@ public class LettuceBackendResource {
             if (parts.length > 2 && parts[2].equalsIgnoreCase("sortable")) {
                 options.sortable();
             }
-            fields.add(name.length > 1 ? IndexedField.from(name[0], name[1], type, options)
-                    : IndexedField.from(name[0], type, options));
+            fields.add(new FieldSpec(name[0], name.length > 1 ? name[1] : null, type, options));
         }
         return fields;
     }
@@ -2293,7 +2300,7 @@ public class LettuceBackendResource {
     @POST
     @Path("/search/alter/{index}")
     public void searchAlter(@PathParam("index") String index, String field) {
-        search.ftAlter(index, parseFields(field).get(0));
+        search.ftAlter(index, parseFields(field).get(0).toIndexedField());
     }
 
     @GET

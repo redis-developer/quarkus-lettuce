@@ -315,84 +315,6 @@ public class AggregateArgs implements RedisCommandExtraArguments {
         return cursor;
     }
 
-    /**
-     * @return whether {@code VERBATIM} was requested
-     */
-    public boolean isVerbatim() {
-        return verbatim;
-    }
-
-    /**
-     * @return whether {@code LOAD *} was requested
-     */
-    public boolean isLoadAllFields() {
-        return loadAllFields;
-    }
-
-    /**
-     * @return the fields to load, mapped to their alias ({@code null} when the field has no alias)
-     */
-    public Map<String, String> getFields() {
-        return Collections.unmodifiableMap(fields);
-    }
-
-    /**
-     * @return the timeout, {@code null} if not set
-     */
-    public Duration getTimeout() {
-        return timeout;
-    }
-
-    /**
-     * @return the pipeline clauses ({@link GroupBy}, {@link SortBy}, {@link Apply}, {@link Filter}) in the order they were
-     *         added
-     */
-    public List<Clause> getClauses() {
-        return Collections.unmodifiableList(clauses);
-    }
-
-    /**
-     * @return the {@code LIMIT} offset, {@code -1} if not set
-     */
-    public int getOffset() {
-        return offset;
-    }
-
-    /**
-     * @return the {@code LIMIT} count, {@code -1} if not set
-     */
-    public int getCount() {
-        return count;
-    }
-
-    /**
-     * @return the query parameters
-     */
-    public Map<String, Object> getParams() {
-        return Collections.unmodifiableMap(params);
-    }
-
-    /**
-     * @return the dialect version, {@code -1} if not set
-     */
-    public int getDialect() {
-        return dialect;
-    }
-
-    /**
-     * @return the cursor {@code COUNT}, {@code -1} if not set
-     */
-    public int getCursorCount() {
-        return cursorCount;
-    }
-
-    /**
-     * @return the cursor {@code MAXIDLE}, {@code null} if not set
-     */
-    public Duration getCursorMaxIdle() {
-        return cursorMaxIdle;
-    }
-
     public static class SortBy implements Clause {
         private final Map<String, String> properties = new LinkedHashMap<>();
 
@@ -417,20 +339,6 @@ public class AggregateArgs implements RedisCommandExtraArguments {
             return this;
         }
 
-        /**
-         * @return the sort properties mapped to their direction ({@code ASC} or {@code DESC}), in insertion order
-         */
-        public Map<String, String> getProperties() {
-            return Collections.unmodifiableMap(properties);
-        }
-
-        /**
-         * @return the {@code MAX} value, {@code -1} if not set
-         */
-        public int getMax() {
-            return max;
-        }
-
         @Override
         public List<String> toArgs() {
             if (properties.isEmpty() && max == -1) {
@@ -451,10 +359,7 @@ public class AggregateArgs implements RedisCommandExtraArguments {
         }
     }
 
-    /**
-     * A clause of the aggregation pipeline.
-     */
-    public interface Clause {
+    private interface Clause {
         List<String> toArgs();
     }
 
@@ -465,20 +370,6 @@ public class AggregateArgs implements RedisCommandExtraArguments {
         public Apply(String expr, String alias) {
             this.expr = notNullOrBlank(expr, expr);
             this.alias = notNullOrBlank(alias, "alias");
-        }
-
-        /**
-         * @return the expression to apply
-         */
-        public String getExpression() {
-            return expr;
-        }
-
-        /**
-         * @return the alias of the resulting property
-         */
-        public String getAlias() {
-            return alias;
         }
 
         @Override
@@ -533,20 +424,6 @@ public class AggregateArgs implements RedisCommandExtraArguments {
             return this;
         }
 
-        /**
-         * @return the properties to group by
-         */
-        public List<String> getProperties() {
-            return Collections.unmodifiableList(properties);
-        }
-
-        /**
-         * @return the reduce functions applied to each group
-         */
-        public List<ReduceFunction> getReduceFunctions() {
-            return Collections.unmodifiableList(functions);
-        }
-
         @Override
         public List<String> toArgs() {
             List<String> list = new ArrayList<>();
@@ -561,10 +438,7 @@ public class AggregateArgs implements RedisCommandExtraArguments {
         }
     }
 
-    /**
-     * A {@code REDUCE} function of a {@link GroupBy} clause.
-     */
-    public static class ReduceFunction {
+    private static class ReduceFunction {
         private final String function;
         private final Object[] args;
         private final String alias;
@@ -573,27 +447,6 @@ public class AggregateArgs implements RedisCommandExtraArguments {
             this.function = notNullOrBlank(function, "function");
             this.alias = alias;
             this.args = doesNotContainNull(args, "args");
-        }
-
-        /**
-         * @return the reducer function name, such as {@code COUNT} or {@code SUM}
-         */
-        public String getFunction() {
-            return function;
-        }
-
-        /**
-         * @return the alias of the result, {@code null} if not set
-         */
-        public String getAlias() {
-            return alias;
-        }
-
-        /**
-         * @return the function arguments
-         */
-        public List<Object> getArgs() {
-            return args == null ? Collections.emptyList() : List.of(args);
         }
 
         public List<String> toArgs() {
@@ -616,21 +469,11 @@ public class AggregateArgs implements RedisCommandExtraArguments {
         }
     }
 
-    /**
-     * A {@code FILTER} clause.
-     */
-    public static class Filter implements Clause {
+    private static class Filter implements Clause {
         private final String filter;
 
         private Filter(String filter) {
             this.filter = filter;
-        }
-
-        /**
-         * @return the filter expression
-         */
-        public String getFilter() {
-            return filter;
         }
 
         @Override

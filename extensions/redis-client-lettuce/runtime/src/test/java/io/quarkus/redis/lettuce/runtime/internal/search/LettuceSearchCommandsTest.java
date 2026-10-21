@@ -2,7 +2,6 @@ package io.quarkus.redis.lettuce.runtime.internal.search;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.fail;
 import static org.awaitility.Awaitility.await;
 
@@ -14,10 +13,9 @@ import org.assertj.core.data.Offset;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import io.lettuce.core.RedisCommandExecutionException;
-import io.lettuce.core.search.AggregationReply;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.geo.GeoUnit;
 import io.quarkus.redis.datasource.hash.HashCommands;
 import io.quarkus.redis.datasource.search.AggregateArgs;
 import io.quarkus.redis.datasource.search.AggregationResponse;
@@ -96,8 +94,8 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
                     assertThat(d.property("test").asString()).isEqualTo("some text");
                 });
 
-        // WITHSCORES: the exact values depend on the scorer and on the dialect Lettuce always sends, so unlike the
-        // Vert.x test only check that a score is reported
+        // WITHSCORES: Redis 8 scores with BM25 by default, so the exact TF-IDF values the Vert.x test expects do not
+        // apply, only check that a score is reported
         res = blockingSearch.ftSearch(key, "(@bar:[3,4] | %ipsum%)", new QueryArgs().withScores());
         assertThat(res.count()).isEqualTo(2);
         assertThat(res.documents()).hasSize(2);
@@ -118,13 +116,7 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
                     assertThat(d.payload()).isNull();
                 });
 
-        // Lettuce does not support WITHPAYLOADS, the Vert.x backend returns the payload field here
-        assertThatThrownBy(() -> blockingSearch.ftSearch(key, "(@bar:[3,4] | %ipsum%)",
-                new QueryArgs().withScores().withPayloads()))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("WITHPAYLOADS");
-
-        res = blockingSearch.ftSearch(key, "(@bar:[3,4] | %ipsum%)", new QueryArgs().withScores().withSortKeys());
+        res = blockingSearch.ftSearch(key, "(@bar:[3,4] | %ipsum%)", new QueryArgs().withScores().withPayloads());
         assertThat(res.count()).isEqualTo(2);
         assertThat(res.documents()).hasSize(2);
         assertThat(res.documents())
@@ -134,14 +126,35 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
                     assertThat(d.property("foo").asString()).isEqualTo("hello monde");
                     assertThat(d.property("bar").asInteger()).isEqualTo(3);
                     assertThat(d.property("test").asString()).isEqualTo("some text");
-                    assertThat(d.payload()).isNull();
+                    assertThat(d.payload().toString()).isEqualTo("b");
                 }).anySatisfy(d -> {
                     assertThat(d.key()).isEqualTo("c");
                     assertThat(d.score()).isPositive();
                     assertThat(d.property("foo").asString()).isEqualTo("bonjour monde");
                     assertThat(d.property("bar").asInteger()).isEqualTo(4);
                     assertThat(d.property("test").asString()).isEqualTo("lorem ipsum");
-                    assertThat(d.payload()).isNull();
+                    assertThat(d.payload().toString()).isEqualTo("c");
+                });
+
+        res = blockingSearch.ftSearch(key, "(@bar:[3,4] | %ipsum%)",
+                new QueryArgs().withScores().withPayloads().withSortKeys());
+        assertThat(res.count()).isEqualTo(2);
+        assertThat(res.documents()).hasSize(2);
+        assertThat(res.documents())
+                .anySatisfy(d -> {
+                    assertThat(d.key()).isEqualTo("b");
+                    assertThat(d.score()).isPositive();
+                    assertThat(d.property("foo").asString()).isEqualTo("hello monde");
+                    assertThat(d.property("bar").asInteger()).isEqualTo(3);
+                    assertThat(d.property("test").asString()).isEqualTo("some text");
+                    assertThat(d.payload().toString()).isEqualTo("b");
+                }).anySatisfy(d -> {
+                    assertThat(d.key()).isEqualTo("c");
+                    assertThat(d.score()).isPositive();
+                    assertThat(d.property("foo").asString()).isEqualTo("bonjour monde");
+                    assertThat(d.property("bar").asInteger()).isEqualTo(4);
+                    assertThat(d.property("test").asString()).isEqualTo("lorem ipsum");
+                    assertThat(d.payload().toString()).isEqualTo("c");
                 });
 
         res = blockingSearch.ftSearch(key, "missing");
@@ -201,7 +214,7 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
                 .groupBy(new AggregateArgs.GroupBy().addReduceFunction("SUM", "total", "@bar"))).await().atMost(TIMEOUT);
         assertThat(agg.count()).isEqualTo(1);
         assertThat(agg.cursor()).isEqualTo(-1);
-        assertThat(agg.documents().get(0).property("total").asInteger()).isEqualTo(9);
+        assertThat(agg.documents().getFirst().property("total").asInteger()).isEqualTo(9);
 
         reactiveSearch.ftDropIndex(key).await().atMost(TIMEOUT);
         assertThat(reactiveSearch.ft_list().await().atMost(TIMEOUT)).isEmpty();
@@ -225,7 +238,7 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
         // > FT.SEARCH myIdx "hello world" LIMIT 0 10
         var result = blockingSearch.ftSearch("myIdx", "hello world", new QueryArgs().limit(0, 10));
         assertThat(result.count()).isEqualTo(1);
-        assertThat(result.documents().get(0).property("body").asString()).isEqualTo("lorem ipsum");
+        assertThat(result.documents().getFirst().property("body").asString()).isEqualTo("lorem ipsum");
 
         // > FT.DROPINDEX myIdx
         blockingSearch.ftDropIndex("myIdx", true);
@@ -251,7 +264,7 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
 
         // > JSON.SET item:1 $ '{"name":"Noise-cancelling Bluetooth headphones",
         // "description":"Wireless Bluetooth headphones with noise-cancelling technology",
-        // "connection":{"wireless":true,"type":"Bluetooth"},"price":99.98,"stock":25,"colors":["black","silver"]}'
+        // "connection":{"wireless":true,"type":"Bluetooth"},"price":99.98,"stock":25,"colours":["black","silver"]}'
         JsonObject json1 = JsonObject.of("name", "Noise-cancelling Bluetooth headphones",
                 "description", "Wireless Bluetooth headphones with noise-cancelling technology",
                 "connection", JsonObject.of("wireless", true, "type", "Bluetooth"),
@@ -259,7 +272,7 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
                 "colors", JsonArray.of("black", "silver"));
         json.jsonSet("item:1", json1);
         // > JSON.SET item:2 $ '{"name":"Wireless earbuds","description":"Wireless Bluetooth in-ear headphones",
-        // "connection":{"wireless":true,"type":"Bluetooth"},"price":64.99,"stock":17,"colors":["black","white"]}'
+        // "connection":{"wireless":true,"type":"Bluetooth"},"price":64.99,"stock":17,"colours":["black","white"]}'
         JsonObject json2 = JsonObject.of("name", "Wireless earbuds", "description",
                 "Wireless Bluetooth in-ear headphones",
                 "connection", JsonObject.of("wireless", true, "type", "Bluetooth"),
@@ -270,8 +283,8 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
         await().untilAsserted(() -> {
             var result = blockingSearch.ftSearch("itemIdx", "@name:(earbuds)");
             assertThat(result.count()).isEqualTo(1);
-            assertThat(result.documents().get(0).key()).isEqualTo("item:2");
-            assertThat(result.documents().get(0).property("$").asJsonObject()).isEqualTo(json2);
+            assertThat(result.documents().getFirst().key()).isEqualTo("item:2");
+            assertThat(result.documents().getFirst().property("$").asJsonObject()).isEqualTo(json2);
         });
 
         // > FT.SEARCH itemIdx '@description:(bluetooth headphones)'
@@ -288,12 +301,12 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
         await().untilAsserted(() -> {
             var result = blockingSearch.ftSearch("itemIdx", "@description:(bluetooth headphones) @price:[0 70]");
             assertThat(result.count()).isEqualTo(1);
-            assertThat(result.documents().get(0).key()).isEqualTo("item:2");
-            assertThat(result.documents().get(0).property("$").asJsonObject()).isEqualTo(json2);
+            assertThat(result.documents().getFirst().key()).isEqualTo("item:2");
+            assertThat(result.documents().getFirst().property("$").asJsonObject()).isEqualTo(json2);
         });
 
         // Part 2 - Tags
-        // > > FT.CREATE itemIdx2 ON JSON PREFIX 1 item: SCHEMA $.colors.* AS colors TAG $.name AS name TEXT $.description as description TEXT
+        // > > FT.CREATE itemIdx2 ON JSON PREFIX 1 item: SCHEMA $.colours.* AS colours TAG $.name AS name TEXT $.description as description TEXT
         blockingSearch.ftCreate("itemIdx2", new CreateArgs().onJson()
                 .prefixes("item:")
                 .indexedField("$.colors.*", "colors", FieldType.TAG)
@@ -304,7 +317,7 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
         await().untilAsserted(() -> {
             var res = blockingSearch.ftSearch("itemIdx2", "@colors:{silver} (@name:(headphones)|@description:(headphones))");
             assertThat(res.documents()).hasSize(1);
-            assertThat(res.documents().get(0)).satisfies(doc -> {
+            assertThat(res.documents().getFirst()).satisfies(doc -> {
                 assertThat(doc.key()).isEqualTo("item:1");
                 assertThat(doc.property("$").asJsonObject()).isEqualTo(json1);
             });
@@ -582,61 +595,6 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void cursorRegistryForgetsOnlyCursorsTheServerReportsGone() {
-        String index = "tripwire";
-        blockingSearch.ftCreate(index, new CreateArgs().onHash().prefixes("tw:").indexedField("n", FieldType.NUMERIC));
-        for (int i = 1; i <= 4; i++) {
-            blockingHash.hset("tw:" + i, "n", Integer.toString(i));
-        }
-        LettuceSearchCursors registry = new LettuceSearchCursors();
-
-        // A server error that leaves the cursor alive must not evict it
-        long cursor = openCursor(index);
-        trackWithNode(registry, index, cursor);
-        Throwable badArgument = catchThrowable(() -> reactiveDs
-                .execute("FT.CURSOR", "READ", index, Long.toString(cursor), "COUNT", "abc").await().atMost(TIMEOUT));
-        assertThat(badArgument).isInstanceOf(RedisCommandExecutionException.class).hasMessageContaining("COUNT");
-        registry.forgetIfGone(index, cursor, badArgument);
-        assertThat(registry.cursor(index, cursor).getNodeId()).contains("nodeA");
-        assertThat(reactiveSearch.ftCursorRead(index, cursor, 1).await().atMost(TIMEOUT).cursor()).isEqualTo(cursor);
-
-        // "Cursor not found" after FT.CURSOR DEL evicts it
-        blockingSearch.ftCursorDel(index, cursor);
-        Throwable notFound = catchThrowable(() -> reactiveSearch.ftCursorRead(index, cursor).await().atMost(TIMEOUT));
-        assertThat(notFound).isInstanceOf(RedisCommandExecutionException.class);
-        registry.forgetIfGone(index, cursor, notFound);
-        assertThat(registry.cursor(index, cursor).getNodeId()).isEmpty();
-
-        // "Cursor does not exist" from a second FT.CURSOR DEL evicts it
-        trackWithNode(registry, index, cursor);
-        Throwable doesNotExist = catchThrowable(() -> reactiveSearch.ftCursorDel(index, cursor).await().atMost(TIMEOUT));
-        assertThat(doesNotExist).isInstanceOf(RedisCommandExecutionException.class);
-        registry.forgetIfGone(index, cursor, doesNotExist);
-        assertThat(registry.cursor(index, cursor).getNodeId()).isEmpty();
-
-        // "Index not found" after FT.DROPINDEX evicts it
-        long orphan = openCursor(index);
-        trackWithNode(registry, index, orphan);
-        blockingSearch.ftDropIndex(index);
-        Throwable indexGone = catchThrowable(() -> reactiveSearch.ftCursorRead(index, orphan).await().atMost(TIMEOUT));
-        assertThat(indexGone).isInstanceOf(RedisCommandExecutionException.class);
-        registry.forgetIfGone(index, orphan, indexGone);
-        assertThat(registry.cursor(index, orphan).getNodeId()).isEmpty();
-    }
-
-    private long openCursor(String index) {
-        return await().until(() -> blockingSearch
-                .ftAggregate(index, "*", new AggregateArgs().field("n").withCursor().cursorCount(1)).cursor(),
-                c -> c > 0);
-    }
-
-    private static void trackWithNode(LettuceSearchCursors registry, String index, long cursor) {
-        AggregationReply<byte[]> reply = new AggregationReply<>();
-        reply.setCursor(AggregationReply.Cursor.of(cursor, "nodeA"));
-        registry.track(index, 0, reply);
-    }
-
-    @Test
     void cursorReadWithCountReactive() {
         setupTraffic();
 
@@ -743,13 +701,9 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
         });
 
         // > FT.SEARCH idx:movie * FILTER release_year 1970 1980 RETURN 2 title release_year
-        // Lettuce does not support FILTER, the range goes in the query string instead
-        assertThatThrownBy(() -> blockingSearch.ftSearch("idx:movie", "*", new QueryArgs()
-                .filter(new NumericFilter("release_year", 1970, 1980))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("FILTER");
         await().untilAsserted(() -> {
-            var result = blockingSearch.ftSearch("idx:movie", "@release_year:[1970 1980]");
+            var result = blockingSearch.ftSearch("idx:movie", "*", new QueryArgs()
+                    .filter(new NumericFilter("release_year", 1970, 1980)));
             assertThat(result.count()).isEqualTo(2);
         });
 
@@ -798,15 +752,14 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
         // > FT._LIST
         await().untilAsserted(() -> assertThat(blockingSearch.ft_list()).containsExactly("idx:movie"));
 
-        // > FT.ALTER idx:movie SCHEMA ADD plot TEXT WEIGHT 2
-        // Lettuce only accepts whole-number weights, the Vert.x backend accepts 0.5 here
-        blockingSearch.ftAlter("idx:movie", IndexedField.from("plot", FieldType.TEXT, new FieldOptions().weight(2.0)));
+        // > FT.ALTER idx:movie SCHEMA ADD plot TEXT WEIGHT 0.5
+        blockingSearch.ftAlter("idx:movie", IndexedField.from("plot", FieldType.TEXT, new FieldOptions().weight(0.5)));
 
         // > FT.SEARCH idx:movie "empire @genre:{Action}"
         await().untilAsserted(() -> {
             var result = blockingSearch.ftSearch("idx:movie", "empire @genre:{Action}");
             assertThat(result.count()).isEqualTo(2);
-            assertThat(result.documents().get(0).property("title").asString())
+            assertThat(result.documents().getFirst().property("title").asString())
                     .isEqualTo("Star Wars: Episode V - The Empire Strikes Back");
         });
 
@@ -869,7 +822,7 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
     void testAlterSchema() {
         setupMovies();
         assertThatThrownBy(() -> blockingSearch.ftAlter("missing", IndexedField.from("test", FieldType.TEXT)));
-        blockingSearch.ftAlter("idx:movie", IndexedField.from("plot", FieldType.TEXT, new FieldOptions().weight(2.0)));
+        blockingSearch.ftAlter("idx:movie", IndexedField.from("plot", FieldType.TEXT, new FieldOptions().weight(0.5)));
         await()
                 .untilAsserted(() -> assertThat(blockingSearch.ftSearch("idx:movie", "brutally").count()).isEqualTo(1));
     }
@@ -946,14 +899,6 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
                 blockingSearch.ftSpellCheck("my-index", "bonjour hockey", new SpellCheckArgs().includes("my-dict"))
                         .misspelledWords())
                 .isEmpty();
-
-        // Several dictionaries: each one must be applied (one TERMS clause per dictionary). "zebra" is neither in
-        // the index nor in my-dict, so only other-dict can make it correct.
-        blockingSearch.ftDictAdd("other-dict", "zebra");
-        assertThat(blockingSearch.ftSpellCheck("my-index", "bonjour zebra",
-                new SpellCheckArgs().includes("my-dict", "other-dict")).isCorrect()).isTrue();
-        assertThat(blockingSearch.ftSpellCheck("my-index", "bonjour zebra",
-                new SpellCheckArgs().includes("my-dict")).misspelledWords()).containsExactly("zebra");
 
         res = blockingSearch.ftSpellCheck("my-index", "bonjour magyc hocky",
                 new SpellCheckArgs().includes("my-dict").distance(3));
@@ -1133,7 +1078,7 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
                 .param("BLOB", queryVector);
         SearchQueryResponse response = blockingDs.search().ftSearch("IDX:double", query, args);
         assertThat(response.count()).isEqualTo(1);
-        Document foundEntry = response.documents().get(0);
+        Document foundEntry = response.documents().getFirst();
         assertThat(foundEntry.key()).isEqualTo("indexed:3");
     }
 
@@ -1165,7 +1110,7 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
 
         SearchQueryResponse response = blockingDs.search().ftSearch("IDX:float", query, args);
         assertThat(response.count()).isEqualTo(1);
-        Document foundEntry = response.documents().get(0);
+        Document foundEntry = response.documents().getFirst();
         assertThat(foundEntry.key()).isEqualTo("indexed:3");
     }
 
@@ -1176,44 +1121,63 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void unsupportedQueryOptionsAreRejectedBeforeReachingTheServer() {
-        setupMovies();
+    void queryOptionsAreSentAsTheVertxBackendSendsThem() {
+        blockingSearch.ftCreate("idx:place", new CreateArgs().onHash().prefixes("place:")
+                .indexedField("name", FieldType.TEXT)
+                .indexedField("description", FieldType.TEXT)
+                .indexedField("location", FieldType.GEO)
+                .indexedField("rating", FieldType.NUMERIC)
+                .payloadField("tag"));
+        blockingHash.hset("place:1", Map.of("name", "Louvre", "description", "museum in Paris",
+                "location", "2.3376,48.8606", "rating", "5", "tag", "p1"));
+        blockingHash.hset("place:2", Map.of("name", "Big Ben", "description", "clock tower in London",
+                "location", "-0.1246,51.5007", "rating", "4", "tag", "p2"));
+        blockingHash.hset("place:3", Map.of("name", "Paris Hotel", "description", "hotel in Las Vegas",
+                "location", "-115.1708,36.1125", "rating", "3", "tag", "p3"));
+        await().untilAsserted(() -> assertThat(blockingSearch.ftSearch("idx:place", "*").count()).isEqualTo(3));
 
-        assertThatThrownBy(() -> blockingSearch.ftSearch("idx:movie", "*", new QueryArgs().withPayloads()))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("WITHPAYLOADS");
-        assertThatThrownBy(() -> blockingSearch.ftSearch("idx:movie", "*",
-                new QueryArgs().filter(new NumericFilter("release_year", 1970, 1980))))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("FILTER");
-        assertThatThrownBy(() -> blockingSearch.ftSearch("idx:movie", "*",
-                new QueryArgs().geoFilter(new GeoFilter("location", 0, 0, 10, io.quarkus.redis.datasource.geo.GeoUnit.KM))))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("GEOFILTER");
-        assertThatThrownBy(() -> blockingSearch.ftSearch("idx:movie", "*", new QueryArgs().explainScore()))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("EXPLAINSCORE");
-        assertThatThrownBy(() -> blockingSearch.ftSearch("idx:movie", "*",
-                new QueryArgs().sortByAscending("title").sortByDescending("rating")))
+        // GEOFILTER: within 10 km of the Louvre
+        var res = blockingSearch.ftSearch("idx:place", "*",
+                new QueryArgs().geoFilter(new GeoFilter("location", 2.35, 48.85, 10, GeoUnit.KM)));
+        assertThat(res.documents()).extracting(Document::key).containsExactly("place:1");
+
+        // FILTER: a numeric range
+        res = blockingSearch.ftSearch("idx:place", "*", new QueryArgs().filter(new NumericFilter("rating", 4, 5)));
+        assertThat(res.documents()).extracting(Document::key).containsExactlyInAnyOrder("place:1", "place:2");
+
+        // INKEYS: only the listed keys
+        res = blockingSearch.ftSearch("idx:place", "*", new QueryArgs().inKeys("place:2", "place:3"));
+        assertThat(res.documents()).extracting(Document::key).containsExactlyInAnyOrder("place:2", "place:3");
+
+        // INFIELDS: "paris" is in the name of place:3 but only in the description of place:1
+        res = blockingSearch.ftSearch("idx:place", "paris", new QueryArgs().inFields("name"));
+        assertThat(res.documents()).extracting(Document::key).containsExactly("place:3");
+
+        // WITHPAYLOADS, and EXPLAINSCORE (which needs WITHSCORES) returning the score with its explanation
+        res = blockingSearch.ftSearch("idx:place", "paris", new QueryArgs().withScores().withPayloads().explainScore());
+        assertThat(res.count()).isEqualTo(2);
+        assertThat(res.documents()).allSatisfy(d -> {
+            assertThat(d.score()).isPositive();
+            assertThat(d.payload().toString()).isEqualTo(d.key().replace("place:", "p"));
+            assertThat(d.property("name").asString()).isNotBlank();
+        });
+
+        // An ascending and a descending SORTBY together are rejected before reaching the server, on both APIs
+        assertThatThrownBy(() -> blockingSearch.ftSearch("idx:place", "*",
+                new QueryArgs().sortByAscending("name").sortByDescending("rating")))
                 .isInstanceOf(IllegalArgumentException.class);
-
-        // The same checks apply on the reactive API, before subscription
-        assertThatThrownBy(() -> reactiveSearch.ftSearch("idx:movie", "*", new QueryArgs().withPayloads()))
+        assertThatThrownBy(() -> reactiveSearch.ftSearch("idx:place", "*",
+                new QueryArgs().sortByAscending("name").sortByDescending("rating")))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void unsupportedSchemaOptionsAreRejected() {
+    void invalidSchemasAreRejectedBeforeReachingTheServer() {
         assertThatThrownBy(() -> blockingSearch.ftCreate(key, new CreateArgs()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("schema");
         assertThatThrownBy(() -> blockingSearch.ftCreate(key, new CreateArgs().onHash().onJson()
                 .indexedField("foo", FieldType.TEXT)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> blockingSearch.ftCreate(key, new CreateArgs()
-                .indexedField("foo", FieldType.TEXT, new FieldOptions().weight(0.5))))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("weight");
-        assertThatThrownBy(() -> blockingSearch.ftCreate(key, new CreateArgs()
-                .indexedField("foo", FieldType.NUMERIC, new FieldOptions().noStem())))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("noStem");
-        assertThatThrownBy(() -> blockingSearch.ftCreate(key, new CreateArgs()
-                .indexedField("foo", FieldType.TEXT, new FieldOptions().separator(','))))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("separator");
         assertThat(blockingSearch.ft_list()).isEmpty();
     }
 

@@ -9,7 +9,6 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.positiveOrZero;
 
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -17,12 +16,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import io.lettuce.core.search.AggregationReply;
-import io.lettuce.core.search.FieldValue;
-import io.lettuce.core.search.SearchReply;
+import io.lettuce.core.codec.ByteArrayCodec;
+import io.lettuce.core.output.ComplexOutput;
+import io.lettuce.core.output.EncodedComplexOutput;
+import io.lettuce.core.output.StatusOutput;
+import io.lettuce.core.protocol.CommandArgs;
+import io.lettuce.core.protocol.CommandKeyword;
+import io.lettuce.core.protocol.CommandType;
 import io.lettuce.core.search.SpellCheckResult;
-import io.lettuce.core.search.arguments.FieldArgs;
-import io.lettuce.core.search.arguments.SearchArgs;
+import io.lettuce.core.search.SpellCheckResultParser;
 import io.lettuce.core.search.arguments.SynUpdateArgs;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.search.AggregateArgs;
@@ -38,26 +40,25 @@ import io.quarkus.redis.datasource.search.SpellCheckArgs;
 import io.quarkus.redis.datasource.search.SpellCheckResponse;
 import io.quarkus.redis.datasource.search.SynDumpResponse;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
+import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.VertxResponseParser;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
-import io.vertx.core.buffer.Buffer;
 import io.vertx.redis.client.Response;
-import io.vertx.redis.client.impl.types.BulkType;
+import io.vertx.redis.client.ResponseType;
 import io.vertx.redis.client.impl.types.MultiType;
 
 public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommands<K, K>
         implements ReactiveSearchCommands<K> {
 
     private final ReactiveRedisDataSource dataSource;
-    private final LettuceSearchCursors cursors;
 
     public LettuceReactiveSearchCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, Type keyType) {
         super(connection, keyType, keyType, new Marshaller(keyType));
         this.dataSource = dataSource;
-        this.cursors = connection.searchCursors();
     }
 
     @Override
@@ -79,15 +80,15 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         return _ftAggregate(indexName, query, args).toUni();
     }
 
-    LettuceCommand<AggregationReply<byte[]>, AggregationResponse> _ftAggregate(String indexName, String query,
-            AggregateArgs args) {
+    LettuceCommand<Response, AggregationResponse> _ftAggregate(String indexName, String query, AggregateArgs args) {
         notNullOrBlank(indexName, "indexName");
         notNullOrBlank(query, "query");
         nonNull(args, "args");
-        io.lettuce.core.search.arguments.AggregateArgs lettuceArgs = LettuceSearchCommandsConverters
-                .toLettuceAggregateArgs(args);
-        return LettuceCommand.of(() -> async.ftAggregate(indexName, query, lettuceArgs),
-                reply -> decodeAggregationReply(indexName, 0, args.getCursorMaxIdle(), reply));
+        CommandArgs<byte[], byte[]> commandArgs = commandArgs(indexName, query);
+        ArgReplay.replay(args.toArgs(), commandArgs);
+        boolean cursor = args.hasCursor();
+        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_AGGREGATE, responseOutput(), commandArgs),
+                reply -> decodeAggregateResponse(reply, cursor));
     }
 
     @Override
@@ -95,11 +96,12 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         return _ftAggregate(indexName, query).toUni();
     }
 
-    LettuceCommand<AggregationReply<byte[]>, AggregationResponse> _ftAggregate(String indexName, String query) {
+    LettuceCommand<Response, AggregationResponse> _ftAggregate(String indexName, String query) {
         notNullOrBlank(indexName, "indexName");
         notNullOrBlank(query, "query");
-        return LettuceCommand.of(() -> async.ftAggregate(indexName, query),
-                reply -> decodeAggregationReply(indexName, 0, reply));
+        CommandArgs<byte[], byte[]> commandArgs = commandArgs(indexName, query);
+        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_AGGREGATE, responseOutput(), commandArgs),
+                reply -> decodeAggregateResponse(reply, false));
     }
 
     @Override
@@ -142,8 +144,13 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<String, Void> _ftAlter(String index, IndexedField field, boolean skipInitialScan) {
         notNullOrBlank(index, "index");
         nonNull(field, "field");
-        FieldArgs fieldArgs = LettuceSearchCommandsConverters.toLettuceFieldArgs(field);
-        return LettuceCommand.discarding(() -> async.ftAlter(index, skipInitialScan, List.of(fieldArgs)));
+        CommandArgs<byte[], byte[]> commandArgs = commandArgs(index);
+        if (skipInitialScan) {
+            commandArgs.add(CommandKeyword.SKIPINITIALSCAN);
+        }
+        commandArgs.add(CommandKeyword.SCHEMA).add(CommandKeyword.ADD);
+        ArgReplay.replay(field.toArgs(), commandArgs);
+        return LettuceCommand.discarding(() -> async.dispatch(CommandType.FT_ALTER, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
     }
 
     @Override
@@ -154,12 +161,10 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<String, Void> _ftCreate(String index, CreateArgs args) {
         notNullOrBlank(index, "index");
         nonNull(args, "args");
-        if (args.getSchema().isEmpty()) {
-            throw new IllegalArgumentException("The schema cannot be empty, you configure the indexed fields");
-        }
-        io.lettuce.core.search.arguments.CreateArgs createArgs = LettuceSearchCommandsConverters.toLettuceCreateArgs(args);
-        List<FieldArgs> schema = args.getSchema().stream().map(LettuceSearchCommandsConverters::toLettuceFieldArgs).toList();
-        return LettuceCommand.discarding(() -> async.ftCreate(index, createArgs, schema));
+        CommandArgs<byte[], byte[]> commandArgs = commandArgs(index);
+        // toArgs() rejects an empty schema and `ON HASH` combined with `ON JSON`, before the command is issued
+        ArgReplay.replay(args.toArgs(), commandArgs);
+        return LettuceCommand.discarding(() -> async.dispatch(CommandType.FT_CREATE, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
     }
 
     @Override
@@ -170,11 +175,8 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<String, Void> _ftCursorDel(String index, long cursor) {
         notNullOrBlank(index, "index");
         positiveOrZero(cursor, "cursor");
-        AggregationReply.Cursor lettuceCursor = cursors.cursor(index, cursor);
-        return LettuceCommand.<String, Void> of(() -> async.ftCursordel(index, lettuceCursor), ignored -> {
-            cursors.forget(index, cursor);
-            return null;
-        }).onFailure(failure -> cursors.forgetIfGone(index, cursor, failure));
+        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.DEL).add(index).add(cursor);
+        return LettuceCommand.discarding(() -> async.dispatch(CommandType.FT_CURSOR, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
     }
 
     @Override
@@ -182,13 +184,12 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         return _ftCursorRead(index, cursor).toUni();
     }
 
-    LettuceCommand<AggregationReply<byte[]>, AggregationResponse> _ftCursorRead(String index, long cursor) {
+    LettuceCommand<Response, AggregationResponse> _ftCursorRead(String index, long cursor) {
         notNullOrBlank(index, "index");
         positiveOrZero(cursor, "cursor");
-        AggregationReply.Cursor lettuceCursor = cursors.cursor(index, cursor);
-        return LettuceCommand.of(() -> async.ftCursorread(index, lettuceCursor),
-                reply -> decodeAggregationReply(index, cursor, reply))
-                .onFailure(failure -> cursors.forgetIfGone(index, cursor, failure));
+        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.READ).add(index).add(cursor);
+        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_CURSOR, responseOutput(), commandArgs),
+                reply -> decodeAggregateResponse(reply, true));
     }
 
     @Override
@@ -196,14 +197,14 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         return _ftCursorRead(index, cursor, count).toUni();
     }
 
-    LettuceCommand<AggregationReply<byte[]>, AggregationResponse> _ftCursorRead(String index, long cursor, int count) {
+    LettuceCommand<Response, AggregationResponse> _ftCursorRead(String index, long cursor, int count) {
         notNullOrBlank(index, "index");
         positiveOrZero(cursor, "cursor");
         positive(count, "count");
-        AggregationReply.Cursor lettuceCursor = cursors.cursor(index, cursor);
-        return LettuceCommand.of(() -> async.ftCursorread(index, lettuceCursor, count),
-                reply -> decodeAggregationReply(index, cursor, reply))
-                .onFailure(failure -> cursors.forgetIfGone(index, cursor, failure));
+        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.READ).add(index).add(cursor)
+                .add(CommandKeyword.COUNT).add(count);
+        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_CURSOR, responseOutput(), commandArgs),
+                reply -> decodeAggregateResponse(reply, true));
     }
 
     @Override
@@ -213,10 +214,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<String, Void> _ftDropIndex(String index) {
         notNullOrBlank(index, "index");
-        return LettuceCommand.of(() -> async.ftDropindex(index), ignored -> {
-            cursors.forgetIndex(index);
-            return null;
-        });
+        return LettuceCommand.discarding(() -> async.ftDropindex(index));
     }
 
     @Override
@@ -226,10 +224,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<String, Void> _ftDropIndex(String index, boolean dd) {
         notNullOrBlank(index, "index");
-        return LettuceCommand.of(() -> async.ftDropindex(index, dd), ignored -> {
-            cursors.forgetIndex(index);
-            return null;
-        });
+        return LettuceCommand.discarding(() -> async.ftDropindex(index, dd));
     }
 
     @Override
@@ -271,12 +266,17 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         return _ftSearch(index, query, args).toUni();
     }
 
-    LettuceCommand<SearchReply<byte[]>, SearchQueryResponse> _ftSearch(String index, String query, QueryArgs args) {
+    LettuceCommand<Response, SearchQueryResponse> _ftSearch(String index, String query, QueryArgs args) {
         notNullOrBlank(index, "index");
         notNullOrBlank(query, "query");
         nonNull(args, "args");
-        SearchArgs<byte[]> searchArgs = LettuceSearchCommandsConverters.toLettuceSearchArgs(args);
-        return LettuceCommand.of(() -> async.ftSearch(index, query, searchArgs), this::decodeSearchReply);
+        CommandArgs<byte[], byte[]> commandArgs = commandArgs(index, query);
+        // toArgs() rejects an ascending and a descending SORTBY together, before the command is issued
+        List<Object> tokens = args.toArgs();
+        ArgReplay.replay(tokens, commandArgs);
+        ResultLayout layout = ResultLayout.of(args, tokens);
+        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_SEARCH, responseOutput(), commandArgs),
+                reply -> decodeSearchResponse(reply, layout));
     }
 
     @Override
@@ -284,10 +284,12 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         return _ftSearch(index, query).toUni();
     }
 
-    LettuceCommand<SearchReply<byte[]>, SearchQueryResponse> _ftSearch(String index, String query) {
+    LettuceCommand<Response, SearchQueryResponse> _ftSearch(String index, String query) {
         notNullOrBlank(index, "index");
         notNullOrBlank(query, "query");
-        return LettuceCommand.of(() -> async.ftSearch(index, query), this::decodeSearchReply);
+        CommandArgs<byte[], byte[]> commandArgs = commandArgs(index, query);
+        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_SEARCH, responseOutput(), commandArgs),
+                reply -> decodeSearchResponse(reply, ResultLayout.DEFAULT));
     }
 
     @Override
@@ -311,9 +313,11 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         notNullOrBlank(index, "index");
         notNullOrBlank(query, "query");
         nonNull(args, "args");
-        io.lettuce.core.search.arguments.SpellCheckArgs lettuceArgs = LettuceSearchCommandsConverters
-                .toLettuceSpellCheckArgs(args);
-        return LettuceCommand.of(() -> async.ftSpellcheck(index, query, lettuceArgs),
+        CommandArgs<byte[], byte[]> commandArgs = commandArgs(index, query);
+        // toArgs() rejects `includes` combined with `excludes`, before the command is issued
+        ArgReplay.replay(args.toArgs(), commandArgs);
+        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_SPELLCHECK,
+                new EncodedComplexOutput<>(ByteArrayCodec.INSTANCE, new SpellCheckResultParser()), commandArgs),
                 LettuceReactiveSearchCommandsImpl::decodeSpellCheckResult);
     }
 
@@ -368,88 +372,134 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         return LettuceCommand.of(() -> async.ftTagvals(index, field), Set::copyOf);
     }
 
+    private static CommandArgs<byte[], byte[]> commandArgs(String... leading) {
+        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE);
+        for (String token : leading) {
+            commandArgs.add(token);
+        }
+        return commandArgs;
+    }
+
+    private static ComplexOutput<byte[], byte[], Response> responseOutput() {
+        return new ComplexOutput<>(ByteArrayCodec.INSTANCE, VertxResponseParser.INSTANCE);
+    }
+
     private List<K> decodeIndexNames(List<String> names) {
         return orEmpty(names).stream()
                 .map(name -> decodeK(name.getBytes(StandardCharsets.UTF_8)))
                 .toList();
     }
 
-    private AggregationResponse decodeAggregationReply(String index, long requestedCursor,
-            AggregationReply<byte[]> reply) {
-        return decodeAggregationReply(index, requestedCursor, null, reply);
-    }
+    record ResultLayout(boolean withScores, boolean withPayloads, boolean withSortKeys, boolean withContent) {
 
-    private AggregationResponse decodeAggregationReply(String index, long requestedCursor, Duration cursorMaxIdle,
-            AggregationReply<byte[]> reply) {
-        cursors.track(index, requestedCursor, reply, cursorMaxIdle);
-        return decodeAggregationReply(reply);
-    }
+        static final ResultLayout DEFAULT = new ResultLayout(false, false, false, true);
 
-    private AggregationResponse decodeAggregationReply(AggregationReply<byte[]> reply) {
-        if (reply == null) {
-            return new AggregationResponse(Collections.emptyList());
+        static ResultLayout of(QueryArgs args, List<Object> tokens) {
+            return new ResultLayout(args.containsScore(), args.containsPayload(), args.containsSortKeys(),
+                    !tokens.contains("NOCONTENT"));
         }
-        long cursor = reply.getCursor().map(AggregationReply.Cursor::getCursorId).orElse(-1L);
-        List<AggregateDocument> documents = new ArrayList<>();
-        for (SearchReply<byte[]> searchReply : orEmpty(reply.getReplies())) {
-            for (SearchReply.SearchResult<byte[]> result : orEmpty(searchReply.getResults())) {
-                documents.add(new AggregateDocument(toProperties(result.getFields())));
-            }
-        }
-        return new AggregationResponse(cursor, documents);
+
     }
 
-    private SearchQueryResponse decodeSearchReply(SearchReply<byte[]> reply) {
-        if (reply == null) {
+    static SearchQueryResponse decodeSearchResponse(Response response, ResultLayout layout) {
+        if (response == null) {
             return new SearchQueryResponse(0, Collections.emptyList());
         }
-        List<Document> documents = new ArrayList<>(reply.size());
-        for (SearchReply.SearchResult<byte[]> result : orEmpty(reply.getResults())) {
-            String id = result.getId() == null ? null : decodeString(result.getId());
-            // The score is only present with WITHSCORES, the Vert.x backend also reports 1.0 otherwise
-            double score = result.getScore() == null ? 1.0 : result.getScore();
-            // Lettuce does not support WITHPAYLOADS (rejected by the converter), so there is never a payload
-            documents.add(new Document(id, score, null, toProperties(result.getFields())));
+        if (isMap(response)) {
+            Response total = response.get("total_results");
+            if (total == null || total.toInteger() == 0) {
+                return new SearchQueryResponse(0, Collections.emptyList());
+            }
+            List<Document> documents = new ArrayList<>();
+            for (Response result : orEmpty(response.get("results"))) {
+                documents.add(new Document(result.get("id").toString(), score(result.get("score")), result.get("payload"),
+                        properties(result.get("extra_attributes"))));
+            }
+            return new SearchQueryResponse(total.toInteger(), documents);
         }
-        return new SearchQueryResponse((int) reply.getCount(), documents);
+
+        int count = response.get(0).toInteger();
+        if (count == 0) {
+            return new SearchQueryResponse(0, Collections.emptyList());
+        }
+        List<Document> documents = new ArrayList<>();
+        for (int i = 1; i < response.size();) {
+            Response id = response.get(i++);
+            Response score = layout.withScores() ? response.get(i++) : null;
+            Response payload = layout.withPayloads() ? response.get(i++) : null;
+            if (layout.withSortKeys()) {
+                i++;
+            }
+            Response fields = layout.withContent() ? response.get(i++) : null;
+            documents.add(new Document(id.toString(), score(score), payload, properties(fields)));
+        }
+        return new SearchQueryResponse(count, documents);
     }
 
-    private static Map<String, Document.Property> toProperties(Map<String, FieldValue> fields) {
+    static AggregationResponse decodeAggregateResponse(Response response, boolean cursor) {
+        if (response == null) {
+            return new AggregationResponse(Collections.emptyList());
+        }
+        Response results = response;
+        long cursorId = -1L;
+        if (cursor) {
+            results = response.get(0);
+            cursorId = response.get(1).toLong();
+        }
+        List<AggregateDocument> documents = new ArrayList<>();
+        if (isMap(results)) {
+            for (Response result : orEmpty(results.get("results"))) {
+                documents.add(new AggregateDocument(properties(result.get("extra_attributes"))));
+            }
+            return new AggregationResponse(cursorId, documents);
+        }
+
+        // The first element is the group count, the rows follow
+        for (int i = 1; i < results.size(); i++) {
+            documents.add(new AggregateDocument(properties(results.get(i))));
+        }
+        return new AggregationResponse(cursorId, documents);
+    }
+
+    private static boolean isMap(Response response) {
+        return response instanceof MultiType multi && multi.isMap();
+    }
+
+    private static Iterable<Response> orEmpty(Response multi) {
+        return multi == null ? Collections.emptyList() : multi;
+    }
+
+    private static double score(Response score) {
+        if (score == null) {
+            return 1.0;
+        }
+        if (score.type() == ResponseType.MULTI) {
+            return score.get(0).toDouble();
+        }
+        return score.toDouble();
+    }
+
+    private static Map<String, Document.Property> properties(Response fields) {
         Map<String, Document.Property> properties = new LinkedHashMap<>();
         if (fields == null) {
             return properties;
         }
-        for (Map.Entry<String, FieldValue> field : fields.entrySet()) {
-            properties.put(field.getKey(), new Document.Property(field.getKey(), toVertxResponse(field.getValue())));
+        if (isMap(fields)) {
+            for (String name : fields.getKeys()) {
+                properties.put(name, new Document.Property(name, fields.get(name)));
+            }
+            return properties;
+        }
+        String name = null;
+        for (Response element : fields) {
+            if (name == null) {
+                name = element.toString();
+            } else {
+                properties.put(name, new Document.Property(name, element));
+                name = null;
+            }
         }
         return properties;
-    }
-
-    private static Response toVertxResponse(FieldValue value) {
-        if (value == null || value.isNull()) {
-            return null;
-        }
-        switch (value.getKind()) {
-            case ARRAY: {
-                List<FieldValue> items = value.asList();
-                MultiType multi = MultiType.create(items.size(), false);
-                for (FieldValue item : items) {
-                    multi.add(toVertxResponse(item));
-                }
-                return multi;
-            }
-            case MAP: {
-                Map<String, FieldValue> entries = value.asMap();
-                MultiType multi = MultiType.create(entries.size(), true);
-                for (Map.Entry<String, FieldValue> entry : entries.entrySet()) {
-                    multi.add(BulkType.create(Buffer.buffer(entry.getKey()), false));
-                    multi.add(toVertxResponse(entry.getValue()));
-                }
-                return multi;
-            }
-            default:
-                return BulkType.create(Buffer.buffer(value.asBytes()), false);
-        }
     }
 
     private static SynDumpResponse decodeSynDump(Map<String, List<String>> termsToGroups) {
