@@ -135,6 +135,41 @@ class LettuceSearchReplyDecodingTest {
         assertThat(response.documents().get(0).property("count").asInteger()).isEqualTo(3);
     }
 
+    @Test
+    void resp3SearchReplyFlattenedInsideATransaction() {
+        Response reply = flattened("attributes", multi(), "format", bulk("STRING"), "total_results", number(1),
+                "results", multi(flattened("id", bulk("doc:1"), "score", number(1.5), "payload", bulk("p1"),
+                        "extra_attributes", flattened("title", bulk("Heat"), "rating", number(8)))),
+                "warning", multi());
+
+        SearchQueryResponse response = decodeSearchResponse(reply, EVERYTHING);
+
+        assertThat(response.count()).isEqualTo(1);
+        assertThat(response.documents()).singleElement().satisfies(d -> {
+            assertThat(d.key()).isEqualTo("doc:1");
+            assertThat(d.score()).isEqualTo(1.5);
+            assertThat(d.payload().toString()).isEqualTo("p1");
+            assertThat(d.property("title").asString()).isEqualTo("Heat");
+            assertThat(d.property("rating").asInteger()).isEqualTo(8);
+        });
+    }
+
+    @Test
+    void resp3AggregateReplyFlattenedInsideATransaction() {
+        Response reply = multi(
+                flattened("attributes", multi(), "format", bulk("STRING"), "total_results", number(1),
+                        "results", multi(flattened("extra_attributes", flattened("country", bulk("fr"), "count", number(3)))),
+                        "warning", multi()),
+                number(0));
+
+        AggregationResponse response = decodeAggregateResponse(reply, true);
+
+        assertThat(response.cursor()).isEqualTo(0);
+        assertThat(response.count()).isEqualTo(1);
+        assertThat(response.documents().get(0).property("country").asString()).isEqualTo("fr");
+        assertThat(response.documents().get(0).property("count").asInteger()).isEqualTo(3);
+    }
+
     private static Response bulk(String value) {
         return BulkType.create(Buffer.buffer(value), false);
     }
@@ -147,6 +182,19 @@ class LettuceSearchReplyDecodingTest {
         MultiType multi = MultiType.create(elements.length, false);
         for (Response element : elements) {
             multi.add(element);
+        }
+        return multi;
+    }
+
+    /**
+     * A RESP3 map as Lettuce 8.0.0.BETA1 delivers it to a command queued in {@code MULTI}/{@code EXEC}: a plain array
+     * of alternating keys and values (redis/lettuce#3937).
+     */
+    private static Response flattened(Object... keysAndValues) {
+        MultiType multi = MultiType.create(keysAndValues.length, false);
+        for (int i = 0; i < keysAndValues.length; i += 2) {
+            multi.add(bulk((String) keysAndValues[i]));
+            multi.add((Response) keysAndValues[i + 1]);
         }
         return multi;
     }

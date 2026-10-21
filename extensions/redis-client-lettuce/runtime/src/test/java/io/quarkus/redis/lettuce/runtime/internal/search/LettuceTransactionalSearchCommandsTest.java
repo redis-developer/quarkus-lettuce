@@ -7,7 +7,6 @@ import java.time.Duration;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -28,13 +27,10 @@ import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
 
 /**
- * Disabled until the BOM moves to a Lettuce release carrying redis/lettuce#3959: before it, Lettuce hands a RESP3 map
- * reply to a command queued in {@code MULTI}/{@code EXEC} as a plain array (redis/lettuce#3937), so the
- * {@code FT.SEARCH} and {@code FT.AGGREGATE} replies of a transaction cannot be decoded on the RESP3 connections the
- * tests use. Remove the annotation once the fix is in.
+ * On the RESP3 connections the tests use, Lettuce 8.0.0.BETA1 hands the {@code FT.SEARCH} and {@code FT.AGGREGATE}
+ * replies of a transaction to the decoder flattened into plain arrays (redis/lettuce#3937);
+ * {@link #searchAndAggregateRepliesAreDecodedInsideTransactions} covers that.
  */
-@Disabled("redis/lettuce#3937: RESP3 map replies are flattened inside MULTI/EXEC, fixed by redis/lettuce#3959 which"
-        + " the Lettuce version of the BOM does not carry yet")
 @SuppressWarnings("ConstantConditions")
 class LettuceTransactionalSearchCommandsTest extends CommandsTestBase {
 

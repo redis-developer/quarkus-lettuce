@@ -411,7 +411,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         if (response == null) {
             return new SearchQueryResponse(0, Collections.emptyList());
         }
-        if (isMap(response)) {
+        if (isMapReply(response)) {
             Response total = response.get("total_results");
             if (total == null || total.toInteger() == 0) {
                 return new SearchQueryResponse(0, Collections.emptyList());
@@ -453,7 +453,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
             cursorId = response.get(1).toLong();
         }
         List<AggregateDocument> documents = new ArrayList<>();
-        if (isMap(results)) {
+        if (isMapReply(results)) {
             for (Response result : orEmpty(results.get("results"))) {
                 documents.add(new AggregateDocument(properties(result.get("extra_attributes"))));
             }
@@ -469,6 +469,24 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
 
     private static boolean isMap(Response response) {
         return response instanceof MultiType multi && multi.isMap();
+    }
+
+    /**
+     * Whether a {@code FT.SEARCH} or {@code FT.AGGREGATE} reply is a RESP3 map, as such or flattened into an array of
+     * alternating keys and values: Lettuce 8.0.0.BETA1 hands the RESP3 map reply of a command queued in
+     * {@code MULTI}/{@code EXEC} to the command's output as a plain array (redis/lettuce#3937, fixed by
+     * redis/lettuce#3959). The RESP2 replies start with the result count, so an even-sized array starting with a bulk
+     * string is a flattened map, on which {@link MultiType} resolves the names pairwise.
+     */
+    private static boolean isMapReply(Response response) {
+        if (!(response instanceof MultiType multi)) {
+            return false;
+        }
+        if (multi.isMap()) {
+            return true;
+        }
+        return multi.size() > 0 && multi.size() % 2 == 0 && multi.get(0) != null
+                && multi.get(0).type() == ResponseType.BULK;
     }
 
     private static Iterable<Response> orEmpty(Response multi) {
