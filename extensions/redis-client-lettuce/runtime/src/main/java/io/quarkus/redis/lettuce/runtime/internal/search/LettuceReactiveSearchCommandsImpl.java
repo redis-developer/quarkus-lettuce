@@ -150,7 +150,8 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         }
         commandArgs.add(CommandKeyword.SCHEMA).add(CommandKeyword.ADD);
         ArgReplay.replay(field.toArgs(), commandArgs);
-        return LettuceCommand.discarding(() -> async.dispatch(CommandType.FT_ALTER, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
+        return LettuceCommand.discarding(
+                () -> async.dispatch(CommandType.FT_ALTER, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
     }
 
     @Override
@@ -164,7 +165,8 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         CommandArgs<byte[], byte[]> commandArgs = commandArgs(index);
         // toArgs() rejects an empty schema and `ON HASH` combined with `ON JSON`, before the command is issued
         ArgReplay.replay(args.toArgs(), commandArgs);
-        return LettuceCommand.discarding(() -> async.dispatch(CommandType.FT_CREATE, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
+        return LettuceCommand.discarding(
+                () -> async.dispatch(CommandType.FT_CREATE, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
     }
 
     @Override
@@ -175,8 +177,10 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<String, Void> _ftCursorDel(String index, long cursor) {
         notNullOrBlank(index, "index");
         positiveOrZero(cursor, "cursor");
-        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.DEL).add(index).add(cursor);
-        return LettuceCommand.discarding(() -> async.dispatch(CommandType.FT_CURSOR, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
+        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.DEL).add(index)
+                .add(cursor);
+        return LettuceCommand.discarding(
+                () -> async.dispatch(CommandType.FT_CURSOR, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
     }
 
     @Override
@@ -187,7 +191,8 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<Response, AggregationResponse> _ftCursorRead(String index, long cursor) {
         notNullOrBlank(index, "index");
         positiveOrZero(cursor, "cursor");
-        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.READ).add(index).add(cursor);
+        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.READ).add(index)
+                .add(cursor);
         return LettuceCommand.of(() -> async.dispatch(CommandType.FT_CURSOR, responseOutput(), commandArgs),
                 reply -> decodeAggregateResponse(reply, true));
     }
@@ -201,7 +206,8 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         notNullOrBlank(index, "index");
         positiveOrZero(cursor, "cursor");
         positive(count, "count");
-        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.READ).add(index).add(cursor)
+        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.READ).add(index)
+                .add(cursor)
                 .add(CommandKeyword.COUNT).add(count);
         return LettuceCommand.of(() -> async.dispatch(CommandType.FT_CURSOR, responseOutput(), commandArgs),
                 reply -> decodeAggregateResponse(reply, true));
