@@ -84,7 +84,7 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
         if (values.length == 0) {
             return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
-        return LettuceCommand.of(() -> async.bfMExists(marshaller.encode(key), marshaller.encodeAsArray(values)));
+        return LettuceCommand.of(() -> async.bfMExists(marshaller.encode(key), marshaller.encodeAsArray(values)), AbstractLettuceCommands::decodeList);
     }
 
     @Override
