@@ -19,13 +19,16 @@ import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.test.QuarkusExtensionTest;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.smallrye.common.annotation.Identifier;
-import io.vertx.core.Vertx;
 import io.vertx.redis.client.Command;
 
 /**
  * Verifies that a Lettuce client configured through {@code hosts-provider-name}, with no {@code hosts}, connects to
  * the URI the {@link RedisHostsProvider} bean of that name returns, as the Vert.x client does: the data source and
  * the Lettuce beans of the client work, on the database of the provided URI.
+ * <p>
+ * The provider of a data source client is also called by the Vert.x client still created for it, from a
+ * {@code Phase.DATA} service that runs before the synthetic beans initialized at runtime are usable, so it must not
+ * inject such beans. {@link LettuceHostsProviderInitOrderTest} covers the call order of the Lettuce backend alone.
  */
 @QuarkusTestResource(RedisTestResource.class)
 public class LettuceHostsProviderTest {
@@ -57,9 +60,7 @@ public class LettuceHostsProviderTest {
 
     /**
      * Provides the test server, database 2, so that the connections can be told from ones made through
-     * {@code hosts}. Injects the Vert.x instance, a bean initialized at runtime like a data source or a Vert.x Redis
-     * client, as a provider discovering the hosts would: the backend must only call the provider once such beans are
-     * usable.
+     * {@code hosts}.
      */
     @ApplicationScoped
     @Identifier("database-two")
@@ -68,12 +69,8 @@ public class LettuceHostsProviderTest {
         @ConfigProperty(name = "quarkus.redis.tr")
         String endpoint;
 
-        @Inject
-        Vertx vertx;
-
         @Override
         public Set<URI> getHosts() {
-            assertThat(vertx).isNotNull();
             return Set.of(URI.create(endpoint + "/2"));
         }
     }

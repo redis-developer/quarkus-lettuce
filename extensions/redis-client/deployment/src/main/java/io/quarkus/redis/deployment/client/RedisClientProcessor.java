@@ -13,12 +13,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Default;
+import jakarta.enterprise.inject.Instance;
 
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
@@ -31,12 +33,13 @@ import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.BeanArchiveIndexBuildItem;
 import io.quarkus.arc.deployment.BeanDiscoveryFinishedBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
-import io.quarkus.arc.deployment.SyntheticBeansRuntimeInitBuildItem;
 import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
 import io.quarkus.arc.processor.InjectionPointInfo;
+import io.quarkus.arc.runtime.BeanContainer;
+import io.quarkus.core.Phase;
+import io.quarkus.core.deployment.service.ServiceRegistrar;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
-import io.quarkus.deployment.annotations.Consume;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.ApplicationArchivesBuildItem;
@@ -44,25 +47,30 @@ import io.quarkus.deployment.builditem.ExtensionSslNativeSupportBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.HotDeploymentWatchedFileBuildItem;
 import io.quarkus.deployment.builditem.LaunchModeBuildItem;
-import io.quarkus.deployment.builditem.ServiceStartBuildItem;
-import io.quarkus.deployment.builditem.ShutdownContextBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
-import io.quarkus.proxy.deployment.ProxyRegistryBuildItem;
+import io.quarkus.proxy.ProxyConfigurationRegistry;
 import io.quarkus.redis.client.RedisClient;
 import io.quarkus.redis.client.RedisClientName;
 import io.quarkus.redis.client.RedisHostsProvider;
 import io.quarkus.redis.client.RedisOptionsCustomizer;
 import io.quarkus.redis.client.reactive.ReactiveRedisClient;
+import io.quarkus.redis.runtime.client.ObservableRedisMetrics;
+import io.quarkus.redis.runtime.client.RedisClientConnection;
 import io.quarkus.redis.runtime.client.RedisClientRecorder;
+import io.quarkus.redis.runtime.client.RedisDataLoader;
+import io.quarkus.redis.runtime.client.VertxRedisClientFactory;
+import io.quarkus.redis.runtime.client.config.RedisClientConfig;
 import io.quarkus.redis.runtime.client.config.RedisConfig;
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.runtime.configuration.NameIterator;
 import io.quarkus.smallrye.health.deployment.spi.HealthBuildItem;
-import io.quarkus.tls.deployment.spi.TlsRegistryBuildItem;
-import io.quarkus.vertx.deployment.VertxBuildItem;
+import io.quarkus.tls.TlsConfigurationRegistry;
 import io.smallrye.config.SmallRyeConfig;
+import io.vertx.core.Vertx;
+import io.vertx.redis.client.Command;
+import io.vertx.redis.client.Request;
 import io.vertx.redis.client.impl.types.BulkType;
 
 public class RedisClientProcessor {
@@ -124,71 +132,15 @@ public class RedisClientProcessor {
     public void init(
             List<RequestedRedisClientBuildItem> clients,
             RedisClientRecorder recorder,
+            ServiceRegistrar reg,
             RedisBuildTimeConfig buildTimeConfig,
             BeanArchiveIndexBuildItem indexBuildItem,
             BeanDiscoveryFinishedBuildItem beans,
-            BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
-
-        // Create the supplier and define the beans.
-        for (String name : usedClientNames(clients, buildTimeConfig, indexBuildItem, beans)) {
-            Supplier<ActiveResult> checkActive = recorder.checkActive(name);
-
-            // Redis objects
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.mutiny.redis.client.Redis.class,
-                    checkActive, recorder.getRedisClient(name)));
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.redis.client.Redis.class,
-                    checkActive, recorder.getBareRedisClient(name)));
-
-            // Redis API objects
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.mutiny.redis.client.RedisAPI.class,
-                    checkActive, recorder.getRedisAPI(name)));
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.redis.client.RedisAPI.class,
-                    checkActive, recorder.getBareRedisAPI(name)));
-
-            // Legacy clients
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, RedisClient.class,
-                    checkActive, recorder.getLegacyRedisClient(name)));
-            syntheticBeans.produce(configureAndCreateSyntheticBean(name, ReactiveRedisClient.class,
-                    checkActive, recorder.getLegacyReactiveRedisClient(name)));
-        }
-    }
-
-    @BuildStep
-    @Record(ExecutionTime.RUNTIME_INIT)
-    @Consume(SyntheticBeansRuntimeInitBuildItem.class)
-    public ServiceStartBuildItem initializeClients(
-            List<RequestedRedisClientBuildItem> clients,
-            RedisClientRecorder recorder,
-            RedisBuildTimeConfig buildTimeConfig,
-            BeanArchiveIndexBuildItem indexBuildItem,
-            BeanDiscoveryFinishedBuildItem beans,
-            ShutdownContextBuildItem shutdown,
-            VertxBuildItem vertxBuildItem,
+            BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
             ApplicationArchivesBuildItem applicationArchivesBuildItem, LaunchModeBuildItem launchMode,
             BuildProducer<NativeImageResourceBuildItem> nativeImageResources,
-            BuildProducer<HotDeploymentWatchedFileBuildItem> hotDeploymentWatchedFiles,
-            TlsRegistryBuildItem tlsRegistryBuildItem,
-            ProxyRegistryBuildItem proxyRegistryBuildItem) {
+            BuildProducer<HotDeploymentWatchedFileBuildItem> hotDeploymentWatchedFiles) {
 
-        Set<String> names = usedClientNames(clients, buildTimeConfig, indexBuildItem, beans);
-
-        // Inject the creation of the client when the application starts.
-        recorder.initialize(vertxBuildItem.getVertx(), names, tlsRegistryBuildItem.registry(),
-                proxyRegistryBuildItem.registry());
-
-        recorder.cleanup(shutdown);
-
-        // Handle data import
-        for (String name : buildTimeConfig.clientsNames()) {
-            preloadRedisData(name, buildTimeConfig.clients().get(name), applicationArchivesBuildItem,
-                    launchMode.getLaunchMode(),
-                    nativeImageResources, hotDeploymentWatchedFiles, recorder);
-        }
-        return new ServiceStartBuildItem(FEATURE);
-    }
-
-    static Set<String> usedClientNames(List<RequestedRedisClientBuildItem> clients, RedisBuildTimeConfig buildTimeConfig,
-            BeanArchiveIndexBuildItem indexBuildItem, BeanDiscoveryFinishedBuildItem beans) {
         // Collect the used redis clients, the unused clients will not be instantiated.
         Set<String> names = new HashSet<>();
 
@@ -214,7 +166,120 @@ public class RedisClientProcessor {
                 .filter(InjectionPointInfo::isProgrammaticLookup)
                 .findAny()
                 .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, ConfigProvider.getConfig())));
-        return names;
+
+        // Register services and synthetic beans for each client name
+        for (String name : names) {
+            Supplier<ActiveResult> checkActive = recorder.checkActive(name);
+
+            registerClientServices(reg, name);
+            registerClientBeans(syntheticBeans, checkActive, name);
+        }
+
+        // Handle data import (chained sequentially since clients may share a server)
+        String previousPreload = null;
+        for (String name : buildTimeConfig.clientsNames()) {
+            previousPreload = preloadRedisData(name, buildTimeConfig.clients().get(name), applicationArchivesBuildItem,
+                    launchMode.getLaunchMode(),
+                    nativeImageResources, hotDeploymentWatchedFiles, reg, previousPreload);
+        }
+    }
+
+    /**
+     * Register the core client connection service and all derived bean services
+     * for a single named Redis client.
+     */
+    private void registerClientServices(ServiceRegistrar reg, String name) {
+        // Core connection service: creates the Vert.x Redis client
+        reg.forService(RedisClientConnection.class, name)
+                .atPhase(Phase.DATA)
+                .require(RedisConfig.class)
+                .require(Vertx.class)
+                .require(TlsConfigurationRegistry.class)
+                .require(BeanContainer.class)
+                .request(ProxyConfigurationRegistry.class)
+                .optional()
+                .onStart((ctx, config, vertx, tlsReg, bc, proxyRegOpt) -> {
+                    RedisClientConfig clientConfig = config.clients().get(name);
+                    if (!clientConfig.active()
+                            || (clientConfig.hosts().isEmpty() && clientConfig.hostsProviderName().isEmpty())) {
+                        return Optional.empty();
+                    }
+                    ObservableRedisMetrics metrics = null;
+                    Instance<ObservableRedisMetrics> inst = jakarta.enterprise.inject.spi.CDI.current()
+                            .select(ObservableRedisMetrics.class);
+                    if (inst.isResolvable()) {
+                        metrics = inst.get();
+                    }
+                    RedisClientConnection conn = RedisClientConnection.create(name,
+                            VertxRedisClientFactory.create(name, vertx, clientConfig, tlsReg,
+                                    proxyRegOpt.orElse(null)),
+                            metrics);
+                    ctx.onStop(() -> conn.redis().close());
+                    return Optional.of(conn);
+                });
+
+        // Mutiny Redis client bean service
+        reg.forService(io.vertx.mutiny.redis.client.Redis.class, name)
+                .atPhase(Phase.DATA)
+                .request(RedisClientConnection.class, name)
+                .optional()
+                .onStart((ctx, connOpt) -> connOpt.map(RedisClientConnection::redis));
+
+        // Bare Vert.x Redis client bean service
+        reg.forService(io.vertx.redis.client.Redis.class, name)
+                .atPhase(Phase.DATA)
+                .request(RedisClientConnection.class, name)
+                .optional()
+                .onStart((ctx, connOpt) -> connOpt.map(RedisClientConnection::observable));
+
+        // Mutiny RedisAPI bean service
+        reg.forService(io.vertx.mutiny.redis.client.RedisAPI.class, name)
+                .atPhase(Phase.DATA)
+                .request(RedisClientConnection.class, name)
+                .optional()
+                .onStart((ctx, connOpt) -> connOpt.map(RedisClientConnection::api));
+
+        // Bare Vert.x RedisAPI bean service
+        reg.forService(io.vertx.redis.client.RedisAPI.class, name)
+                .atPhase(Phase.DATA)
+                .request(RedisClientConnection.class, name)
+                .optional()
+                .onStart((ctx, connOpt) -> connOpt.map(c -> c.api().getDelegate()));
+
+        // Legacy RedisClient bean service
+        reg.forService(RedisClient.class, name)
+                .atPhase(Phase.DATA)
+                .request(RedisClientConnection.class, name)
+                .require(RedisConfig.class)
+                .optional()
+                .onStart((ctx, connOpt, config) -> connOpt.map(conn -> {
+                    java.time.Duration timeout = config.clients().get(name).timeout();
+                    return new io.quarkus.redis.runtime.client.RedisClientImpl(
+                            conn.redis(), conn.api(), timeout);
+                }));
+
+        // Legacy ReactiveRedisClient bean service
+        reg.forService(ReactiveRedisClient.class, name)
+                .atPhase(Phase.DATA)
+                .request(RedisClientConnection.class, name)
+                .optional()
+                .onStart((ctx, connOpt) -> connOpt.map(conn -> new io.quarkus.redis.runtime.client.ReactiveRedisClientImpl(
+                        conn.redis(), conn.api())));
+    }
+
+    /**
+     * Register synthetic CDI beans backed by service values.
+     */
+    private void registerClientBeans(BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
+            Supplier<ActiveResult> checkActive, String name) {
+        // Client types
+        syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.mutiny.redis.client.Redis.class, checkActive));
+        syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.redis.client.Redis.class, checkActive));
+        syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.mutiny.redis.client.RedisAPI.class, checkActive));
+        syntheticBeans.produce(configureAndCreateSyntheticBean(name, io.vertx.redis.client.RedisAPI.class, checkActive));
+        // Legacy types
+        syntheticBeans.produce(configureAndCreateSyntheticBean(name, RedisClient.class, checkActive));
+        syntheticBeans.produce(configureAndCreateSyntheticBean(name, ReactiveRedisClient.class, checkActive));
     }
 
     static Set<String> configuredClientNames(RedisBuildTimeConfig buildTimeConfig, Config config) {
@@ -249,8 +314,11 @@ public class RedisClientProcessor {
         return names;
     }
 
+    /**
+     * Configure a synthetic bean backed by a service value.
+     */
     static <T> SyntheticBeanBuildItem configureAndCreateSyntheticBean(String name, Class<T> type,
-            Supplier<ActiveResult> checkActive, Supplier<T> supplier) {
+            Supplier<ActiveResult> checkActive) {
 
         SyntheticBeanBuildItem.ExtendedBeanConfigurator configurator = SyntheticBeanBuildItem
                 .configure(type)
@@ -258,7 +326,7 @@ public class RedisClientProcessor {
                 .startup()
                 .setRuntimeInit()
                 .unremovable()
-                .supplier(supplier)
+                .serviceValue(type, name)
                 .scope(ApplicationScoped.class);
 
         if (DEFAULT_CLIENT_NAME.equalsIgnoreCase(name)) {
@@ -270,10 +338,15 @@ public class RedisClientProcessor {
         return configurator.done();
     }
 
-    private void preloadRedisData(String name, RedisClientBuildTimeConfig clientConfig,
+    /**
+     * Register a preload service for the given client name, returning the service name
+     * (or {@code previousPreload} if no preload was registered).
+     */
+    private String preloadRedisData(String name, RedisClientBuildTimeConfig clientConfig,
             ApplicationArchivesBuildItem applicationArchivesBuildItem,
             LaunchMode launchMode, BuildProducer<NativeImageResourceBuildItem> nativeImageResources,
-            BuildProducer<HotDeploymentWatchedFileBuildItem> hotDeploymentWatchedFiles, RedisClientRecorder recorder) {
+            BuildProducer<HotDeploymentWatchedFileBuildItem> hotDeploymentWatchedFiles, ServiceRegistrar reg,
+            String previousPreload) {
         List<String> importFiles = getRedisLoadScript(clientConfig, launchMode);
         List<String> paths = new ArrayList<>();
         for (String importFile : importFiles) {
@@ -309,13 +382,35 @@ public class RedisClientProcessor {
         }
 
         if (!paths.isEmpty()) {
-            if (clientConfig != null) {
-                recorder.preload(name, paths, clientConfig.flushBeforeLoad(), clientConfig.loadOnlyIfEmpty());
-            } else {
-                recorder.preload(name, paths, true, true);
-            }
-        }
+            boolean flushBeforeLoad = clientConfig != null && clientConfig.flushBeforeLoad();
+            boolean loadOnlyIfEmpty = clientConfig == null || clientConfig.loadOnlyIfEmpty();
+            List<String> capturedPaths = List.copyOf(paths);
+            String serviceName = "io.quarkus.redis.preload." + name;
 
+            var builder = reg.forService(serviceName)
+                    .atPhase(Phase.INIT)
+                    .require(RedisClientConnection.class, name)
+                    .require(Vertx.class);
+            if (previousPreload != null) {
+                builder.after(previousPreload);
+            }
+            builder.onStart((ctx, conn, vertx) -> {
+                io.vertx.mutiny.core.Vertx mutinyVertx = io.vertx.mutiny.core.Vertx.newInstance(vertx);
+                if (flushBeforeLoad) {
+                    conn.redis().send(Request.cmd(Command.FLUSHALL)).await().indefinitely();
+                } else if (loadOnlyIfEmpty) {
+                    var list = conn.redis().send(Request.cmd(Command.KEYS).arg("*")).await().indefinitely();
+                    if (list.size() != 0) {
+                        return;
+                    }
+                }
+                for (String path : capturedPaths) {
+                    RedisDataLoader.load(mutinyVertx, conn.redis(), path);
+                }
+            });
+            return serviceName;
+        }
+        return previousPreload;
     }
 
     @BuildStep
