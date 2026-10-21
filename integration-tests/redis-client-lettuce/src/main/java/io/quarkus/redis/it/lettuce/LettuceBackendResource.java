@@ -13,6 +13,7 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -76,6 +77,20 @@ import io.quarkus.redis.datasource.list.ListCommands;
 import io.quarkus.redis.datasource.list.ReactiveListCommands;
 import io.quarkus.redis.datasource.pubsub.PubSubCommands;
 import io.quarkus.redis.datasource.pubsub.ReactivePubSubCommands;
+import io.quarkus.redis.datasource.search.AggregateArgs;
+import io.quarkus.redis.datasource.search.AggregationResponse;
+import io.quarkus.redis.datasource.search.CreateArgs;
+import io.quarkus.redis.datasource.search.Document;
+import io.quarkus.redis.datasource.search.FieldOptions;
+import io.quarkus.redis.datasource.search.FieldType;
+import io.quarkus.redis.datasource.search.IndexedField;
+import io.quarkus.redis.datasource.search.QueryArgs;
+import io.quarkus.redis.datasource.search.ReactiveSearchCommands;
+import io.quarkus.redis.datasource.search.SearchCommands;
+import io.quarkus.redis.datasource.search.SearchQueryResponse;
+import io.quarkus.redis.datasource.search.SpellCheckArgs;
+import io.quarkus.redis.datasource.search.SpellCheckResponse;
+import io.quarkus.redis.datasource.search.SynDumpResponse;
 import io.quarkus.redis.datasource.set.ReactiveSetCommands;
 import io.quarkus.redis.datasource.set.SetCommands;
 import io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands;
@@ -149,6 +164,8 @@ public class LettuceBackendResource {
     private final ReactivePubSubCommands<String> reactivePubSub;
     private final JsonCommands<String> json;
     private final ReactiveJsonCommands<String> reactiveJson;
+    private final SearchCommands<String> search;
+    private final ReactiveSearchCommands<String> reactiveSearch;
     private final AutoSuggestCommands<String> autosuggest;
     private final ReactiveAutoSuggestCommands<String> reactiveAutoSuggest;
     private final CuckooCommands<String, String> cuckoo;
@@ -203,6 +220,8 @@ public class LettuceBackendResource {
         this.reactivePubSub = reactiveDs.pubsub(String.class);
         this.json = ds.json();
         this.reactiveJson = reactiveDs.json();
+        this.search = ds.search();
+        this.reactiveSearch = reactiveDs.search();
         this.autosuggest = ds.autosuggest(String.class);
         this.reactiveAutoSuggest = reactiveDs.autosuggest(String.class);
         this.cuckoo = ds.cuckoo(String.class);
@@ -1149,7 +1168,7 @@ public class LettuceBackendResource {
     public String pubSubSubscribe(@QueryParam("channels") String channels) {
         Subscription subscription = new Subscription();
         subscription.subscriber = pubsub.subscribe(List.of(channels.split(",")),
-                (channel, payload) -> subscription.record(channel, payload), subscription::end, null);
+                subscription::record, subscription::end, null);
         return register(subscription);
     }
 
@@ -1159,7 +1178,7 @@ public class LettuceBackendResource {
     public String pubSubSubscribeToPatterns(@QueryParam("patterns") String patterns) {
         Subscription subscription = new Subscription();
         subscription.subscriber = pubsub.subscribeToPatterns(List.of(patterns.split(",")),
-                (channel, payload) -> subscription.record(channel, payload), subscription::end, null);
+                subscription::record, subscription::end, null);
         return register(subscription);
     }
 
@@ -2211,6 +2230,336 @@ public class LettuceBackendResource {
         return result.discarded() + "," + result.size() + "," + (created == null) + "," + id1 + "," + id2 + "," + length
                 + "," + formatMessages(range) + "," + formatMessages(read) + "," + formatMessages(group) + ","
                 + formatPendingSummary(pending) + "," + acknowledged + "," + deleted + "," + trimmed;
+    }
+
+    @RegisterForReflection
+    public record SearchDocument(String key, double score, Map<String, String> properties) {
+    }
+
+    @RegisterForReflection
+    public record SearchResult(int count, long cursor, List<SearchDocument> documents) {
+    }
+
+    @RegisterForReflection
+    public record SpellCheck(boolean correct, Map<String, List<String>> suggestions) {
+    }
+
+    @POST
+    @Path("/search/index/{index}")
+    public void searchCreate(@PathParam("index") String index, @QueryParam("prefix") String prefix,
+            @QueryParam("json") boolean onJson, String fields) {
+        CreateArgs args = onJson ? new CreateArgs().onJson() : new CreateArgs().onHash();
+        if (prefix != null) {
+            args.prefixes(prefix);
+        }
+        for (FieldSpec field : parseFields(fields)) {
+            if (field.alias() == null) {
+                args.indexedField(field.name(), field.type(), field.options());
+            } else {
+                args.indexedField(field.name(), field.alias(), field.type(), field.options());
+            }
+        }
+        search.ftCreate(index, args);
+    }
+
+    private record FieldSpec(String name, String alias, FieldType type, FieldOptions options) {
+
+        IndexedField toIndexedField() {
+            return alias == null ? IndexedField.from(name, type, options) : IndexedField.from(name, alias, type, options);
+        }
+
+    }
+
+    private static List<FieldSpec> parseFields(String spec) {
+        List<FieldSpec> fields = new ArrayList<>();
+        for (String token : spec.split(",")) {
+            String[] parts = token.trim().split(":");
+            String[] name = parts[0].split("=");
+            FieldType type = FieldType.valueOf(parts[1].toUpperCase());
+            FieldOptions options = new FieldOptions();
+            if (parts.length > 2 && parts[2].equalsIgnoreCase("sortable")) {
+                options.sortable();
+            }
+            fields.add(new FieldSpec(name[0], name.length > 1 ? name[1] : null, type, options));
+        }
+        return fields;
+    }
+
+    @GET
+    @Path("/search/list")
+    public List<String> searchList() {
+        return search.ft_list();
+    }
+
+    @DELETE
+    @Path("/search/index/{index}")
+    public void searchDrop(@PathParam("index") String index, @QueryParam("dd") boolean dd) {
+        search.ftDropIndex(index, dd);
+    }
+
+    @POST
+    @Path("/search/alter/{index}")
+    public void searchAlter(@PathParam("index") String index, String field) {
+        search.ftAlter(index, parseFields(field).get(0).toIndexedField());
+    }
+
+    @GET
+    @Path("/search/query/{index}")
+    public SearchResult searchQuery(@PathParam("index") String index, @QueryParam("q") String query,
+            @QueryParam("return") String returnFields, @QueryParam("sortBy") String sortBy,
+            @QueryParam("desc") boolean desc, @QueryParam("offset") Integer offset, @QueryParam("count") Integer count,
+            @QueryParam("withScores") boolean withScores, @QueryParam("noContent") boolean noContent,
+            @QueryParam("param") List<String> params) {
+        QueryArgs args = new QueryArgs();
+        boolean withArgs = false;
+        if (returnFields != null) {
+            for (String field : returnFields.split(",")) {
+                String[] parts = field.split("=");
+                if (parts.length > 1) {
+                    args.returnAttribute(parts[0], parts[1]);
+                } else {
+                    args.returnAttribute(parts[0]);
+                }
+            }
+            withArgs = true;
+        }
+        if (sortBy != null) {
+            if (desc) {
+                args.sortByDescending(sortBy);
+            } else {
+                args.sortByAscending(sortBy);
+            }
+            withArgs = true;
+        }
+        if (offset != null && count != null) {
+            args.limit(offset, count);
+            withArgs = true;
+        }
+        if (withScores) {
+            args.withScores();
+            withArgs = true;
+        }
+        if (noContent) {
+            args.nocontent();
+            withArgs = true;
+        }
+        if (!params.isEmpty()) {
+            for (String param : params) {
+                String[] parts = param.split("=", 2);
+                args.param(parts[0], parts[1]);
+            }
+            args.dialect(2);
+            withArgs = true;
+        }
+        return toResult(withArgs ? search.ftSearch(index, query, args) : search.ftSearch(index, query));
+    }
+
+    @GET
+    @Path("/search/aggregate/{index}")
+    public SearchResult searchAggregate(@PathParam("index") String index, @QueryParam("q") String query,
+            @QueryParam("load") String load, @QueryParam("apply") String apply, @QueryParam("groupBy") String groupBy,
+            @QueryParam("reduce") List<String> reduces, @QueryParam("sortBy") String sortBy,
+            @QueryParam("desc") boolean desc, @QueryParam("cursor") Integer cursorCount) {
+        AggregateArgs args = new AggregateArgs();
+        if ("*".equals(load)) {
+            args.allFields();
+        } else if (load != null) {
+            for (String field : load.split(",")) {
+                String[] parts = field.split("=");
+                if (parts.length > 1) {
+                    args.field(parts[0], parts[1]);
+                } else {
+                    args.field(parts[0]);
+                }
+            }
+        }
+        if (apply != null) {
+            String[] parts = apply.split("=", 2);
+            args.apply(new AggregateArgs.Apply(parts[1], parts[0]));
+        }
+        if (groupBy != null) {
+            AggregateArgs.GroupBy group = new AggregateArgs.GroupBy();
+            for (String property : groupBy.split(",")) {
+                group.addProperty(property);
+            }
+            for (String reduce : reduces) {
+                String[] parts = reduce.split(":");
+                Object[] reduceArgs = parts.length > 2 ? parts[2].split(",") : new Object[0];
+                group.addReduceFunction(parts[0], parts[1], reduceArgs);
+            }
+            args.groupBy(group);
+        }
+        if (sortBy != null) {
+            args.sortBy(desc ? new AggregateArgs.SortBy().descending(sortBy) : new AggregateArgs.SortBy().ascending(sortBy));
+        }
+        if (cursorCount != null) {
+            args.withCursor().cursorCount(cursorCount);
+        }
+        return toResult(search.ftAggregate(index, query, args));
+    }
+
+    @GET
+    @Path("/search/cursor/{index}/{cursor}")
+    public SearchResult searchCursorRead(@PathParam("index") String index, @PathParam("cursor") long cursor,
+            @QueryParam("count") Integer count) {
+        return toResult(count == null ? search.ftCursorRead(index, cursor) : search.ftCursorRead(index, cursor, count));
+    }
+
+    @DELETE
+    @Path("/search/cursor/{index}/{cursor}")
+    public void searchCursorDel(@PathParam("index") String index, @PathParam("cursor") long cursor) {
+        search.ftCursorDel(index, cursor);
+    }
+
+    @POST
+    @Path("/search/alias/{alias}/{index}")
+    public void searchAliasAdd(@PathParam("alias") String alias, @PathParam("index") String index,
+            @QueryParam("update") boolean update) {
+        if (update) {
+            search.ftAliasUpdate(alias, index);
+        } else {
+            search.ftAliasAdd(alias, index);
+        }
+    }
+
+    @DELETE
+    @Path("/search/alias/{alias}")
+    public void searchAliasDel(@PathParam("alias") String alias) {
+        search.ftAliasDel(alias);
+    }
+
+    @POST
+    @Path("/search/synonyms/{index}/{group}")
+    public void searchSynUpdate(@PathParam("index") String index, @PathParam("group") String group,
+            @QueryParam("skipInitialScan") boolean skipInitialScan, String terms) {
+        search.ftSynUpdate(index, group, skipInitialScan, terms.split(","));
+    }
+
+    @GET
+    @Path("/search/synonyms/{index}")
+    public Map<String, List<String>> searchSynDump(@PathParam("index") String index) {
+        SynDumpResponse response = search.ftSynDump(index);
+        Map<String, List<String>> groups = new TreeMap<>();
+        for (String group : response.groups()) {
+            groups.put(group, response.synonym(group).stream().sorted().toList());
+        }
+        return groups;
+    }
+
+    @POST
+    @Path("/search/dict/{dict}")
+    public void searchDictAdd(@PathParam("dict") String dict, String words) {
+        search.ftDictAdd(dict, words.split(","));
+    }
+
+    @DELETE
+    @Path("/search/dict/{dict}")
+    public void searchDictDel(@PathParam("dict") String dict, @QueryParam("words") String words) {
+        search.ftDictDel(dict, words.split(","));
+    }
+
+    @GET
+    @Path("/search/dict/{dict}")
+    public List<String> searchDictDump(@PathParam("dict") String dict) {
+        return search.ftDictDump(dict).stream().sorted().toList();
+    }
+
+    @GET
+    @Path("/search/spellcheck/{index}")
+    public SpellCheck searchSpellCheck(@PathParam("index") String index, @QueryParam("q") String query,
+            @QueryParam("include") String include, @QueryParam("exclude") String exclude,
+            @QueryParam("distance") Integer distance) {
+        SpellCheckResponse response;
+        if (include == null && exclude == null && distance == null) {
+            response = search.ftSpellCheck(index, query);
+        } else {
+            SpellCheckArgs args = new SpellCheckArgs();
+            if (include != null) {
+                args.includes(include);
+            }
+            if (exclude != null) {
+                args.excludes(exclude);
+            }
+            if (distance != null) {
+                args.distance(distance);
+            }
+            response = search.ftSpellCheck(index, query, args);
+        }
+        Map<String, List<String>> suggestions = new TreeMap<>();
+        for (String word : response.misspelledWords()) {
+            suggestions.put(word, response.suggestions(word).stream()
+                    .map(SpellCheckResponse.SpellCheckSuggestion::word)
+                    .toList());
+        }
+        return new SpellCheck(response.isCorrect(), suggestions);
+    }
+
+    @GET
+    @Path("/search/tagvals/{index}/{field}")
+    public Set<String> searchTagVals(@PathParam("index") String index, @PathParam("field") String field) {
+        return new TreeSet<>(search.ftTagVals(index, field));
+    }
+
+    @GET
+    @Path("/search/reactive/list")
+    public Uni<List<String>> searchListReactive() {
+        return reactiveSearch.ft_list();
+    }
+
+    @GET
+    @Path("/search/reactive/query/{index}")
+    public Uni<SearchResult> searchQueryReactive(@PathParam("index") String index, @QueryParam("q") String query) {
+        return reactiveSearch.ftSearch(index, query).map(LettuceBackendResource::toResult);
+    }
+
+    private static SearchResult toResult(SearchQueryResponse response) {
+        List<SearchDocument> documents = response.documents().stream()
+                .map(d -> new SearchDocument(d.key(), d.score(), toStrings(d.properties())))
+                .toList();
+        return new SearchResult(response.count(), -1, documents);
+    }
+
+    private static SearchResult toResult(AggregationResponse response) {
+        List<SearchDocument> documents = response.documents().stream()
+                .map(d -> new SearchDocument(null, 0, toStrings(d.properties())))
+                .toList();
+        return new SearchResult(response.count(), response.cursor(), documents);
+    }
+
+    private static Map<String, String> toStrings(Map<String, Document.Property> properties) {
+        Map<String, String> strings = new LinkedHashMap<>();
+        properties.forEach((name, property) -> strings.put(name, property == null ? null : property.asString()));
+        return strings;
+    }
+
+    @POST
+    @Path("/with-transaction/search/{index}")
+    public String withTransactionSearch(@PathParam("index") String index) {
+        String alias = index + "-alias";
+        String dict = index + "-dict";
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var s = tx.search();
+            s.ft_list(); // 0
+            s.ftTagVals(index, "genre"); // 1
+            s.ftAliasAdd(alias, index); // 2
+            s.ftAliasDel(alias); // 3
+            s.ftSynUpdate(index, "greetings", "hello", "world"); // 4
+            s.ftSynDump(index); // 5
+            s.ftDictAdd(dict, "hello", "bonjour"); // 6
+            s.ftDictDel(dict, "hello"); // 7
+            s.ftDictDump(dict); // 8
+            s.ftAlter(index, IndexedField.from("plot", FieldType.TEXT)); // 9
+            s.ftDropIndex(index, true); // 10
+        });
+        List<String> indexes = result.get(0);
+        Set<String> genres = result.get(1);
+        Object aliasAdded = result.get(2);
+        SynDumpResponse synonyms = result.get(5);
+        List<String> dictionary = result.get(8);
+        Object dropped = result.get(10);
+        return result.discarded() + "," + result.size() + "," + indexes.contains(index) + "," + new TreeSet<>(genres) + ","
+                + (aliasAdded == null) + "," + synonyms.groups() + ","
+                + synonyms.synonym("greetings").stream().sorted().toList() + "," + dictionary + "," + (dropped == null);
     }
 
     @POST
