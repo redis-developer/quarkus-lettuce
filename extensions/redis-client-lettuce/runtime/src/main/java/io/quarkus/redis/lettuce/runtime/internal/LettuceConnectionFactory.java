@@ -54,16 +54,6 @@ public class LettuceConnectionFactory {
     private static final Logger LOGGER = Logger.getLogger(LettuceConnectionFactory.class);
 
     /**
-     * Blocking command families. Their timeout is the explicit {@code Duration} argument the caller
-     * passes to Redis, not the shared {@code quarkus.redis.timeout} — so the client-side command
-     * timeout is disabled for them and left to the caller's own argument plus the pooled connection
-     * bound (see {@code lettuce-blocking-connection-pool-proposal.md}).
-     */
-    private static final Set<CommandType> BLOCKING_COMMANDS = Set.of(
-            CommandType.BLPOP, CommandType.BRPOP, CommandType.BLMOVE, CommandType.BLMPOP, CommandType.BRPOPLPUSH,
-            CommandType.BZPOPMIN, CommandType.BZPOPMAX, CommandType.BZMPOP);
-
-    /**
      * How the master and the replicas of a Sentinel or replication client are found, see
      * {@link #LettuceConnectionFactory(String, ClientResources, MasterReplicaMode, List, ClientOptions, ReadFrom, Duration)}.
      */
@@ -577,19 +567,13 @@ public class LettuceConnectionFactory {
 
     }
 
-    /**
-     * Applies {@code quarkus.redis.timeout} to ordinary commands so a stuck future eventually fails
-     * and its connection is released, instead of being held forever. Two kinds are exempted:
-     * <ul>
-     * <li>Blocking commands: their timeout is the explicit {@code Duration} argument already sent to
-     * Redis, and a stuck one only holds a single pooled connection rather than the shared one.</li>
-     * <li>Commands queued between {@code MULTI} and {@code EXEC}: Redis answers {@code QUEUED} at once,
-     * but Lettuce completes their futures only with the {@code EXEC} reply, so a timer started when they
-     * are written would fail commands the transaction then went on to execute. {@code EXEC} itself is
-     * timed and bounds them all.</li>
-     * </ul>
-     */
-    private static final class NonBlockingCommandTimeoutSource extends TimeoutOptions.TimeoutSource {
+    static final class NonBlockingCommandTimeoutSource extends TimeoutOptions.TimeoutSource {
+
+        private static final Set<CommandType> BLOCKING_COMMANDS = Set.of(
+                CommandType.BLPOP, CommandType.BRPOP, CommandType.BLMOVE, CommandType.BLMPOP, CommandType.BRPOPLPUSH,
+                CommandType.BZPOPMIN, CommandType.BZPOPMAX, CommandType.BZMPOP);
+
+        private static final Set<CommandType> OPTIONAL_BLOCKING_COMMANDS = Set.of(CommandType.XREAD, CommandType.XREADGROUP);
 
         private final long timeoutMillis;
 
@@ -602,7 +586,15 @@ public class LettuceConnectionFactory {
             if (command instanceof TransactionalCommand<?, ?, ?>) {
                 return -1; // completes on EXEC, bounded by the EXEC timeout
             }
-            return command.getType() instanceof CommandType type && BLOCKING_COMMANDS.contains(type) ? -1 : timeoutMillis;
+            if (command.getType() instanceof CommandType type) {
+                if (BLOCKING_COMMANDS.contains(type)) {
+                    return -1;
+                }
+                if (OPTIONAL_BLOCKING_COMMANDS.contains(type) && BlockingReads.isMarked(command.getArgs())) {
+                    return -1; // bounded by its own BLOCK duration
+                }
+            }
+            return timeoutMillis;
         }
 
     }
