@@ -548,4 +548,25 @@ class LettuceJsonCommandsTest extends CommandsTestBase {
         assertThat(object.getJsonArray("$..b")).containsExactly(3, null);
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        blockingJson.jsonSet(key, JsonObject.of("a", JsonArray.of(1, 2, 3), "o", JsonObject.of("x", 1), "s", "str", "b", true));
+        assertImmutable(blockingJson.jsonArrLen(key, "$.a"));
+        assertImmutable(blockingJson.jsonArrAppend(key, "$.a", 4));
+        assertImmutable(blockingJson.jsonArrIndex(key, "$.a", 2));
+        assertImmutable(blockingJson.jsonArrInsert(key, "$.a", 0, 0));
+        assertImmutable(blockingJson.jsonArrPop(key, Integer.class, "$.a", -1));
+        assertImmutable(blockingJson.jsonArrTrim(key, "$.a", 0, 1));
+        assertImmutable(blockingJson.jsonMget("$.o", key, "missing"));
+        assertImmutable(blockingJson.jsonObjKeys(key, "$.o"));
+        assertImmutable(blockingJson.jsonObjKeys(key, "$.o").get(0));
+        assertImmutable(blockingJson.jsonObjKeys(key, "$.missing"));
+        assertImmutable(blockingJson.jsonObjKeys(key, "$.missing").get(0));
+        assertImmutable(blockingJson.jsonObjLen(key, "$.o"));
+        assertImmutable(blockingJson.jsonStrLen(key, "$.s"));
+        assertImmutable(blockingJson.jsonStrAppend(key, "$.s", "x"));
+        assertImmutable(blockingJson.jsonToggle(key, "$.b"));
+        assertImmutable(blockingJson.jsonType(key, "$.a"));
+    }
+
 }

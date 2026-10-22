@@ -16,12 +16,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveBloomCommands}.
- *
- * @param <K> the key type
- * @param <V> the value type
- */
 public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveBloomCommands<K, V> {
 
@@ -90,7 +84,8 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
         if (values.length == 0) {
             return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
-        return LettuceCommand.of(() -> async.bfMExists(marshaller.encode(key), marshaller.encodeAsArray(values)));
+        return LettuceCommand.of(() -> async.bfMExists(marshaller.encode(key), marshaller.encodeAsArray(values)),
+                AbstractLettuceCommands::decodeList);
     }
 
     @Override

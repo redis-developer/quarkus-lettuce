@@ -14,12 +14,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveHyperLogLogCommands}.
- *
- * @param <K> the key type
- * @param <V> the value type
- */
 public class LettuceReactiveHyperLogLogCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveHyperLogLogCommands<K, V> {
 
@@ -48,7 +42,7 @@ public class LettuceReactiveHyperLogLogCommandsImpl<K, V> extends AbstractLettuc
         notNullOrEmpty(values, "values");
         doesNotContainNull(values, "values");
         return LettuceCommand.of(() -> async.pfadd(marshaller.encode(key), marshaller.encodeAsArray(values)),
-                AbstractLettuceCommands::asBoolean);
+                AbstractLettuceCommands::toBoolean);
     }
 
     @SafeVarargs

@@ -115,4 +115,14 @@ class LettuceTopKCommandsTest extends CommandsTestBase {
         assertThat(topk.topkQuery(key, l1, l2, l3)).containsExactly(true, true, false);
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        blockingTopK.topkReserve(key, 3);
+        assertImmutable(blockingTopK.topkAdd(key, Person.person1, Person.person2));
+        assertImmutable(blockingTopK.topkIncrBy(key, Map.of(Person.person1, 2)));
+        assertImmutable(blockingTopK.topkList(key));
+        assertImmutable(blockingTopK.topkListWithCount(key));
+        assertImmutable(blockingTopK.topkQuery(key, Person.person1, Person.person3));
+    }
+
 }

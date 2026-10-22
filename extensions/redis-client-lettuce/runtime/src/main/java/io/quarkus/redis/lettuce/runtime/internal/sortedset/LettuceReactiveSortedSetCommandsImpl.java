@@ -8,7 +8,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.positive;
 
 import java.lang.reflect.Type;
 import java.time.Duration;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -37,12 +37,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveSortedSetCommands}.
- *
- * @param <K> the key type
- * @param <V> the type of the scored member
- */
 public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveSortedSetCommands<K, V> {
 
@@ -92,7 +86,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         double normalized = normalizeScore(score);
         return LettuceCommand.of(
                 () -> async.zadd(marshaller.encode(key), lettuceArgs, normalized, marshaller.encode(value)),
-                AbstractLettuceCommands::asBoolean);
+                AbstractLettuceCommands::toBoolean);
     }
 
     LettuceCommand<Long, Boolean> _zadd(K key, double score, V value) {
@@ -110,15 +104,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(args, "args");
 
         io.lettuce.core.ZAddArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(args);
-        List<io.lettuce.core.ScoredValue<byte[]>> entries = new ArrayList<>(items.size());
-        for (Map.Entry<V, Double> entry : items.entrySet()) {
-            nonNull(entry.getValue(), "value from items");
-            entries.add(io.lettuce.core.ScoredValue.just(normalizeScore(entry.getValue()),
-                    marshaller.encode(entry.getKey())));
-        }
-
         @SuppressWarnings("unchecked")
-        io.lettuce.core.ScoredValue<byte[]>[] array = entries.toArray(new io.lettuce.core.ScoredValue[0]);
+        io.lettuce.core.ScoredValue<byte[]>[] array = items.entrySet().stream()
+                .map(entry -> io.lettuce.core.ScoredValue.just(
+                        normalizeScore(nonNull(entry.getValue(), "value from items")),
+                        marshaller.encode(entry.getKey())))
+                .toArray(io.lettuce.core.ScoredValue[]::new);
         return LettuceCommand.of(() -> async.zadd(marshaller.encode(key), lettuceArgs, array),
                 AbstractLettuceCommands::toInteger);
     }
@@ -140,14 +131,11 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(args, "args");
 
         io.lettuce.core.ZAddArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(args);
-        List<io.lettuce.core.ScoredValue<byte[]>> entries = new ArrayList<>(items.length);
-        for (ScoredValue<V> item : items) {
-            nonNull(item.value, "value from scored value");
-            entries.add(io.lettuce.core.ScoredValue.just(normalizeScore(item.score), marshaller.encode(item.value)));
-        }
-
         @SuppressWarnings("unchecked")
-        io.lettuce.core.ScoredValue<byte[]>[] array = entries.toArray(new io.lettuce.core.ScoredValue[0]);
+        io.lettuce.core.ScoredValue<byte[]>[] array = Arrays.stream(items)
+                .map(item -> io.lettuce.core.ScoredValue.just(normalizeScore(item.score),
+                        marshaller.encode(nonNull(item.value, "value from scored value"))))
+                .toArray(io.lettuce.core.ScoredValue[]::new);
         return LettuceCommand.of(() -> async.zadd(marshaller.encode(key), lettuceArgs, array),
                 AbstractLettuceCommands::toInteger);
     }
@@ -216,7 +204,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         if (keys.length < 2) {
             return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.zdiff(marshaller.encodeAsArray(keys)), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.zdiff(marshaller.encodeAsArray(keys)), this::decodeListOfValues);
     }
 
     @SafeVarargs
@@ -280,7 +268,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         }
         io.lettuce.core.ZAggregateArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAggregateArgs(args);
         return LettuceCommand.of(() -> async.zinter(lettuceArgs, marshaller.encodeAsArray(keys)),
-                this::decodeListOfValueOrEmpty);
+                this::decodeListOfValues);
     }
 
     @SafeVarargs
@@ -586,7 +574,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(values, "values");
         doesNotContainNull(values, "values");
         return LettuceCommand.of(() -> async.zmscore(marshaller.encode(key), marshaller.encodeAsArray(values)),
-                AbstractLettuceCommands::orEmpty);
+                AbstractLettuceCommands::decodeList);
     }
 
     @Override
@@ -638,7 +626,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     LettuceCommand<byte[], V> _zrandmember(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.zrandmember(marshaller.encode(key)), this::decodeV);
+        return LettuceCommand.of(() -> async.zrandmember(marshaller.encode(key)), this::decodeValue);
     }
 
     @Override
@@ -649,7 +637,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     LettuceCommand<List<byte[]>, List<V>> _zrandmember(K key, int count) {
         nonNull(key, "key");
         positive(count, "count");
-        return LettuceCommand.of(() -> async.zrandmember(marshaller.encode(key), count), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.zrandmember(marshaller.encode(key), count), this::decodeListOfValues);
     }
 
     @Override
@@ -737,7 +725,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(args, "args");
         ZRange.ByIndex range = LettuceSortedSetCommandsConverters.toLettuceByIndex(start, stop, args);
-        return LettuceCommand.of(() -> async.zrange(marshaller.encode(key), range), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.zrange(marshaller.encode(key), range), this::decodeListOfValues);
     }
 
     LettuceCommand<List<byte[]>, List<V>> _zrange(K key, long start, long stop) {
@@ -782,7 +770,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(args, "args");
         nonNull(range, "range");
         ZRange.ByLex<byte[]> byLex = LettuceSortedSetCommandsConverters.toLettuceByLex(range, args);
-        return LettuceCommand.of(() -> async.zrange(marshaller.encode(key), byLex), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.zrange(marshaller.encode(key), byLex), this::decodeListOfValues);
     }
 
     LettuceCommand<List<byte[]>, List<V>> _zrangebylex(K key, Range<String> range) {
@@ -804,7 +792,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(args, "args");
         nonNull(range, "range");
         ZRange.ByScore byScore = LettuceSortedSetCommandsConverters.toLettuceByScore(range, args);
-        return LettuceCommand.of(() -> async.zrange(marshaller.encode(key), byScore), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.zrange(marshaller.encode(key), byScore), this::decodeListOfValues);
     }
 
     LettuceCommand<List<byte[]>, List<V>> _zrangebyscore(K key, ScoreRange<Double> range) {
@@ -1033,7 +1021,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         doesNotContainNull(keys, "keys");
         io.lettuce.core.ZAggregateArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAggregateArgs(args);
         return LettuceCommand.of(() -> async.zunion(lettuceArgs, marshaller.encodeAsArray(keys)),
-                this::decodeListOfValueOrEmpty);
+                this::decodeListOfValues);
     }
 
     @SafeVarargs
@@ -1117,7 +1105,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(sortArguments, "sortArguments");
         io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(sortArguments);
-        return LettuceCommand.of(() -> async.sort(marshaller.encode(key), lettuceArgs), this::decodeListOfValueOrEmpty);
+        return LettuceCommand.of(() -> async.sort(marshaller.encode(key), lettuceArgs), this::decodeListOfValues);
     }
 
     @Override
@@ -1142,7 +1130,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         if (value == null || !value.hasValue()) {
             return null;
         }
-        return ScoredValue.of(decodeV(value.getValue()), value.getScore());
+        return ScoredValue.of(decodeValue(value.getValue()), value.getScore());
     }
 
     private ScoredValue<V> decodeScoredValueOrEmpty(io.lettuce.core.ScoredValue<byte[]> value) {
@@ -1154,14 +1142,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     }
 
     private List<ScoredValue<V>> decodeScoredValues(List<io.lettuce.core.ScoredValue<byte[]>> values) {
-        if (values == null) {
-            return List.of();
-        }
-        List<ScoredValue<V>> result = new ArrayList<>(values.size());
-        for (io.lettuce.core.ScoredValue<byte[]> value : values) {
-            result.add(decodeScoredValue(value));
-        }
-        return result;
+        return decodeList(values, this::decodeScoredValue);
     }
 
     private ScoredValue<V> decodePopped(io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>> result) {
@@ -1184,7 +1165,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         if (result == null || !result.hasValue()) {
             return null;
         }
-        return KeyValue.of(decodeK(result.getKey()), decodeScoredValue(result.getValue()));
+        return KeyValue.of(decodeKey(result.getKey()), decodeScoredValue(result.getValue()));
     }
 
     private static double normalizeScore(double score) {

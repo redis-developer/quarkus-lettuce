@@ -6,6 +6,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,13 +23,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveHashCommands}.
- *
- * @param <K> the key type
- * @param <F> the field type
- * @param <V> the value type
- */
 public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveHashCommands<K, F, V> {
 
@@ -81,7 +75,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     LettuceCommand<byte[], V> _hget(K key, F field) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return LettuceCommand.of(() -> async.hget(marshaller.encode(key), marshaller.encode(field)), this::decodeV);
+        return LettuceCommand.of(() -> async.hget(marshaller.encode(key), marshaller.encode(field)), this::decodeValue);
     }
 
     @Override
@@ -151,7 +145,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         }
         byte[][] encodedFields = marshaller.encodeAsArray(fields);
         return LettuceCommand.of(() -> async.hmget(marshaller.encode(key), encodedFields),
-                r -> decodeAsOrderedMap(fields, r));
+                r -> decodeOrderedMap(fields, r));
     }
 
     @Deprecated
@@ -273,7 +267,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
 
     LettuceCommand<List<byte[]>, List<V>> _hvals(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.hvals(marshaller.encode(key)), this::decodeListOfValue);
+        return LettuceCommand.of(() -> async.hvals(marshaller.encode(key)), this::decodeListOfValues);
     }
 
     private F decodeF(byte[] bytes) {
@@ -281,11 +275,14 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     }
 
     private Map<F, V> decodeFieldWithValueMap(List<KeyValue<byte[], byte[]>> entries) {
-        Map<F, V> map = new LinkedHashMap<>();
-        for (KeyValue<byte[], byte[]> entry : entries) {
-            map.put(decodeF(entry.getKey()), decodeV(entry.getValueOrElse(null)));
+        if (entries == null || entries.isEmpty()) {
+            return Collections.emptyMap();
         }
-        return map;
+        Map<F, V> map = LinkedHashMap.newLinkedHashMap(entries.size());
+        for (KeyValue<byte[], byte[]> entry : entries) {
+            map.put(decodeF(entry.getKey()), decodeValue(entry.getValueOrElse(null)));
+        }
+        return Collections.unmodifiableMap(map);
     }
 
     private List<F> decodeListOfField(List<byte[]> list) {

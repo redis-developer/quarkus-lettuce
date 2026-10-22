@@ -6,6 +6,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,12 +21,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveCountMinCommands}.
- *
- * @param <K> the key type
- * @param <V> the value type
- */
 public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveCountMinCommands<K, V> {
 
@@ -51,7 +46,7 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
         nonNull(key, "key");
         nonNull(value, "value");
         IncrementPair<byte[]> pair = new IncrementPair<>(marshaller.encode(value), increment);
-        return LettuceCommand.of(() -> async.cmsIncrBy(marshaller.encode(key), pair), counts -> counts.get(0));
+        return LettuceCommand.of(() -> async.cmsIncrBy(marshaller.encode(key), pair), List::getFirst);
     }
 
     @Override
@@ -102,7 +97,7 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
         nonNull(key, "key");
         nonNull(item, "item");
         return LettuceCommand.of(() -> async.cmsQuery(marshaller.encode(key), marshaller.encode(item)),
-                counts -> counts.get(0));
+                List::getFirst);
     }
 
     @SafeVarargs
@@ -118,7 +113,8 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
         if (items.length == 0) {
             return LettuceCommand.failing(new IllegalArgumentException("`items` must not be empty"));
         }
-        return LettuceCommand.of(() -> async.cmsQuery(marshaller.encode(key), marshaller.encodeAsArray(items)));
+        return LettuceCommand.of(() -> async.cmsQuery(marshaller.encode(key), marshaller.encodeAsArray(items)),
+                AbstractLettuceCommands::decodeList);
     }
 
     @Override
@@ -166,11 +162,14 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
     }
 
     private static <V> Map<V, Long> zipCounts(List<V> values, List<Long> counts) {
-        Map<V, Long> result = new LinkedHashMap<>();
+        if (counts == null || counts.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<V, Long> result = LinkedHashMap.newLinkedHashMap(values.size());
         for (int i = 0; i < values.size(); i++) {
             result.put(values.get(i), counts.get(i));
         }
-        return result;
+        return Collections.unmodifiableMap(result);
     }
 
 }

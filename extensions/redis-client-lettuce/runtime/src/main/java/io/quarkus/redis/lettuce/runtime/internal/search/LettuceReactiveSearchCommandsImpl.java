@@ -264,7 +264,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<List<String>, List<String>> _ftDictDump(String dict) {
         notNullOrBlank(dict, "dict");
-        return LettuceCommand.of(() -> async.ftDictdump(dict));
+        return LettuceCommand.of(() -> async.ftDictdump(dict), AbstractLettuceCommands::decodeList);
     }
 
     @Override
@@ -375,7 +375,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<List<String>, Set<String>> _ftTagVals(String index, String field) {
         notNullOrBlank(index, "index");
         notNullOrBlank(field, "field");
-        return LettuceCommand.of(() -> async.ftTagvals(index, field), Set::copyOf);
+        return LettuceCommand.of(() -> async.ftTagvals(index, field), AbstractLettuceCommands::decodeSet);
     }
 
     private static CommandArgs<byte[], byte[]> commandArgs(String... leading) {
@@ -391,9 +391,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     }
 
     private List<K> decodeIndexNames(List<String> names) {
-        return orEmpty(names).stream()
-                .map(name -> decodeK(name.getBytes(StandardCharsets.UTF_8)))
-                .toList();
+        return decodeList(names, name -> decodeKey(name.getBytes(StandardCharsets.UTF_8)));
     }
 
     record ResultLayout(boolean withScores, boolean withPayloads, boolean withSortKeys, boolean withContent) {
@@ -403,6 +401,11 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         static ResultLayout of(QueryArgs args, List<Object> tokens) {
             return new ResultLayout(args.containsScore(), args.containsPayload(), args.containsSortKeys(),
                     !tokens.contains("NOCONTENT"));
+        }
+
+        /** Number of reply elements per document in a RESP2 reply: the id plus one per enabled section. */
+        int stride() {
+            return 1 + (withScores ? 1 : 0) + (withPayloads ? 1 : 0) + (withSortKeys ? 1 : 0) + (withContent ? 1 : 0);
         }
 
     }
@@ -416,8 +419,9 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
             if (total == null || total.toInteger() == 0) {
                 return new SearchQueryResponse(0, Collections.emptyList());
             }
-            List<Document> documents = new ArrayList<>();
-            for (Response result : orEmpty(response.get("results"))) {
+            Response results = response.get("results");
+            List<Document> documents = new ArrayList<>(sizeOf(results));
+            for (Response result : elements(results)) {
                 documents.add(new Document(result.get("id").toString(), score(result.get("score")), result.get("payload"),
                         properties(result.get("extra_attributes"))));
             }
@@ -428,7 +432,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         if (count == 0) {
             return new SearchQueryResponse(0, Collections.emptyList());
         }
-        List<Document> documents = new ArrayList<>();
+        List<Document> documents = new ArrayList<>((response.size() - 1) / layout.stride());
         for (int i = 1; i < response.size();) {
             Response id = response.get(i++);
             Response score = layout.withScores() ? response.get(i++) : null;
@@ -452,15 +456,17 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
             results = response.get(0);
             cursorId = response.get(1).toLong();
         }
-        List<AggregateDocument> documents = new ArrayList<>();
         if (isMapReply(results)) {
-            for (Response result : orEmpty(results.get("results"))) {
+            Response rows = results.get("results");
+            List<AggregateDocument> documents = new ArrayList<>(sizeOf(rows));
+            for (Response result : elements(rows)) {
                 documents.add(new AggregateDocument(properties(result.get("extra_attributes"))));
             }
             return new AggregationResponse(cursorId, documents);
         }
 
         // The first element is the group count, the rows follow
+        List<AggregateDocument> documents = new ArrayList<>();
         for (int i = 1; i < results.size(); i++) {
             documents.add(new AggregateDocument(properties(results.get(i))));
         }
@@ -489,8 +495,12 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
                 && multi.get(0).type() == ResponseType.BULK;
     }
 
-    private static Iterable<Response> orEmpty(Response multi) {
+    private static Iterable<Response> elements(Response multi) {
         return multi == null ? Collections.emptyList() : multi;
+    }
+
+    private static int sizeOf(Response multi) {
+        return multi == null ? 0 : multi.size();
     }
 
     private static double score(Response score) {
@@ -504,16 +514,17 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     }
 
     private static Map<String, Document.Property> properties(Response fields) {
-        Map<String, Document.Property> properties = new LinkedHashMap<>();
         if (fields == null) {
-            return properties;
+            return Collections.emptyMap();
         }
         if (isMap(fields)) {
+            Map<String, Document.Property> properties = LinkedHashMap.newLinkedHashMap(fields.size());
             for (String name : fields.getKeys()) {
                 properties.put(name, new Document.Property(name, fields.get(name)));
             }
             return properties;
         }
+        Map<String, Document.Property> properties = LinkedHashMap.newLinkedHashMap(fields.size() / 2);
         String name = null;
         for (Response element : fields) {
             if (name == null) {
@@ -527,29 +538,32 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     }
 
     private static SynDumpResponse decodeSynDump(Map<String, List<String>> termsToGroups) {
-        Map<String, List<String>> groupsToTerms = new LinkedHashMap<>();
-        if (termsToGroups != null) {
-            for (Map.Entry<String, List<String>> entry : termsToGroups.entrySet()) {
-                for (String group : orEmpty(entry.getValue())) {
-                    groupsToTerms.computeIfAbsent(group, ignored -> new ArrayList<>()).add(entry.getKey());
-                }
+        if (termsToGroups == null || termsToGroups.isEmpty()) {
+            return new SynDumpResponse(Collections.emptyMap());
+        }
+        Map<String, List<String>> groupsToTerms = LinkedHashMap.newLinkedHashMap(termsToGroups.size());
+        for (Map.Entry<String, List<String>> entry : termsToGroups.entrySet()) {
+            for (String group : decodeList(entry.getValue())) {
+                groupsToTerms.computeIfAbsent(group, ignored -> new ArrayList<>()).add(entry.getKey());
             }
         }
-        return new SynDumpResponse(groupsToTerms);
+        groupsToTerms.replaceAll((group, terms) -> Collections.unmodifiableList(terms));
+        return new SynDumpResponse(Collections.unmodifiableMap(groupsToTerms));
     }
 
     private static SpellCheckResponse decodeSpellCheckResult(SpellCheckResult result) {
         if (result == null || !result.hasMisspelledTerms()) {
             return new SpellCheckResponse(Collections.emptyMap());
         }
-        Map<String, List<SpellCheckResponse.SpellCheckSuggestion>> response = new LinkedHashMap<>();
-        for (SpellCheckResult.MisspelledTerm term : result.getMisspelledTerms()) {
+        List<SpellCheckResult.MisspelledTerm> terms = result.getMisspelledTerms();
+        Map<String, List<SpellCheckResponse.SpellCheckSuggestion>> response = LinkedHashMap.newLinkedHashMap(terms.size());
+        for (SpellCheckResult.MisspelledTerm term : terms) {
             String word = term.getTerm();
             if (!term.hasSuggestions()) {
                 response.put(word, Collections.emptyList());
                 continue;
             }
-            List<SpellCheckResponse.SpellCheckSuggestion> suggestions = new ArrayList<>();
+            List<SpellCheckResponse.SpellCheckSuggestion> suggestions = new ArrayList<>(term.getSuggestions().size());
             for (SpellCheckResult.Suggestion suggestion : term.getSuggestions()) {
                 // Same as the Vert.x backend: a proposal identical to the term is not a correction
                 if (!word.equals(suggestion.getSuggestion())) {
@@ -558,10 +572,10 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
                 }
             }
             if (!suggestions.isEmpty()) {
-                response.put(word, suggestions);
+                response.put(word, Collections.unmodifiableList(suggestions));
             }
         }
-        return new SpellCheckResponse(response);
+        return new SpellCheckResponse(Collections.unmodifiableMap(response));
     }
 
 }

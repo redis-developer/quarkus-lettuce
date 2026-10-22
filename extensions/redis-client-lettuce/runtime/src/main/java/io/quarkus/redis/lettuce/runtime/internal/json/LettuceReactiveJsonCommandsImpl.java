@@ -25,11 +25,6 @@ import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveJsonCommands}.
- *
- * @param <K> the key type
- */
 public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<K, K>
         implements ReactiveJsonCommands<K> {
 
@@ -175,7 +170,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
             jsonPaths[i] = JsonPath.of(paths[i]);
         }
         return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key), jsonPaths),
-                raw -> decodeJsonObject(first(raw)));
+                reply -> decodeJsonObject(first(reply)));
     }
 
     @SafeVarargs
@@ -251,11 +246,12 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         nonNull(key, "key");
         nonNull(clazz, "clazz");
         if (path == null && index == -1) {
-            return LettuceCommand.of(() -> async.jsonArrpopRaw(marshaller.encode(key)), raw -> decodeJsonValues(raw, clazz));
+            return LettuceCommand.of(() -> async.jsonArrpopRaw(marshaller.encode(key)),
+                    reply -> decodeJsonValues(reply, clazz));
         }
         JsonPath jsonPath = path == null ? JsonPath.ROOT_PATH : JsonPath.of(path);
         return LettuceCommand.of(() -> async.jsonArrpopRaw(marshaller.encode(key), jsonPath, index),
-                raw -> decodeJsonValues(raw, clazz));
+                reply -> decodeJsonValues(reply, clazz));
     }
 
     @Override
@@ -311,7 +307,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         doesNotContainNull(keys, "keys");
         byte[][] encodedKeys = marshaller.encodeAsArray(keys);
         return LettuceCommand.of(() -> async.jsonMGetRaw(JsonPath.of(path), encodedKeys),
-                LettuceReactiveJsonCommandsImpl::decodeJsonArrays);
+                reply -> decodeList(reply, item -> item == null ? null : new JsonArray(item)));
     }
 
     @Override
@@ -394,7 +390,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         nonNull(key, "key");
         nonNull(path, "path");
         return LettuceCommand.of(() -> async.jsonToggle(marshaller.encode(key), JsonPath.of(path)),
-                LettuceReactiveJsonCommandsImpl::decodeToggle);
+                reply -> decodeList(reply, item -> item == null ? null : item == 1L));
     }
 
     @Override
@@ -406,10 +402,10 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         nonNull(key, "key");
         if (path == null) {
             return LettuceCommand.of(() -> async.jsonType(marshaller.encode(key)),
-                    LettuceReactiveJsonCommandsImpl::decodeJsonTypes);
+                    it -> decodeList(it, LettuceReactiveJsonCommandsImpl::decodeJsonType));
         }
         return LettuceCommand.of(() -> async.jsonType(marshaller.encode(key), JsonPath.of(path)),
-                LettuceReactiveJsonCommandsImpl::decodeJsonTypes);
+                it -> decodeList(it, LettuceReactiveJsonCommandsImpl::decodeJsonType));
     }
 
     private static <T> String[] encodeJson(T[] values) {
@@ -424,14 +420,14 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         if (raw == null || raw.isEmpty()) {
             return null;
         }
-        return raw.get(0);
+        return raw.getFirst();
     }
 
     private static boolean isJsonNull(String raw) {
-        return raw == null || raw.equalsIgnoreCase("null");
+        return raw == null || "null".equalsIgnoreCase(raw);
     }
 
-    static JsonObject decodeJsonObject(String raw) {
+    private static JsonObject decodeJsonObject(String raw) {
         if (isJsonNull(raw)) {
             return null;
         }
@@ -449,65 +445,45 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         return matches;
     }
 
-    static JsonObject decodeRootObject(String raw) {
+    private static JsonObject decodeRootObject(String raw) {
         JsonArray matches = rootMatches(raw);
         return matches == null ? null : matches.getJsonObject(0);
     }
 
-    static JsonArray decodeRootArray(String raw) {
+    private static JsonArray decodeRootArray(String raw) {
         JsonArray matches = rootMatches(raw);
         return matches == null ? null : matches.getJsonArray(0);
     }
 
-    static JsonArray decodeJsonArrayFromJsonGet(String raw) {
+    private static JsonArray decodeJsonArrayFromJsonGet(String raw) {
         if (isJsonNull(raw)) {
             return null;
         }
         return new JsonArray(raw);
     }
 
-    static List<JsonArray> decodeJsonArrays(List<String> raw) {
-        List<JsonArray> list = new ArrayList<>();
-        for (String item : orEmpty(raw)) {
-            list.add(item == null ? null : new JsonArray(item));
-        }
-        return list;
+    private static <T> List<T> decodeJsonValues(List<String> raw, Class<T> clazz) {
+        return decodeList(raw, item -> item == null ? null : Json.decodeValue(item, clazz));
     }
 
-    static <T> List<T> decodeJsonValues(List<String> raw, Class<T> clazz) {
-        List<T> list = new ArrayList<>();
-        for (String item : orEmpty(raw)) {
-            list.add(item == null ? null : Json.decodeValue(item, clazz));
+    private static List<List<String>> decodeObjKeys(List<byte[]> raw) {
+        if (raw == null) {
+            return Collections.singletonList(Collections.emptyList());
         }
-        return list;
-    }
-
-    static List<List<String>> decodeObjKeys(List<byte[]> raw) {
-        List<List<String>> list = new ArrayList<>();
-        List<String> keys = new ArrayList<>();
-        for (byte[] item : orEmpty(raw)) {
+        List<List<String>> list = new ArrayList<>(raw.size() + 1);
+        List<String> keys = new ArrayList<>(raw.size());
+        for (byte[] item : raw) {
             if (item == null) {
                 list.add(null);
             } else {
                 keys.add(new String(item, StandardCharsets.UTF_8));
             }
         }
-        list.add(keys);
-        return list;
+        list.add(Collections.unmodifiableList(keys));
+        return Collections.unmodifiableList(list);
     }
 
-    static List<Boolean> decodeToggle(List<Long> raw) {
-        if (raw == null || raw.isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<Boolean> list = new ArrayList<>(raw.size());
-        for (Long item : raw) {
-            list.add(item == null ? null : item == 1L);
-        }
-        return list;
-    }
-
-    static String decodeJsonType(JsonType type) {
+    private static String decodeJsonType(JsonType type) {
         if (type == null) {
             return null;
         }
@@ -520,17 +496,6 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
             case BOOLEAN -> "boolean";
             case UNKNOWN -> "null";
         };
-    }
-
-    static List<String> decodeJsonTypes(List<JsonType> raw) {
-        if (raw == null || raw.isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<String> list = new ArrayList<>(raw.size());
-        for (JsonType type : raw) {
-            list.add(decodeJsonType(type));
-        }
-        return list;
     }
 
 }

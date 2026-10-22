@@ -477,4 +477,14 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
         }
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        blockingValues.set(key, Person.person1);
+        blockingValues.set(key + "-2", Person.person2);
+        assertImmutable(blockingKeys.keys(key + "*"));
+        assertImmutable(blockingKeys.keys("nothing-matches-*"));
+        assertImmutable(blockingKeys.scan().next());
+        assertImmutable(blockingKeys.scan(new KeyScanArgs().count(10)).next());
+    }
+
 }

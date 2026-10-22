@@ -213,4 +213,11 @@ class LettuceCountMinCommandsTest extends CommandsTestBase {
         assertThat(cm.cmsQuery(key, List.of(leia, luke), List.of(luke, anakin))).containsExactly(12L, 5L);
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        blockingCountMin.cmsInitByDim(key, 100, 5);
+        assertImmutable(blockingCountMin.cmsIncrBy(key, Map.of(Person.person1, 2L)));
+        assertImmutable(blockingCountMin.cmsQuery(key, Person.person1, Person.person2));
+    }
+
 }

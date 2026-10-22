@@ -168,4 +168,13 @@ class LettuceAutoSuggestCommandsTest extends CommandsTestBase {
                 });
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        blockingAuto.ftSugAdd(key, "hello", 1.0);
+        blockingAuto.ftSugAdd(key, "help", 1.0);
+        assertImmutable(blockingAuto.ftSugGet(key, "hel"));
+        assertImmutable(blockingAuto.ftSugGet(key, "hel", new GetArgs().max(1)));
+        assertImmutable(blockingAuto.ftSugGet(key, "nothing"));
+    }
+
 }

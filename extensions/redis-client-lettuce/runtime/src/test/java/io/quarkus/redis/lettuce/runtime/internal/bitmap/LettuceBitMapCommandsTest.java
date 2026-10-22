@@ -237,4 +237,9 @@ class LettuceBitMapCommandsTest extends CommandsTestBase {
         assertThat(blockingBitMap.bitcount(key, 3, -1)).isEqualTo(0);
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        assertImmutable(blockingBitMap.bitfield(key, new BitFieldArgs().set(signed(8), 0, 1).get().get(2)));
+    }
+
 }

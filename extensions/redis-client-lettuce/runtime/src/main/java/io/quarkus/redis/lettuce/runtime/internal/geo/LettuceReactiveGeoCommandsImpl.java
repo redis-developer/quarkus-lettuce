@@ -8,8 +8,6 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.OptionalDouble;
 import java.util.OptionalLong;
@@ -42,12 +40,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveGeoCommands}.
- *
- * @param <K> the key type
- * @param <V> the value type
- */
 public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveGeoCommands<K, V> {
 
@@ -116,7 +108,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         validateLatitude(latitude);
         io.lettuce.core.GeoAddArgs lettuceArgs = LettuceGeoCommandsConverters.toGeoAddArgs(args);
         return LettuceCommand.of(() -> async.geoadd(marshaller.encode(key), longitude, latitude, marshaller.encode(member),
-                lettuceArgs), AbstractLettuceCommands::asBoolean);
+                lettuceArgs), AbstractLettuceCommands::toBoolean);
     }
 
     @Override
@@ -170,7 +162,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(members, "members");
         doesNotContainNull(members, "members");
         return LettuceCommand.of(() -> async.geohash(marshaller.encode(key), marshaller.encodeAsArray(members)),
-                LettuceReactiveGeoCommandsImpl::decodeHashes);
+                it -> decodeList(it, hash -> hash.hasValue() ? hash.getValue() : null));
     }
 
     @SafeVarargs
@@ -185,7 +177,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(members, "members");
         doesNotContainNull(members, "members");
         return LettuceCommand.of(() -> async.geopos(marshaller.encode(key), marshaller.encodeAsArray(members)),
-                LettuceReactiveGeoCommandsImpl::decodePositions);
+                it -> decodeList(it, LettuceGeoCommandsConverters::toGeoPosition));
     }
 
     @Override
@@ -200,7 +192,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         validateLatitude(latitude);
         nonNull(unit, "unit");
         return LettuceCommand.of(() -> async.georadius(marshaller.encode(key), longitude, latitude, radius,
-                LettuceGeoCommandsConverters.toUnit(unit)), this::decodeSetOfValue);
+                LettuceGeoCommandsConverters.toUnit(unit)), this::decodeSetOfValues);
     }
 
     @Override
@@ -271,7 +263,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         positive(distance, "distance");
         nonNull(unit, "unit");
         return LettuceCommand.of(() -> async.georadiusbymember(marshaller.encode(key), marshaller.encode(member), distance,
-                LettuceGeoCommandsConverters.toUnit(unit)), this::decodeSetOfValue);
+                LettuceGeoCommandsConverters.toUnit(unit)), this::decodeSetOfValues);
     }
 
     @Override
@@ -339,49 +331,12 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
                 new IntegerOutput<>(ByteArrayCodec.INSTANCE), args));
     }
 
-    private static List<String> decodeHashes(List<Value<String>> hashes) {
-        if (hashes == null || hashes.isEmpty()) {
-            return new ArrayList<>();
-        }
-        List<String> decoded = new ArrayList<>(hashes.size());
-        for (Value<String> hash : hashes) {
-            decoded.add(hash.hasValue() ? hash.getValue() : null);
-        }
-        return decoded;
-    }
-
-    private static List<GeoPosition> decodePositions(List<GeoCoordinates> coordinates) {
-        if (coordinates == null || coordinates.isEmpty()) {
-            return new ArrayList<>();
-        }
-        List<GeoPosition> decoded = new ArrayList<>(coordinates.size());
-        for (GeoCoordinates coordinate : coordinates) {
-            decoded.add(LettuceGeoCommandsConverters.toGeoPosition(coordinate));
-        }
-        return decoded;
-    }
-
-    private Set<V> decodeSetOfValue(Set<byte[]> members) {
-        if (members == null) {
-            return new LinkedHashSet<>();
-        }
-        Set<V> decoded = new LinkedHashSet<>(members.size());
-        for (byte[] member : members) {
-            decoded.add(decodeV(member));
-        }
-        return decoded;
-    }
-
     private List<GeoValue<V>> decodeGeoValues(List<GeoWithin<byte[]>> values) {
-        List<GeoValue<V>> decoded = new ArrayList<>();
-        for (GeoWithin<byte[]> within : orEmpty(values)) {
-            decoded.add(decodeGeoValue(within));
-        }
-        return decoded;
+        return decodeList(values, this::decodeGeoValue);
     }
 
     private GeoValue<V> decodeGeoValue(GeoWithin<byte[]> within) {
-        V member = decodeV(within.getMember());
+        V member = decodeValue(within.getMember());
         OptionalDouble distance = within.getDistance() == null ? OptionalDouble.empty()
                 : OptionalDouble.of(within.getDistance());
         OptionalLong geohash = within.getGeohash() == null ? OptionalLong.empty() : OptionalLong.of(within.getGeohash());

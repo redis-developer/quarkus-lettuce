@@ -9,6 +9,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -611,18 +612,17 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         String lowest = ids == null ? null : ids.getLower().getValue();
         String highest = ids == null ? null : ids.getUpper().getValue();
         Map<String, Long> consumers = pending.getConsumerMessageCount();
-        return new XPendingSummary(pending.getCount(), lowest, highest, consumers == null ? Map.of() : consumers);
+        return new XPendingSummary(pending.getCount(), lowest, highest,
+                consumers == null || consumers.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(consumers));
     }
 
     private static List<PendingMessage> decodePendingMessages(List<io.lettuce.core.models.stream.PendingMessage> list) {
-        return orEmpty(list).stream()
-                .map(m -> new PendingMessage(m.getId(), m.getConsumer(), Duration.ofMillis(m.getMsSinceLastDelivery()),
-                        (int) m.getRedeliveryCount()))
-                .toList();
+        return decodeList(list, m -> new PendingMessage(m.getId(), m.getConsumer(),
+                Duration.ofMillis(m.getMsSinceLastDelivery()), (int) m.getRedeliveryCount()));
     }
 
     private StreamMessage<K, F, V> decodeStreamMessage(io.lettuce.core.StreamMessage<byte[], byte[]> message) {
-        K key = decodeK(message.getStream());
+        K key = decodeKey(message.getStream());
         Map<F, V> payload = decodeMap(fieldType, message.getBody());
         Long millisElapsedFromDelivery = message.getMillisElapsedFromDelivery();
         if (millisElapsedFromDelivery != null) {
@@ -635,7 +635,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
 
     private List<StreamMessage<K, F, V>> decodeStreamMessages(
             List<io.lettuce.core.StreamMessage<byte[], byte[]>> messages) {
-        return orEmpty(messages).stream().map(this::decodeStreamMessage).toList();
+        return decodeList(messages, this::decodeStreamMessage);
     }
 
     private ClaimedMessages<K, F, V> decodeClaimedMessages(

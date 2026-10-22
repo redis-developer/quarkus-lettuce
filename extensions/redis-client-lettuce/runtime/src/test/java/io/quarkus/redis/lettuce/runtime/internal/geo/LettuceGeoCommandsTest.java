@@ -669,4 +669,21 @@ class LettuceGeoCommandsTest extends CommandsTestBase {
         return georadius.get(index).longitude.orElseThrow();
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        populate();
+        assertImmutable(blockingGeo.geohash(key, Place.crussol, Place.grignan));
+        assertImmutable(blockingGeo.geopos(key, Place.crussol, Place.adhemar));
+        assertImmutable(blockingGeo.georadius(key, VALENCE_LONGITUDE, VALENCE_LATITUDE, 15, GeoUnit.KM));
+        assertImmutable(blockingGeo.georadius(key, VALENCE_LONGITUDE, VALENCE_LATITUDE, 15, GeoUnit.KM,
+                new GeoRadiusArgs().ascending()));
+        assertImmutable(blockingGeo.georadiusbymember(key, Place.crussol, 100, GeoUnit.KM));
+        assertImmutable(blockingGeo.georadiusbymember(key, Place.crussol, 100, GeoUnit.KM, new GeoRadiusArgs().descending()));
+        assertImmutable(
+                blockingGeo.geosearch(key, new GeoSearchArgs<Place>().fromMember(Place.crussol).byRadius(100, GeoUnit.KM)));
+        // no match
+        assertImmutable(blockingGeo.georadius(key, 0, 0, 1, GeoUnit.M));
+        assertImmutable(blockingGeo.georadius(key, 0, 0, 1, GeoUnit.M, new GeoRadiusArgs()));
+    }
+
 }

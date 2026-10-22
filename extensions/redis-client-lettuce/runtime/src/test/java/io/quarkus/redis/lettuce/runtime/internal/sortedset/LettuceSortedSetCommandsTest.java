@@ -1059,4 +1059,35 @@ class LettuceSortedSetCommandsTest extends CommandsTestBase {
         assertThat(rawZrange(key)).hasSize(3);
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        var zset = blockingSortedSetOfStrings;
+        zset.zadd(key, Map.of("a", 1.0, "b", 2.0, "c", 3.0));
+        zset.zadd(key + "-2", Map.of("a", 1.0));
+        assertImmutable(zset.zrange(key, 0, -1));
+        assertImmutable(zset.zrangeWithScores(key, 0, -1));
+        assertImmutable(zset.zrange("missing", 0, -1));
+        assertImmutable(zset.zrangebyscore(key, ScoreRange.from(0, 10)));
+        assertImmutable(zset.zrangebyscoreWithScores(key, ScoreRange.from(0, 10)));
+        assertImmutable(zset.zrangebylex(key, Range.unbounded()));
+        // The blocking wrapper of the redis-client module re-collects the scores into a mutable list
+        assertImmutable(reactiveSortedSetOfStrings.zmscore(key, "a", "zzz").await().atMost(TIMEOUT));
+        assertImmutable(zset.zrandmember(key, 2));
+        assertImmutable(zset.zrandmemberWithScores(key, 2));
+        assertImmutable(zset.zdiff(key, key + "-2"));
+        assertImmutable(zset.zdiffWithScores(key, key + "-2"));
+        assertImmutable(zset.zinter(key, key + "-2"));
+        assertImmutable(zset.zinterWithScores(key, key + "-2"));
+        assertImmutable(zset.zunion(key, key + "-2"));
+        assertImmutable(zset.zunionWithScores(key, key + "-2"));
+        assertImmutable(zset.sort(key, new SortArgs().alpha()));
+        assertImmutable(zset.zscan(key).next());
+        assertImmutable(zset.zpopmin(key, 1));
+        assertImmutable(zset.zpopmax(key, 1));
+        assertImmutable(zset.zmpopMin(1, key));
+        assertImmutable(zset.zmpopMax(1, key + "-2"));
+        assertImmutable(zset.bzmpopMin(Duration.ofSeconds(1), 1, key));
+        assertImmutable(zset.zpopmin("missing", 1));
+    }
+
 }

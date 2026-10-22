@@ -358,4 +358,10 @@ class LettuceValueCommandsTest extends CommandsTestBase {
         assertThat(keys.ttl(key)).isGreaterThanOrEqualTo(19);
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        blockingValues.set(key, "value");
+        assertImmutable(blockingValues.mget(key, "missing"));
+    }
+
 }

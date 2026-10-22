@@ -26,11 +26,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveKeyCommands}.
- *
- * @param <K> the key type
- */
 public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K, K>
         implements ReactiveKeyCommands<K> {
 
@@ -362,7 +357,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     }
 
     LettuceCommand<byte[], K> _randomkey() {
-        return LettuceCommand.of(async::randomkey, this::decodeK);
+        return LettuceCommand.of(async::randomkey, this::decodeKey);
     }
 
     @Override
