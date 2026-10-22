@@ -466,7 +466,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         }
 
         // The first element is the group count, the rows follow
-        List<AggregateDocument> documents = new ArrayList<>(results.size() - 1);
+        List<AggregateDocument> documents = new ArrayList<>();
         for (int i = 1; i < results.size(); i++) {
             documents.add(new AggregateDocument(properties(results.get(i))));
         }
