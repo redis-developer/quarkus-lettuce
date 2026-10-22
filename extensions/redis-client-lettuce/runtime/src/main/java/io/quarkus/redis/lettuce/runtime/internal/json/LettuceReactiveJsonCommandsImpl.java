@@ -25,11 +25,6 @@ import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveJsonCommands}.
- *
- * @param <K> the key type
- */
 public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<K, K>
         implements ReactiveJsonCommands<K> {
 
