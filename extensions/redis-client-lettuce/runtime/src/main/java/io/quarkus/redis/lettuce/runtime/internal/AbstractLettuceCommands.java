@@ -181,6 +181,17 @@ public abstract class AbstractLettuceCommands<K, V> {
         return decodeSet(list, this::decodeValue);
     }
 
+    protected <F> Map<F, V> decodeMap(Type fieldType, Map<byte[], byte[]> map) {
+        if (map == null || map.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<F, V> decoded = LinkedHashMap.newLinkedHashMap(map.size());
+        for (Map.Entry<byte[], byte[]> e : map.entrySet()) {
+            decoded.put(marshaller.decode(fieldType, e.getKey()), decodeValue(e.getValue()));
+        }
+        return Collections.unmodifiableMap(decoded);
+    }
+
     protected <T> Map<T, V> decodeOrderedMap(T[] keys, List<KeyValue<byte[], byte[]>> results) {
         if (results == null || results.isEmpty()) {
             return Collections.emptyMap();

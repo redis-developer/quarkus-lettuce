@@ -391,9 +391,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     }
 
     private List<K> decodeIndexNames(List<String> names) {
-        return orEmpty(names).stream()
-                .map(name -> decodeK(name.getBytes(StandardCharsets.UTF_8)))
-                .toList();
+        return decodeList(names, name -> decodeKey(name.getBytes(StandardCharsets.UTF_8)));
     }
 
     record ResultLayout(boolean withScores, boolean withPayloads, boolean withSortKeys, boolean withContent) {
@@ -530,7 +528,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         Map<String, List<String>> groupsToTerms = new LinkedHashMap<>();
         if (termsToGroups != null) {
             for (Map.Entry<String, List<String>> entry : termsToGroups.entrySet()) {
-                for (String group : orEmpty(entry.getValue())) {
+                for (String group : decodeList(entry.getValue())) {
                     groupsToTerms.computeIfAbsent(group, ignored -> new ArrayList<>()).add(entry.getKey());
                 }
             }
