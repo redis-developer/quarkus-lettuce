@@ -1,7 +1,12 @@
 package io.quarkus.redis.lettuce.runtime.internal;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Supplier;
@@ -174,6 +179,17 @@ public abstract class CommandsTestBase {
             }
         }
         throw new AssertionError("No client with id " + clientId + " in CLIENT LIST");
+    }
+
+    protected static void assertImmutable(Collection<?> collection) {
+        assertThat(collection).isNotNull();
+        assertThatThrownBy(() -> collection.add(null)).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    protected static void assertImmutable(Map<?, ?> map) {
+        assertThat(map).isNotNull();
+        assertThatThrownBy(() -> ((Map) map).put(null, null)).isInstanceOf(UnsupportedOperationException.class);
     }
 
 }

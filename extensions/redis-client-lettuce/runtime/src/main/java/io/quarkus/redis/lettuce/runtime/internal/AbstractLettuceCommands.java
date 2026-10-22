@@ -149,6 +149,13 @@ public abstract class AbstractLettuceCommands<K, V> {
         return reply.stream().map(mapper).toList();
     }
 
+    protected static <T> Set<T> decodeSet(List<T> reply) {
+        if (reply == null || reply.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return Collections.unmodifiableSet(new LinkedHashSet<>(reply));
+    }
+
     protected static <A, B> Set<B> decodeSet(Set<A> reply, Function<A, B> mapper) {
         if (reply == null || reply.isEmpty()) {
             return Collections.emptySet();

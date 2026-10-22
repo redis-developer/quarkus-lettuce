@@ -424,4 +424,22 @@ class LettuceSetCommandsTest extends CommandsTestBase {
         blockingSets.sadd("key3", person1, person3, person5);
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        blockingSets.sadd(key, Person.person1, Person.person2, Person.person3);
+        blockingSets.sadd(key + "-2", Person.person1);
+        assertImmutable(blockingSets.smembers(key));
+        assertImmutable(blockingSets.smembers("missing"));
+        assertImmutable(blockingSets.sdiff(key, key + "-2"));
+        assertImmutable(blockingSets.sinter(key, key + "-2"));
+        assertImmutable(blockingSets.sunion(key, key + "-2"));
+        assertImmutable(blockingSets.smismember(key, Person.person1, Person.person0));
+        assertImmutable(blockingSets.srandmember(key, 2));
+        assertImmutable(blockingSets.sort(key, new SortArgs().alpha()));
+        assertImmutable(blockingSets.sscan(key).next());
+        assertImmutable(blockingSets.sscan("missing", new ScanArgs().count(5)).next());
+        assertImmutable(blockingSets.spop(key, 2));
+        assertImmutable(blockingSets.spop("missing", 2));
+    }
+
 }

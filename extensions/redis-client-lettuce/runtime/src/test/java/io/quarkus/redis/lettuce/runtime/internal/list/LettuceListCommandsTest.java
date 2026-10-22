@@ -507,4 +507,20 @@ class LettuceListCommandsTest extends CommandsTestBase {
             return this;
         }
     }
+
+    @Test
+    void apiReturnsImmutableCollections() {
+        blockingLists.rpush(key, Person.person1, Person.person2, Person.person3, Person.person1);
+        assertImmutable(blockingLists.lrange(key, 0, -1));
+        assertImmutable(blockingLists.lrange("missing", 0, -1));
+        assertImmutable(blockingLists.lpos(key, Person.person1, 0));
+        assertImmutable(blockingLists.lpos(key, Person.person1, 0, new LPosArgs().maxlen(10)));
+        assertImmutable(blockingLists.sort(key, new SortArgs().alpha()));
+        assertImmutable(blockingLists.lpop(key, 1));
+        assertImmutable(blockingLists.rpop(key, 1));
+        assertImmutable(blockingLists.lmpop(Position.LEFT, 1, key));
+        assertImmutable(blockingLists.blmpop(Duration.ofSeconds(1), Position.LEFT, 1, key));
+        assertImmutable(blockingLists.rpop("missing", 1));
+    }
+
 }

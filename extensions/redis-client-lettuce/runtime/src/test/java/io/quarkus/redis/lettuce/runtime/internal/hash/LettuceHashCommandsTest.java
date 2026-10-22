@@ -431,4 +431,19 @@ class LettuceHashCommandsTest extends CommandsTestBase {
         assertThat(cursor.cursorId()).isEqualTo(0L);
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        blockingHash.hset(key, Map.of("f1", Person.person1, "f2", Person.person2));
+        assertImmutable(blockingHash.hgetall(key));
+        assertImmutable(blockingHash.hgetall("missing"));
+        assertImmutable(blockingHash.hkeys(key));
+        assertImmutable(blockingHash.hvals(key));
+        assertImmutable(blockingHash.hmget(key, "f1", "nope"));
+        assertImmutable(blockingHash.hrandfield(key, 2));
+        assertImmutable(blockingHash.hrandfieldWithValues(key, 2));
+        assertImmutable(blockingHash.hrandfieldWithValues("missing", 2));
+        assertImmutable(blockingHash.hscan(key).next());
+        assertImmutable(blockingHash.hscan("missing", new ScanArgs().count(10)).next());
+    }
+
 }

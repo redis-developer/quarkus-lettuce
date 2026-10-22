@@ -2,6 +2,7 @@ package io.quarkus.redis.lettuce.runtime.internal.key;
 
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -54,7 +55,7 @@ public class LettuceReactiveKeyScanCursorImpl<K> implements ReactiveKeyScanCurso
         final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
         return LettuceResult.toUni(() -> async.scan(current, keyScanArgs))
                 .invoke(kc -> this.cursor = kc)
-                .map(kc -> new LinkedHashSet<>(decoder.apply(kc.getKeys())));
+                .map(kc -> Collections.unmodifiableSet(new LinkedHashSet<>(decoder.apply(kc.getKeys()))));
     }
 
     @Override

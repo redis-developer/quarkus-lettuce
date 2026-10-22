@@ -470,8 +470,8 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         if (raw == null) {
             return Collections.singletonList(Collections.emptyList());
         }
-        List<List<String>> list = new ArrayList<>();
-        List<String> keys = new ArrayList<>();
+        List<List<String>> list = new ArrayList<>(raw.size() + 1);
+        List<String> keys = new ArrayList<>(raw.size());
         for (byte[] item : raw) {
             if (item == null) {
                 list.add(null);

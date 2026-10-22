@@ -1229,4 +1229,36 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
         assertThat(indexes).isEmpty();
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        blockingSearch.ftCreate(key, new CreateArgs().onHash().prefixes("imm:")
+                .indexedField("title", FieldType.TEXT).indexedField("genre", FieldType.TAG));
+        blockingHash.hset("imm:1", Map.of("title", "Star Wars", "genre", "action"));
+        blockingHash.hset("imm:2", Map.of("title", "Star Trek", "genre", "scifi"));
+        blockingSearch.ftSynUpdate(key, "group", "star", "stella");
+        blockingSearch.ftDictAdd("imm-dict", "hello", "world");
+        await().untilAsserted(() -> assertThat(blockingSearch.ftSearch(key, "star").count()).isEqualTo(2));
+
+        assertImmutable(blockingSearch.ft_list());
+        assertImmutable(blockingSearch.ftDictDump("imm-dict"));
+        assertImmutable(blockingSearch.ftTagVals(key, "genre"));
+
+        SearchQueryResponse search = blockingSearch.ftSearch(key, "star");
+        assertImmutable(search.documents());
+        assertImmutable(search.documents().get(0).properties());
+        assertImmutable(blockingSearch.ftSearch(key, "nomatch").documents());
+
+        AggregationResponse aggregate = blockingSearch.ftAggregate(key, "*");
+        assertImmutable(aggregate.documents());
+        assertImmutable(aggregate.documents().get(0).properties());
+
+        SynDumpResponse synonyms = blockingSearch.ftSynDump(key);
+        assertImmutable(synonyms.groups());
+        assertImmutable(synonyms.synonym("group"));
+
+        SpellCheckResponse spelling = blockingSearch.ftSpellCheck(key, "stra", new SpellCheckArgs().distance(2));
+        assertImmutable(spelling.misspelledWords());
+        assertImmutable(spelling.suggestions("stra"));
+    }
+
 }

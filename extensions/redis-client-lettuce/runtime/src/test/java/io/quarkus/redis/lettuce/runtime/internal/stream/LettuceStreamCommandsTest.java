@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import io.quarkus.redis.datasource.ReactiveRedisCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.stream.ClaimedMessages;
 import io.quarkus.redis.datasource.stream.PendingMessage;
 import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
 import io.quarkus.redis.datasource.stream.StreamCommands;
@@ -641,4 +642,36 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
         }
         return false;
     }
+
+    @Test
+    void apiReturnsImmutableCollections() {
+        String group = "g";
+        blockingStream.xgroupCreate(key, group, "$", new XGroupCreateArgs().mkstream());
+        blockingStream.xgroupCreate(key, "idle-group", "0");
+        blockingStream.xadd(key, PAYLOAD);
+        blockingStream.xadd(key, PAYLOAD);
+
+        assertImmutable(blockingStream.xrange(key, StreamRange.of("-", "+")));
+        assertImmutable(blockingStream.xrange(key, StreamRange.of("-", "+")).get(0).payload());
+        assertImmutable(blockingStream.xrevrange(key, StreamRange.of("+", "-")));
+        assertImmutable(blockingStream.xrange("missing", StreamRange.of("-", "+")));
+        assertImmutable(blockingStream.xread(key, "0"));
+        assertImmutable(blockingStream.xread(Map.of(key, "0"), new XReadArgs().count(1)));
+
+        List<StreamMessage<String, String, Integer>> read = blockingStream.xreadgroup(group, "c1", key, ">");
+        assertImmutable(read);
+        assertImmutable(read.get(0).payload());
+
+        XPendingSummary summary = blockingStream.xpending(key, group);
+        assertImmutable(summary.getConsumers());
+        assertImmutable(blockingStream.xpending(key, "idle-group").getConsumers());
+        assertImmutable(blockingStream.xpending(key, group, StreamRange.of("-", "+"), 10));
+        assertImmutable(blockingStream.xpending(key, group, StreamRange.of("-", "+"), 10, new XPendingArgs().consumer("c1")));
+
+        assertImmutable(blockingStream.xclaim(key, group, "c2", Duration.ZERO, read.get(0).id()));
+        ClaimedMessages<String, String, Integer> claimed = blockingStream.xautoclaim(key, group, "c3", Duration.ZERO, "0");
+        assertImmutable(claimed.getMessages());
+        assertImmutable(claimed.getMessages().get(0).payload());
+    }
+
 }

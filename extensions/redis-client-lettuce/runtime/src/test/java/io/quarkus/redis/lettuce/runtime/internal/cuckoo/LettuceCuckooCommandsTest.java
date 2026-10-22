@@ -196,4 +196,11 @@ class LettuceCuckooCommandsTest extends CommandsTestBase {
         return people;
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        assertImmutable(blockingCuckoo.cfinsertnx(key, Person.person1, Person.person2));
+        assertImmutable(blockingCuckoo.cfinsertnx(key, new CfInsertArgs(), Person.person3));
+        assertImmutable(blockingCuckoo.cfmexists(key, Person.person1, Person.person0));
+    }
+
 }

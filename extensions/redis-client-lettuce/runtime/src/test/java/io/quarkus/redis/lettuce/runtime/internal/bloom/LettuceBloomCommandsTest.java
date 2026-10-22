@@ -150,4 +150,11 @@ class LettuceBloomCommandsTest extends CommandsTestBase {
         assertThat(bloom.bfadd(key, l2)).isTrue();
     }
 
+    @Test
+    void apiReturnsImmutableCollections() {
+        assertImmutable(blockingBloom.bfmadd(key, Person.person1, Person.person2));
+        assertImmutable(blockingBloom.bfmexists(key, Person.person1, Person.person3));
+        assertImmutable(blockingBloom.bfinsert(key, new BfInsertArgs(), Person.person0));
+    }
+
 }

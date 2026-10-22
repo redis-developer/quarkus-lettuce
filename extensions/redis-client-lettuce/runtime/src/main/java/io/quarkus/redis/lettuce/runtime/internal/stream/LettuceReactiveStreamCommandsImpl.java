@@ -9,6 +9,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -611,7 +612,8 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         String lowest = ids == null ? null : ids.getLower().getValue();
         String highest = ids == null ? null : ids.getUpper().getValue();
         Map<String, Long> consumers = pending.getConsumerMessageCount();
-        return new XPendingSummary(pending.getCount(), lowest, highest, consumers == null ? Map.of() : consumers);
+        return new XPendingSummary(pending.getCount(), lowest, highest,
+                consumers == null || consumers.isEmpty() ? Collections.emptyMap() : Collections.unmodifiableMap(consumers));
     }
 
     private static List<PendingMessage> decodePendingMessages(List<io.lettuce.core.models.stream.PendingMessage> list) {

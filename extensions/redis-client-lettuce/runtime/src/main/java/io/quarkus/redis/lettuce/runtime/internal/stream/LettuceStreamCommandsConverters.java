@@ -2,6 +2,7 @@ package io.quarkus.redis.lettuce.runtime.internal.stream;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import io.lettuce.core.Range;
@@ -129,16 +130,17 @@ final class LettuceStreamCommandsConverters {
 
     static io.lettuce.core.XPendingArgs<byte[]> toXPendingArgs(byte[] group, StreamRange range, int count,
             XPendingArgs args) {
-        List<Object> tokens = new ArrayList<>();
+        List<Object> rangeTokens = range.toArgs();
+        List<Object> argTokens = args == null ? Collections.emptyList() : args.toArgs();
+        // IDLE and its value, the range, COUNT and the optional arguments
+        List<Object> tokens = new ArrayList<>(2 + rangeTokens.size() + 1 + argTokens.size());
         if (args != null && args.idle() != null) {
             tokens.add("IDLE");
             tokens.add(args.idle().toMillis());
         }
-        tokens.addAll(range.toArgs());
+        tokens.addAll(rangeTokens);
         tokens.add(count);
-        if (args != null) {
-            tokens.addAll(args.toArgs());
-        }
+        tokens.addAll(argTokens);
         return new io.lettuce.core.XPendingArgs<>() {
             @Override
             public <K, V> void build(CommandArgs<K, V> commandArgs) {
