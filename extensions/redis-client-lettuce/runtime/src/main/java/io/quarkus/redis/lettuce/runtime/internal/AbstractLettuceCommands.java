@@ -177,6 +177,10 @@ public abstract class AbstractLettuceCommands<K, V> {
         return decodeList(list, this::decodeValue);
     }
 
+    protected Set<V> decodeSetOfValues(Set<byte[]> list) {
+        return decodeSet(list, this::decodeValue);
+    }
+
     protected <T> Map<T, V> decodeOrderedMap(T[] keys, List<KeyValue<byte[], byte[]>> results) {
         if (results == null || results.isEmpty()) {
             return Collections.emptyMap();

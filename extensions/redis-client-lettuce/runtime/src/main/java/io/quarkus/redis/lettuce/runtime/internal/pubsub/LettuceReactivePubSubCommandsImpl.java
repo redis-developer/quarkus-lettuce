@@ -5,8 +5,6 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -43,11 +41,6 @@ import io.smallrye.mutiny.subscription.MultiEmitter;
 import io.vertx.core.Context;
 import io.vertx.mutiny.core.Vertx;
 
-/**
- * Lettuce-backed implementation of {@link ReactivePubSubCommands}.
- *
- * @param <V> the value type
- */
 public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommands<V, V>
         implements ReactivePubSubCommands<V> {
 
@@ -69,13 +62,10 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
 
     @Override
     public Uni<Void> publish(String channel, V message) {
-        return _publish(channel, message).toUni();
-    }
-
-    LettuceCommand<Long, Void> _publish(String channel, V message) {
         nonNull(channel, "channel");
         nonNull(message, "message");
-        return LettuceCommand.discarding(() -> async.publish(marshaller.encode(channel), marshaller.encode(message)));
+        return LettuceCommand.discarding(() -> async.publish(marshaller.encode(channel), marshaller.encode(message)))
+                .toUni();
     }
 
     @Override
@@ -330,12 +320,8 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
             this.onException = onException;
         }
 
-        private static byte[][] encode(List<String> names) {
-            List<byte[]> encoded = new ArrayList<>(names.size());
-            for (String name : names) {
-                encoded.add(name.getBytes(StandardCharsets.UTF_8));
-            }
-            return encoded.toArray(byte[][]::new);
+        private byte[][] encode(List<String> names) {
+            return names.stream().map(marshaller::encode).toArray(byte[][]::new);
         }
 
         private void runOnDuplicatedContext(Runnable runnable) {
@@ -383,7 +369,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
             runOnDuplicatedContext(() -> {
                 V value;
                 try {
-                    value = marshaller.decode(valueType, payload);
+                    value = decodeValue(payload);
                 } catch (RuntimeException e) {
                     if (onException == null) {
                         throw e;
@@ -391,7 +377,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
                     onException.accept(e);
                     return;
                 }
-                onMessage.accept(new String(channel, StandardCharsets.UTF_8), value);
+                onMessage.accept(decodeString(channel), value);
             });
         }
 

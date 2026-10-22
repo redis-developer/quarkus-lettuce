@@ -24,12 +24,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveStringCommands} and {@link ReactiveValueCommands}.
- *
- * @param <K> the key type
- * @param <V> the value type
- */
 public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveStringCommands<K, V>, ReactiveValueCommands<K, V> {
 
@@ -188,7 +182,7 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
         nonNull(key2, "key2");
         LcsArgs args = LcsArgs.Builder.justLen();
         return LettuceCommand.of(() -> async.lcs(marshaller.encode(key1), marshaller.encode(key2), args),
-                this::decodeStringMatchResultLength);
+                result -> result == null ? null : result.getLen());
     }
 
     @SafeVarargs
@@ -352,10 +346,6 @@ public class LettuceReactiveValueCommandsImpl<K, V> extends AbstractLettuceComma
     LettuceCommand<Long, Long> _strlen(K key) {
         nonNull(key, "key");
         return LettuceCommand.of(() -> async.strlen(marshaller.encode(key)));
-    }
-
-    private Long decodeStringMatchResultLength(StringMatchResult matchResult) {
-        return matchResult == null ? null : matchResult.getLen();
     }
 
 }

@@ -113,7 +113,8 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
         if (items.length == 0) {
             return LettuceCommand.failing(new IllegalArgumentException("`items` must not be empty"));
         }
-        return LettuceCommand.of(() -> async.cmsQuery(marshaller.encode(key), marshaller.encodeAsArray(items)), AbstractLettuceCommands::decodeList);
+        return LettuceCommand.of(() -> async.cmsQuery(marshaller.encode(key), marshaller.encodeAsArray(items)),
+                AbstractLettuceCommands::decodeList);
     }
 
     @Override

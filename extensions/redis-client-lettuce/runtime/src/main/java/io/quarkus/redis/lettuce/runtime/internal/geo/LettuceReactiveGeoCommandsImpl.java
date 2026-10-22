@@ -192,7 +192,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         validateLatitude(latitude);
         nonNull(unit, "unit");
         return LettuceCommand.of(() -> async.georadius(marshaller.encode(key), longitude, latitude, radius,
-                LettuceGeoCommandsConverters.toUnit(unit)), it -> decodeSet(it, this::decodeValue));
+                LettuceGeoCommandsConverters.toUnit(unit)), this::decodeSetOfValues);
     }
 
     @Override
@@ -263,7 +263,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         positive(distance, "distance");
         nonNull(unit, "unit");
         return LettuceCommand.of(() -> async.georadiusbymember(marshaller.encode(key), marshaller.encode(member), distance,
-                LettuceGeoCommandsConverters.toUnit(unit)), it -> decodeSet(it, this::decodeValue));
+                LettuceGeoCommandsConverters.toUnit(unit)), this::decodeSetOfValues);
     }
 
     @Override

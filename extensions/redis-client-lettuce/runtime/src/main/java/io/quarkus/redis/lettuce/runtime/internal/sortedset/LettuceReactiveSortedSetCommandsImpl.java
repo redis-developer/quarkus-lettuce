@@ -8,11 +8,10 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.positive;
 
 import java.lang.reflect.Type;
 import java.time.Duration;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 
 import io.lettuce.core.Limit;
 import io.lettuce.core.ZPopArgs;
@@ -38,17 +37,12 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveSortedSetCommands}.
- *
- * @param <K> the key type
- * @param <V> the type of the scored member
- */
 public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveSortedSetCommands<K, V> {
 
     private static final ZAggregateArgs DEFAULT_INSTANCE_AGG = new ZAggregateArgs();
     private static final ZRangeArgs DEFAULT_INSTANCE_RANGE = new ZRangeArgs();
+    private static final SortArgs DEFAULT_SORT_ARGS = new SortArgs();
 
     private final ReactiveRedisDataSource dataSource;
 
@@ -111,15 +105,12 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(args, "args");
 
         io.lettuce.core.ZAddArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(args);
-        List<io.lettuce.core.ScoredValue<byte[]>> entries = new ArrayList<>(items.size());
-        for (Map.Entry<V, Double> entry : items.entrySet()) {
-            nonNull(entry.getValue(), "value from items");
-            entries.add(io.lettuce.core.ScoredValue.just(normalizeScore(entry.getValue()),
-                    marshaller.encode(entry.getKey())));
-        }
-
         @SuppressWarnings("unchecked")
-        io.lettuce.core.ScoredValue<byte[]>[] array = entries.toArray(new io.lettuce.core.ScoredValue[0]);
+        io.lettuce.core.ScoredValue<byte[]>[] array = items.entrySet().stream()
+                .map(entry -> io.lettuce.core.ScoredValue.just(
+                        normalizeScore(nonNull(entry.getValue(), "value from items")),
+                        marshaller.encode(entry.getKey())))
+                .toArray(io.lettuce.core.ScoredValue[]::new);
         return LettuceCommand.of(() -> async.zadd(marshaller.encode(key), lettuceArgs, array),
                 AbstractLettuceCommands::toInteger);
     }
@@ -141,14 +132,11 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         nonNull(args, "args");
 
         io.lettuce.core.ZAddArgs lettuceArgs = LettuceSortedSetCommandsConverters.toLettuceZAddArgs(args);
-        List<io.lettuce.core.ScoredValue<byte[]>> entries = new ArrayList<>(items.length);
-        for (ScoredValue<V> item : items) {
-            nonNull(item.value, "value from scored value");
-            entries.add(io.lettuce.core.ScoredValue.just(normalizeScore(item.score), marshaller.encode(item.value)));
-        }
-
         @SuppressWarnings("unchecked")
-        io.lettuce.core.ScoredValue<byte[]>[] array = entries.toArray(new io.lettuce.core.ScoredValue[0]);
+        io.lettuce.core.ScoredValue<byte[]>[] array = Arrays.stream(items)
+                .map(item -> io.lettuce.core.ScoredValue.just(normalizeScore(item.score),
+                        marshaller.encode(nonNull(item.value, "value from scored value"))))
+                .toArray(io.lettuce.core.ScoredValue[]::new);
         return LettuceCommand.of(() -> async.zadd(marshaller.encode(key), lettuceArgs, array),
                 AbstractLettuceCommands::toInteger);
     }
@@ -587,7 +575,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
         notNullOrEmpty(values, "values");
         doesNotContainNull(values, "values");
         return LettuceCommand.of(() -> async.zmscore(marshaller.encode(key), marshaller.encodeAsArray(values)),
-                r -> decodeList(r, Function.identity()));
+                AbstractLettuceCommands::decodeList);
     }
 
     @Override
@@ -1106,7 +1094,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<V>> sort(K key) {
-        return sort(key, new SortArgs());
+        return sort(key, DEFAULT_SORT_ARGS);
     }
 
     @Override
@@ -1136,7 +1124,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Long> sortAndStore(K key, K destination) {
-        return sortAndStore(key, destination, new SortArgs());
+        return sortAndStore(key, destination, DEFAULT_SORT_ARGS);
     }
 
     private ScoredValue<V> decodeScoredValue(io.lettuce.core.ScoredValue<byte[]> value) {
@@ -1155,14 +1143,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     }
 
     private List<ScoredValue<V>> decodeScoredValues(List<io.lettuce.core.ScoredValue<byte[]>> values) {
-        if (values == null) {
-            return List.of();
-        }
-        List<ScoredValue<V>> result = new ArrayList<>(values.size());
-        for (io.lettuce.core.ScoredValue<byte[]> value : values) {
-            result.add(decodeScoredValue(value));
-        }
-        return result;
+        return decodeList(values, this::decodeScoredValue);
     }
 
     private ScoredValue<V> decodePopped(io.lettuce.core.KeyValue<byte[], io.lettuce.core.ScoredValue<byte[]>> result) {

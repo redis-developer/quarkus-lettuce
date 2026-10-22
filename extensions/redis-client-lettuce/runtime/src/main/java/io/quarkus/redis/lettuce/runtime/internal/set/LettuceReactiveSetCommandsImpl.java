@@ -6,10 +6,8 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.positive;
 
 import java.lang.reflect.Type;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.function.Function;
 
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.ScanArgs;
@@ -23,12 +21,6 @@ import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
-/**
- * Lettuce-backed implementation of {@link ReactiveSetCommands}.
- *
- * @param <K> the key type
- * @param <V> the member type
- */
 public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveSetCommands<K, V> {
 
@@ -85,7 +77,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         if (keys.length < 2) {
             return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sdiff(marshaller.encodeAsArray(keys)), this::decodeSetOfValue);
+        return LettuceCommand.of(() -> async.sdiff(marshaller.encodeAsArray(keys)), this::decodeSetOfValues);
     }
 
     @SafeVarargs
@@ -118,7 +110,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         if (keys.length < 2) {
             return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sinter(marshaller.encodeAsArray(keys)), this::decodeSetOfValue);
+        return LettuceCommand.of(() -> async.sinter(marshaller.encodeAsArray(keys)), this::decodeSetOfValues);
     }
 
     @SafeVarargs
@@ -189,7 +181,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     LettuceCommand<Set<byte[]>, Set<V>> _smembers(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.smembers(marshaller.encode(key)), this::decodeSetOfValue);
+        return LettuceCommand.of(() -> async.smembers(marshaller.encode(key)), this::decodeSetOfValues);
     }
 
     @SafeVarargs
@@ -204,7 +196,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(members, "members");
         doesNotContainNull(members, "members");
         return LettuceCommand.of(() -> async.smismember(marshaller.encode(key), marshaller.encodeAsArray(members)),
-                r -> decodeList(r, Function.identity()));
+                AbstractLettuceCommands::decodeList);
     }
 
     @Override
@@ -238,7 +230,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     LettuceCommand<Set<byte[]>, Set<V>> _spop(K key, int count) {
         nonNull(key, "key");
         positive(count, "count");
-        return LettuceCommand.of(() -> async.spop(marshaller.encode(key), count), this::decodeSetOfValue);
+        return LettuceCommand.of(() -> async.spop(marshaller.encode(key), count), this::decodeSetOfValues);
     }
 
     @Override
@@ -289,7 +281,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         if (keys.length < 2) {
             return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sunion(marshaller.encodeAsArray(keys)), this::decodeSetOfValue);
+        return LettuceCommand.of(() -> async.sunion(marshaller.encodeAsArray(keys)), this::decodeSetOfValues);
     }
 
     @SafeVarargs
@@ -356,14 +348,6 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     @Override
     public Uni<Long> sortAndStore(K key, K destination) {
         return sortAndStore(key, destination, DEFAULT_SORT_ARGS);
-    }
-
-    private Set<V> decodeSetOfValue(Set<byte[]> members) {
-        Set<V> decoded = new LinkedHashSet<>(members.size());
-        for (byte[] member : members) {
-            decoded.add(decodeValue(member));
-        }
-        return decoded;
     }
 
 }

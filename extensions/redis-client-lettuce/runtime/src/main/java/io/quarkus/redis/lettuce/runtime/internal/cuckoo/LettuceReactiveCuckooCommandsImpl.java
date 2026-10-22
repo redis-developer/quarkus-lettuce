@@ -174,7 +174,8 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
         if (values.length == 0) {
             return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
-        return LettuceCommand.of(() -> async.cfMExists(marshaller.encode(key), marshaller.encodeAsArray(values)), AbstractLettuceCommands::decodeList);
+        return LettuceCommand.of(() -> async.cfMExists(marshaller.encode(key), marshaller.encodeAsArray(values)),
+                AbstractLettuceCommands::decodeList);
     }
 
     @Override
