@@ -456,7 +456,6 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     LettuceCommand<List<byte[]>, List<V>> _rpop(K key, int count) {
         nonNull(key, "key");
-        positive(count, "count");
         return LettuceCommand.of(() -> async.rpop(marshaller.encode(key), count), this::decodeListOfValues);
     }
 

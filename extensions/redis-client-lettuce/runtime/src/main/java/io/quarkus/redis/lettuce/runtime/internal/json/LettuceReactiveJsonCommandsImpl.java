@@ -247,11 +247,11 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         nonNull(clazz, "clazz");
         if (path == null && index == -1) {
             return LettuceCommand.of(() -> async.jsonArrpopRaw(marshaller.encode(key)),
-                    reply -> decodeList(reply, item -> item == null ? null : Json.decodeValue(item, clazz)));
+                    reply -> decodeJsonValues(reply, clazz));
         }
         JsonPath jsonPath = path == null ? JsonPath.ROOT_PATH : JsonPath.of(path);
         return LettuceCommand.of(() -> async.jsonArrpopRaw(marshaller.encode(key), jsonPath, index),
-                reply -> decodeList(reply, item -> item == null ? null : Json.decodeValue(item, clazz)));
+                reply -> decodeJsonValues(reply, clazz));
     }
 
     @Override
@@ -424,7 +424,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     }
 
     private static boolean isJsonNull(String raw) {
-        return "null".equalsIgnoreCase(raw);
+        return raw == null || "null".equalsIgnoreCase(raw);
     }
 
     private static JsonObject decodeJsonObject(String raw) {
@@ -462,9 +462,13 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         return new JsonArray(raw);
     }
 
+    private static <T> List<T> decodeJsonValues(List<String> raw, Class<T> clazz) {
+        return decodeList(raw, item -> item == null ? null : Json.decodeValue(item, clazz));
+    }
+
     private static List<List<String>> decodeObjKeys(List<byte[]> raw) {
-        if (raw == null || raw.isEmpty()) {
-            return Collections.emptyList();
+        if (raw == null) {
+            return Collections.singletonList(Collections.emptyList());
         }
         List<List<String>> list = new ArrayList<>();
         List<String> keys = new ArrayList<>();
@@ -475,8 +479,8 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
                 keys.add(new String(item, StandardCharsets.UTF_8));
             }
         }
-        list.add(keys);
-        return list;
+        list.add(Collections.unmodifiableList(keys));
+        return Collections.unmodifiableList(list);
     }
 
     private static String decodeJsonType(JsonType type) {

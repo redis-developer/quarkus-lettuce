@@ -162,7 +162,7 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
     }
 
     private static <V> Map<V, Long> zipCounts(List<V> values, List<Long> counts) {
-        if (values == null) {
+        if (counts == null || counts.isEmpty()) {
             return Collections.emptyMap();
         }
         Map<V, Long> result = LinkedHashMap.newLinkedHashMap(values.size());

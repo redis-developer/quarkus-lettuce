@@ -42,7 +42,6 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     private static final ZAggregateArgs DEFAULT_INSTANCE_AGG = new ZAggregateArgs();
     private static final ZRangeArgs DEFAULT_INSTANCE_RANGE = new ZRangeArgs();
-    private static final SortArgs DEFAULT_SORT_ARGS = new SortArgs();
 
     private final ReactiveRedisDataSource dataSource;
 
@@ -1094,7 +1093,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<List<V>> sort(K key) {
-        return sort(key, DEFAULT_SORT_ARGS);
+        return sort(key, new SortArgs());
     }
 
     @Override
@@ -1124,7 +1123,7 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
 
     @Override
     public Uni<Long> sortAndStore(K key, K destination) {
-        return sortAndStore(key, destination, DEFAULT_SORT_ARGS);
+        return sortAndStore(key, destination, new SortArgs());
     }
 
     private ScoredValue<V> decodeScoredValue(io.lettuce.core.ScoredValue<byte[]> value) {

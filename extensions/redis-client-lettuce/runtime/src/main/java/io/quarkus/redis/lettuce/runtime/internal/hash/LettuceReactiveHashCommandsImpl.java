@@ -282,7 +282,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         for (Map.Entry<byte[], byte[]> e : map.entrySet()) {
             decoded.put(decodeF(e.getKey()), decodeValue(e.getValue()));
         }
-        return decoded;
+        return Collections.unmodifiableMap(decoded);
     }
 
     private Map<F, V> decodeFieldWithValueMap(List<KeyValue<byte[], byte[]>> entries) {
@@ -293,7 +293,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         for (KeyValue<byte[], byte[]> entry : entries) {
             map.put(decodeF(entry.getKey()), decodeValue(entry.getValueOrElse(null)));
         }
-        return map;
+        return Collections.unmodifiableMap(map);
     }
 
     private List<F> decodeListOfField(List<byte[]> list) {

@@ -217,7 +217,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(geoArgs, "geoArgs");
         GeoArgs lettuceArgs = LettuceGeoCommandsConverters.toGeoArgs(geoArgs);
         return LettuceCommand.of(() -> async.georadius(marshaller.encode(key), longitude, latitude, radius,
-                LettuceGeoCommandsConverters.toUnit(unit), lettuceArgs), it -> decodeList(it, this::decodeGeoValue));
+                LettuceGeoCommandsConverters.toUnit(unit), lettuceArgs), this::decodeGeoValues);
     }
 
     @Override
@@ -280,7 +280,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(geoArgs, "geoArgs");
         GeoArgs lettuceArgs = LettuceGeoCommandsConverters.toGeoArgs(geoArgs);
         return LettuceCommand.of(() -> async.georadiusbymember(marshaller.encode(key), marshaller.encode(member), distance,
-                LettuceGeoCommandsConverters.toUnit(unit), lettuceArgs), it -> decodeList(it, this::decodeGeoValue));
+                LettuceGeoCommandsConverters.toUnit(unit), lettuceArgs), this::decodeGeoValues);
     }
 
     @Override
@@ -313,7 +313,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
                 geoArgs, valueCodec);
         return LettuceCommand.of(
                 () -> async.dispatch(CommandType.GEOSEARCH, LettuceGeoCommandsConverters.toGeoWithinOutput(geoArgs), args),
-                it -> decodeList(it, this::decodeGeoValue));
+                this::decodeGeoValues);
     }
 
     @Override
@@ -329,6 +329,10 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
                 marshaller.encode(destination), marshaller.encode(key), geoArgs, valueCodec, storeDist);
         return LettuceCommand.of(() -> async.dispatch(CommandType.GEOSEARCHSTORE,
                 new IntegerOutput<>(ByteArrayCodec.INSTANCE), args));
+    }
+
+    private List<GeoValue<V>> decodeGeoValues(List<GeoWithin<byte[]>> values) {
+        return decodeList(values, this::decodeGeoValue);
     }
 
     private GeoValue<V> decodeGeoValue(GeoWithin<byte[]> within) {
