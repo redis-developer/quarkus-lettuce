@@ -6,10 +6,9 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import io.lettuce.core.probabilistic.IncrementPair;
 import io.lettuce.core.probabilistic.MergePair;
@@ -65,7 +64,7 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
         List<V> values = new ArrayList<>(couples.keySet());
         IncrementPair<byte[]>[] pairs = encodeCouples(couples);
         return LettuceCommand.of(() -> async.cmsIncrBy(marshaller.encode(key), pairs),
-                counts -> zipCounts(values, counts));
+                counts -> zip(values, counts, Function.identity()));
     }
 
     @Override
@@ -159,17 +158,6 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
             pairs[i] = new MergePair<>(marshaller.encode(src.get(i)), weight.get(i));
         }
         return pairs;
-    }
-
-    private static <V> Map<V, Long> zipCounts(List<V> values, List<Long> counts) {
-        if (counts == null || counts.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        Map<V, Long> result = LinkedHashMap.newLinkedHashMap(values.size());
-        for (int i = 0; i < values.size(); i++) {
-            result.put(values.get(i), counts.get(i));
-        }
-        return Collections.unmodifiableMap(result);
     }
 
 }

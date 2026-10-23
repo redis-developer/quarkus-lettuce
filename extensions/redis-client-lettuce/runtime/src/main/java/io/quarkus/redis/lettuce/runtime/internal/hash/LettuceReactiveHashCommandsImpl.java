@@ -6,8 +6,6 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.doesNotContainNull;
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import java.lang.reflect.Type;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -275,18 +273,11 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     }
 
     private Map<F, V> decodeFieldWithValueMap(List<KeyValue<byte[], byte[]>> entries) {
-        if (entries == null || entries.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        Map<F, V> map = LinkedHashMap.newLinkedHashMap(entries.size());
-        for (KeyValue<byte[], byte[]> entry : entries) {
-            map.put(decodeF(entry.getKey()), decodeValue(entry.getValueOrElse(null)));
-        }
-        return Collections.unmodifiableMap(map);
+        return decodeMap(entries, e -> decodeF(e.getKey()), e -> decodeValue(e.getValueOrElse(null)));
     }
 
     private List<F> decodeListOfField(List<byte[]> list) {
-        return list.stream().map(this::decodeF).toList();
+        return decodeList(list, this::decodeF);
     }
 
 }

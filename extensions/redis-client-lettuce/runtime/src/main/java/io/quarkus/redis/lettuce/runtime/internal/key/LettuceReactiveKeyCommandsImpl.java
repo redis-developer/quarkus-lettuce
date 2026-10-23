@@ -396,14 +396,14 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     @Override
     public ReactiveKeyScanCursor<K> scan() {
-        return new LettuceReactiveKeyScanCursorImpl<>(async, this::decodeListOfKeys);
+        return new LettuceReactiveKeyScanCursorImpl<>(async, this::decodeSetOfKeys);
     }
 
     @Override
     public ReactiveKeyScanCursor<K> scan(KeyScanArgs args) {
         nonNull(args, "args");
         return new LettuceReactiveKeyScanCursorImpl<>(async, LettuceKeyCommandsConverters.toLettuceKeyScanArgs(args),
-                this::decodeListOfKeys);
+                this::decodeSetOfKeys);
     }
 
     @SafeVarargs
