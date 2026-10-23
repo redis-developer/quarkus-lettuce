@@ -2,8 +2,6 @@ package io.quarkus.redis.lettuce.runtime.internal.key;
 
 import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
-import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
@@ -26,16 +24,16 @@ public class LettuceReactiveKeyScanCursorImpl<K> implements ReactiveKeyScanCurso
 
     private final RedisClusterAsyncCommands<byte[], byte[]> async;
     private final KeyScanArgs keyScanArgs;
-    private final Function<List<byte[]>, List<K>> decoder;
+    private final Function<List<byte[]>, Set<K>> decoder;
     private ScanCursor cursor = ScanCursor.INITIAL;
 
     public LettuceReactiveKeyScanCursorImpl(RedisClusterAsyncCommands<byte[], byte[]> async,
-            Function<List<byte[]>, List<K>> decoder) {
+            Function<List<byte[]>, Set<K>> decoder) {
         this(async, new KeyScanArgs(), decoder);
     }
 
     public LettuceReactiveKeyScanCursorImpl(RedisClusterAsyncCommands<byte[], byte[]> async, KeyScanArgs keyScanArgs,
-            Function<List<byte[]>, List<K>> decoder) {
+            Function<List<byte[]>, Set<K>> decoder) {
         nonNull(async, "async");
         nonNull(keyScanArgs, "args");
         nonNull(decoder, "decoder");
@@ -55,7 +53,7 @@ public class LettuceReactiveKeyScanCursorImpl<K> implements ReactiveKeyScanCurso
         final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
         return LettuceResult.toUni(() -> async.scan(current, keyScanArgs))
                 .invoke(kc -> this.cursor = kc)
-                .map(kc -> Collections.unmodifiableSet(new LinkedHashSet<>(decoder.apply(kc.getKeys()))));
+                .map(kc -> decoder.apply(kc.getKeys()));
     }
 
     @Override

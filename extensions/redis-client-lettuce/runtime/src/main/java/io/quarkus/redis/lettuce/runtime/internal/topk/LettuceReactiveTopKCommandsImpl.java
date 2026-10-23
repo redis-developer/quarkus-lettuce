@@ -6,8 +6,6 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.positive;
 
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -47,7 +45,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(key, "key");
         nonNull(item, "item");
         return LettuceCommand.of(() -> async.topKAdd(marshaller.encode(key), marshaller.encode(item)),
-                list -> decodeValue(list.getFirst()));
+                list -> decodeStringValue(list.getFirst()));
     }
 
     @SafeVarargs
@@ -64,7 +62,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
             return LettuceCommand.failing(new IllegalArgumentException("`items` must not be empty"));
         }
         return LettuceCommand.of(() -> async.topKAdd(marshaller.encode(key), marshaller.encodeAsArray(items)),
-                reply -> decodeList(reply, this::decodeValue));
+                reply -> decodeList(reply, this::decodeStringValue));
     }
 
     @Override
@@ -77,7 +75,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(item, "item");
         positive(increment, "increment");
         return LettuceCommand.of(() -> async.topKIncrBy(marshaller.encode(key), marshaller.encode(item), increment),
-                list -> decodeValue(list.getFirst()));
+                list -> decodeStringValue(list.getFirst()));
     }
 
     @Override
@@ -94,7 +92,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         IncrementPair<byte[]>[] pairs = encodeCouples(couples);
         List<V> items = List.copyOf(couples.keySet());
         return LettuceCommand.of(() -> async.topKIncrBy(marshaller.encode(key), pairs),
-                dropped -> zipDropped(items, dropped));
+                dropped -> zip(items, dropped, this::decodeStringValue));
     }
 
     @Override
@@ -104,7 +102,8 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
 
     LettuceCommand<List<String>, List<V>> _topkList(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.topKList(marshaller.encode(key)), reply -> decodeList(reply, this::decodeValue));
+        return LettuceCommand.of(() -> async.topKList(marshaller.encode(key)),
+                reply -> decodeList(reply, this::decodeStringValue));
     }
 
     @Override
@@ -169,7 +168,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         return LettuceCommand.discarding(() -> async.topKReserve(marshaller.encode(key), topk, args));
     }
 
-    private V decodeValue(String item) {
+    private V decodeStringValue(String item) {
         return item == null ? null : decodeValue(item.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -185,26 +184,8 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         return pairs;
     }
 
-    private Map<V, V> zipDropped(List<V> items, List<String> dropped) {
-        if (dropped == null || dropped.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        Map<V, V> result = LinkedHashMap.newLinkedHashMap(items.size());
-        for (int i = 0; i < items.size(); i++) {
-            result.put(items.get(i), decodeValue(dropped.get(i)));
-        }
-        return Collections.unmodifiableMap(result);
-    }
-
     private Map<V, Integer> decodeTopKListValueList(List<TopKListValue> values) {
-        if (values == null || values.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        Map<V, Integer> result = LinkedHashMap.newLinkedHashMap(values.size());
-        for (TopKListValue value : values) {
-            result.put(decodeValue(value.getName()), value.getCount().intValue());
-        }
-        return Collections.unmodifiableMap(result);
+        return decodeMap(values, v -> decodeStringValue(v.getName()), v -> v.getCount().intValue());
     }
 
 }

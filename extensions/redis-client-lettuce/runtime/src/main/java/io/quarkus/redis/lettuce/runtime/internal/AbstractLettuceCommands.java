@@ -5,6 +5,8 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -70,7 +72,7 @@ public abstract class AbstractLettuceCommands<K, V> {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Reply normalisation (type-independent)
+    // Reply normalisation
     // ---------------------------------------------------------------------------------------------
 
     protected static boolean isOk(String response) {
@@ -82,10 +84,7 @@ public abstract class AbstractLettuceCommands<K, V> {
     }
 
     protected static Long orZero(Long value) {
-        if (value == null) {
-            return 0L;
-        }
-        return value;
+        return value != null ? value : 0L;
     }
 
     protected static Integer toInteger(Long value) {
@@ -135,33 +134,50 @@ public abstract class AbstractLettuceCommands<K, V> {
     // Reply decoding
     // ---------------------------------------------------------------------------------------------
 
-    protected static <T> List<T> decodeList(List<T> reply) {
-        if (reply == null || reply.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return Collections.unmodifiableList(reply);
+    protected static <T> List<T> decodeList(Collection<T> reply) {
+        return decodeList(reply, Function.identity());
     }
 
-    protected static <A, B> List<B> decodeList(List<A> reply, Function<A, B> mapper) {
+    protected static <A, B> List<B> decodeList(Collection<A> reply, Function<A, B> mapper) {
         if (reply == null || reply.isEmpty()) {
             return Collections.emptyList();
         }
         return reply.stream().map(mapper).toList();
     }
 
-    protected static <T> Set<T> decodeSet(List<T> reply) {
-        if (reply == null || reply.isEmpty()) {
-            return Collections.emptySet();
-        }
-        return Collections.unmodifiableSet(new LinkedHashSet<>(reply));
+    protected static <T> Set<T> decodeSet(Collection<T> reply) {
+        return decodeSet(reply, Function.identity());
     }
 
-    protected static <A, B> Set<B> decodeSet(Set<A> reply, Function<A, B> mapper) {
+    protected static <A, B> Set<B> decodeSet(Collection<A> reply, Function<A, B> mapper) {
         if (reply == null || reply.isEmpty()) {
             return Collections.emptySet();
         }
         Set<B> decoded = reply.stream().map(mapper).collect(Collectors.toCollection(LinkedHashSet::new));
         return Collections.unmodifiableSet(decoded);
+    }
+
+    protected static <A, K2, V2> Map<K2, V2> decodeMap(Collection<A> reply, Function<A, K2> key,
+            Function<A, V2> value) {
+        if (reply == null || reply.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<K2, V2> decoded = LinkedHashMap.newLinkedHashMap(reply.size());
+        for (A entry : reply) {
+            decoded.put(key.apply(entry), value.apply(entry));
+        }
+        return Collections.unmodifiableMap(decoded);
+    }
+
+    protected static <A, B, V2> Map<A, V2> zip(List<A> keys, List<B> values, Function<B, V2> mapper) {
+        if (values == null || values.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<A, V2> zipped = LinkedHashMap.newLinkedHashMap(keys.size());
+        for (int i = 0; i < keys.size(); i++) {
+            zipped.put(keys.get(i), mapper.apply(values.get(i)));
+        }
+        return Collections.unmodifiableMap(zipped);
     }
 
     protected K decodeKey(byte[] key) {
@@ -184,31 +200,21 @@ public abstract class AbstractLettuceCommands<K, V> {
         return decodeList(list, this::decodeValue);
     }
 
-    protected Set<V> decodeSetOfValues(Set<byte[]> list) {
+    protected Set<K> decodeSetOfKeys(Collection<byte[]> list) {
+        return decodeSet(list, this::decodeKey);
+    }
+
+    protected Set<V> decodeSetOfValues(Collection<byte[]> list) {
         return decodeSet(list, this::decodeValue);
     }
 
     protected <F> Map<F, V> decodeMap(Type fieldType, Map<byte[], byte[]> map) {
-        if (map == null || map.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        Map<F, V> decoded = LinkedHashMap.newLinkedHashMap(map.size());
-        for (Map.Entry<byte[], byte[]> e : map.entrySet()) {
-            decoded.put(marshaller.decode(fieldType, e.getKey()), decodeValue(e.getValue()));
-        }
-        return Collections.unmodifiableMap(decoded);
+        return decodeMap(map == null ? null : map.entrySet(),
+                e -> marshaller.decode(fieldType, e.getKey()), e -> decodeValue(e.getValue()));
     }
 
     protected <T> Map<T, V> decodeOrderedMap(T[] keys, List<KeyValue<byte[], byte[]>> results) {
-        if (results == null || results.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        Map<T, V> map = LinkedHashMap.newLinkedHashMap(keys.length);
-        for (int i = 0; i < keys.length; i++) {
-            KeyValue<byte[], byte[]> kv = results.get(i);
-            map.put(keys[i], kv.hasValue() ? decodeValue(kv.getValue()) : null);
-        }
-        return Collections.unmodifiableMap(map);
+        return zip(Arrays.asList(keys), results, kv -> kv.hasValue() ? decodeValue(kv.getValue()) : null);
     }
 
 }
