@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 import io.lettuce.core.api.StatefulRedisConnection;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceRecorder;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceClientSetup;
 import io.quarkus.test.QuarkusExtensionTest;
 import io.quarkus.test.common.QuarkusTestResource;
 
@@ -57,7 +57,7 @@ public class LettuceUnsupportedConfigurationWarningTest {
             .overrideConfigKey("quarkus.redis.tcp.idle-timeout", "30s")
             // applied only together with configure-client-name, as with the Vert.x client
             .overrideConfigKey("quarkus.redis.client-name", "my-app")
-            .setLogRecordPredicate(record -> LettuceRecorder.class.getName().equals(record.getLoggerName())
+            .setLogRecordPredicate(record -> LettuceClientSetup.class.getName().equals(record.getLoggerName())
                     && record.getLevel().intValue() >= Level.WARNING.intValue())
             .assertLogRecords(records -> assertThat(records)
                     .extracting(LettuceUnsupportedConfigurationWarningTest::message)
