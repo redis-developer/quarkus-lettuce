@@ -220,7 +220,7 @@ public final class LettuceConnectionPool {
      * replays the default database rather than the one the borrower selected.
      */
     private Uni<Void> resetDatabase(LettuceConnection connection) {
-        return LettuceResult.toUni(() -> connection.select(defaultDatabase))
+        return Uni.createFrom().completionStage(() -> connection.select(defaultDatabase))
                 .invoke(() -> dirty.remove(connection))
                 .replaceWithVoid();
     }

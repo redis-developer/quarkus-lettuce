@@ -13,7 +13,9 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import io.lettuce.core.ClientOptions;
 import io.lettuce.core.KeyValue;
+import io.lettuce.core.RedisURI;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.netty.channel.EventLoopGroup;
 import io.smallrye.mutiny.Uni;
@@ -53,8 +55,8 @@ class LettuceClientResourcesTest {
         lettuceResources = new LettuceClientResources(vertxEventLoops);
 
         String redisUri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
-        connectionFactory = new LettuceConnectionFactory("test", lettuceResources.clientResources(), redisUri,
-                Duration.ofSeconds(10));
+        connectionFactory = new LettuceConnectionFactory("test", lettuceResources.clientResources(),
+                RedisURI.create(redisUri), ClientOptions.create(), Duration.ofSeconds(10));
     }
 
     @AfterAll
@@ -129,9 +131,8 @@ class LettuceClientResourcesTest {
                     .toCompletableFuture();
             String[] callbackThreadName = new String[1];
 
-            future.thenAccept(result -> {
-                callbackThreadName[0] = Thread.currentThread().getName();
-            }).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            future.thenAccept(result ->
+                    callbackThreadName[0] = Thread.currentThread().getName()).toCompletableFuture().get(5, TimeUnit.SECONDS);
 
             assertThat(callbackThreadName[0])
                     .as("Lettuce callback should execute on a Vert.x event loop thread")

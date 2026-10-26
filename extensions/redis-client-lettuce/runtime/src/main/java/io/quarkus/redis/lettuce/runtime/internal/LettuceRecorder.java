@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import org.jboss.logging.Logger;
@@ -372,28 +374,46 @@ public class LettuceRecorder {
     }
 
     public Supplier<ActiveResult> checkActive(final String name) {
+        return () -> checkActive(name, runtimeConfig.getValue().clients().get(name));
+    }
+
+    private static ActiveResult checkActive(String name, RedisClientConfig config) {
+        if (!config.active()) {
+            return ActiveResult.inactive(String.format(
+                    """
+                            Lettuce Redis Client '%s' was deactivated through configuration properties. \
+                            To activate the Redis Client, set configuration property '%s' to 'true' and configure the Redis Client '%s'. \
+                            Refer to https://quarkus.io/guides/redis-reference for guidance.
+                            """,
+                    name, getPropertyName(name, "active"), name));
+        }
+        if (!hasHosts(config) && config.hostsProviderName().isEmpty()) {
+            return ActiveResult.inactive(String.format(
+                    """
+                            Lettuce Redis Client '%s' was deactivated automatically because the hosts are not set. \
+                            To activate the Redis Client, set the configuration property '%s', or '%s' together with \
+                            a RedisHostsProvider bean of that name. \
+                            Refer to https://quarkus.io/guides/redis-reference for guidance.
+                            """,
+                    name, getPropertyName(name, HOSTS), getPropertyName(name, HOSTS_PROVIDER_NAME)));
+        }
+        return ActiveResult.active();
+    }
+
+    /**
+     * The activation check of the beans of one topology: {@link #checkActive(String)}, then whether the client is
+     * configured as {@code topology} says, else inactive with the message {@code otherwise} builds, naming the beans
+     * to inject instead.
+     */
+    private Supplier<ActiveResult> checkActiveTopology(String name, Predicate<RedisClientConfig> topology,
+            Function<RedisClientConfig, String> otherwise) {
         return () -> {
-            RedisClientConfig redisClientConfig = runtimeConfig.getValue().clients().get(name);
-            if (!redisClientConfig.active()) {
-                return ActiveResult.inactive(String.format(
-                        """
-                                Lettuce Redis Client '%s' was deactivated through configuration properties. \
-                                To activate the Redis Client, set configuration property '%s' to 'true' and configure the Redis Client '%s'. \
-                                Refer to https://quarkus.io/guides/redis-reference for guidance.
-                                """,
-                        name, getPropertyName(name, "active"), name));
+            RedisClientConfig config = runtimeConfig.getValue().clients().get(name);
+            ActiveResult active = checkActive(name, config);
+            if (!active.value() || topology.test(config)) {
+                return active;
             }
-            if (!hasHosts(redisClientConfig) && redisClientConfig.hostsProviderName().isEmpty()) {
-                return ActiveResult.inactive(String.format(
-                        """
-                                Lettuce Redis Client '%s' was deactivated automatically because the hosts are not set. \
-                                To activate the Redis Client, set the configuration property '%s', or '%s' together with \
-                                a RedisHostsProvider bean of that name. \
-                                Refer to https://quarkus.io/guides/redis-reference for guidance.
-                                """,
-                        name, getPropertyName(name, HOSTS), getPropertyName(name, HOSTS_PROVIDER_NAME)));
-            }
-            return ActiveResult.active();
+            return ActiveResult.inactive(otherwise.apply(config));
         };
     }
 
@@ -402,24 +422,15 @@ public class LettuceRecorder {
      * client that is not configured as a cluster (a master/replica connection is a {@code StatefulRedisConnection}).
      */
     public Supplier<ActiveResult> checkActiveStandalone(final String name) {
-        return () -> {
-            ActiveResult active = checkActive(name).get();
-            if (!active.value()) {
-                return active;
-            }
-            if (isCluster(runtimeConfig.getValue().clients().get(name))) {
-                return ActiveResult.inactive(String.format(
-                        """
-                                Lettuce Redis Client '%s' is configured as a cluster through the configuration property '%s'. \
-                                Inject io.lettuce.core.cluster.RedisClusterClient and \
-                                io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String> instead of \
-                                io.lettuce.core.RedisClient and io.lettuce.core.api.StatefulRedisConnection<String, String>. \
-                                Refer to https://quarkus.io/guides/redis-reference for guidance.
-                                """,
-                        name, getPropertyName(name, "client-type")));
-            }
-            return ActiveResult.active();
-        };
+        return checkActiveTopology(name, config -> !isCluster(config), config -> String.format(
+                """
+                        Lettuce Redis Client '%s' is configured as a cluster through the configuration property '%s'. \
+                        Inject io.lettuce.core.cluster.RedisClusterClient and \
+                        io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String> instead of \
+                        io.lettuce.core.RedisClient and io.lettuce.core.api.StatefulRedisConnection<String, String>. \
+                        Refer to https://quarkus.io/guides/redis-reference for guidance.
+                        """,
+                name, getPropertyName(name, "client-type")));
     }
 
     /**
@@ -427,25 +438,15 @@ public class LettuceRecorder {
      * configured as a Sentinel or replication client.
      */
     public Supplier<ActiveResult> checkActiveMasterReplica(final String name) {
-        return () -> {
-            ActiveResult active = checkActive(name).get();
-            if (!active.value()) {
-                return active;
-            }
-            RedisClientConfig config = runtimeConfig.getValue().clients().get(name);
-            if (!isMasterReplica(config)) {
-                return ActiveResult.inactive(String.format(
-                        """
-                                Lettuce Redis Client '%s' is not configured as a Sentinel or replication client (its '%s' is '%s'): \
-                                inject io.lettuce.core.api.StatefulRedisConnection<String, String> for a standalone client or \
-                                io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String> for a cluster instead of \
-                                io.lettuce.core.masterreplica.StatefulRedisMasterReplicaConnection<String, String>. \
-                                Refer to https://quarkus.io/guides/redis-reference for guidance.
-                                """,
-                        name, getPropertyName(name, "client-type"), config.clientType().name().toLowerCase()));
-            }
-            return ActiveResult.active();
-        };
+        return checkActiveTopology(name, LettuceRecorder::isMasterReplica, config -> String.format(
+                """
+                        Lettuce Redis Client '%s' is not configured as a Sentinel or replication client (its '%s' is '%s'): \
+                        inject io.lettuce.core.api.StatefulRedisConnection<String, String> for a standalone client or \
+                        io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String> for a cluster instead of \
+                        io.lettuce.core.masterreplica.StatefulRedisMasterReplicaConnection<String, String>. \
+                        Refer to https://quarkus.io/guides/redis-reference for guidance.
+                        """,
+                name, getPropertyName(name, "client-type"), config.clientType().name().toLowerCase()));
     }
 
     /**
@@ -453,24 +454,15 @@ public class LettuceRecorder {
      * of an active client that is configured as a cluster.
      */
     public Supplier<ActiveResult> checkActiveCluster(final String name) {
-        return () -> {
-            ActiveResult active = checkActive(name).get();
-            if (!active.value()) {
-                return active;
-            }
-            if (!isCluster(runtimeConfig.getValue().clients().get(name))) {
-                return ActiveResult.inactive(String.format(
-                        """
-                                Lettuce Redis Client '%s' is not configured as a cluster: set the configuration property '%s' to 'cluster', \
-                                or inject io.lettuce.core.RedisClient and io.lettuce.core.api.StatefulRedisConnection<String, String> \
-                                instead of io.lettuce.core.cluster.RedisClusterClient and \
-                                io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>. \
-                                Refer to https://quarkus.io/guides/redis-reference for guidance.
-                                """,
-                        name, getPropertyName(name, "client-type")));
-            }
-            return ActiveResult.active();
-        };
+        return checkActiveTopology(name, LettuceRecorder::isCluster, config -> String.format(
+                """
+                        Lettuce Redis Client '%s' is not configured as a cluster: set the configuration property '%s' to 'cluster', \
+                        or inject io.lettuce.core.RedisClient and io.lettuce.core.api.StatefulRedisConnection<String, String> \
+                        instead of io.lettuce.core.cluster.RedisClusterClient and \
+                        io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>. \
+                        Refer to https://quarkus.io/guides/redis-reference for guidance.
+                        """,
+                name, getPropertyName(name, "client-type")));
     }
 
     public void cleanup(ShutdownContext context) {
