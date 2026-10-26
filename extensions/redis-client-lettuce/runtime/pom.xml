@@ -68,6 +68,11 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-common</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
             <scope>test</scope>
@@ -120,18 +125,12 @@
                     <name>test-containers</name>
                 </property>
             </activation>
-            <properties>
-                <redis.base.image>redis:8-alpine</redis.base.image>
-            </properties>
             <build>
                 <plugins>
                     <plugin>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
                             <skip>false</skip>
-                            <systemProperties>
-                                <redis.base.image>${redis.base.image}</redis.base.image>
-                            </systemProperties>
                         </configuration>
                     </plugin>
                     <plugin>
