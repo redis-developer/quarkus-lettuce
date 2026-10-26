@@ -28,7 +28,6 @@ import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSo
 import io.quarkus.redis.datasource.value.ReactiveTransactionalValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveAutoSuggestCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveTransactionalAutoSuggestCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
@@ -77,8 +76,8 @@ import io.vertx.redis.client.impl.CommandMap;
  * {@code LettuceReactiveRedisDataSourceImpl#withTransaction(...)} assembles the typed
  * {@code TransactionResult} once {@code EXEC} has run.
  * <p>
- * Only the {@code value}, {@code key} and {@code execute(...)} surfaces are wired — every other
- * command group throws {@link UnsupportedOperationException}, mirroring the shape of the
+ * The command-group accessors leave the argument checks to the non-transactional accessors they wrap. The
+ * {@code graph} and {@code timeseries} groups throw {@link UnsupportedOperationException}, as on the
  * non-transactional Lettuce data source.
  */
 public class LettuceReactiveTransactionalRedisDataSourceImpl implements ReactiveTransactionalRedisDataSource {
@@ -96,7 +95,7 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public Uni<Void> discard() {
-        return LettuceResult.toUni(connection::discard)
+        return Uni.createFrom().completionStage(connection::discard)
                 .invoke(tx::discard)
                 .replaceWithVoid();
     }
@@ -108,8 +107,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalValueCommands<K, V> value(Class<K> redisKeyType, Class<V> valueType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(valueType, "valueType");
         LettuceReactiveValueCommandsImpl<K, V> reactiveValue = (LettuceReactiveValueCommandsImpl<K, V>) reactive
                 .value(redisKeyType, valueType);
         return new LettuceReactiveTransactionalValueCommandsImpl<>(this, reactiveValue, tx);
@@ -117,8 +114,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalStringCommands<K, V> string(Class<K> redisKeyType, Class<V> valueType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(valueType, "valueType");
         LettuceReactiveValueCommandsImpl<K, V> reactiveValue = (LettuceReactiveValueCommandsImpl<K, V>) reactive
                 .value(redisKeyType, valueType);
         return new LettuceReactiveTransactionalValueCommandsImpl<>(this, reactiveValue, tx);
@@ -126,7 +121,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K> ReactiveTransactionalKeyCommands<K> key(Class<K> redisKeyType) {
-        nonNull(redisKeyType, "redisKeyType");
         LettuceReactiveKeyCommandsImpl<K> reactiveKey = (LettuceReactiveKeyCommandsImpl<K>) reactive
                 .key(redisKeyType);
         return new LettuceReactiveTransactionalKeyCommandsImpl<>(this, reactiveKey, tx);
@@ -149,9 +143,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     @Override
     public <K, F, V> ReactiveTransactionalHashCommands<K, F, V> hash(Class<K> redisKeyType, Class<F> typeOfField,
             Class<V> typeOfValue) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(typeOfField, "typeOfField");
-        nonNull(typeOfValue, "typeOfValue");
         LettuceReactiveHashCommandsImpl<K, F, V> reactiveHash = (LettuceReactiveHashCommandsImpl<K, F, V>) reactive
                 .hash(redisKeyType, typeOfField, typeOfValue);
         return new LettuceReactiveTransactionalHashCommandsImpl<>(this, reactiveHash, tx);
@@ -159,8 +150,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalGeoCommands<K, V> geo(Class<K> redisKeyType, Class<V> memberType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(memberType, "memberType");
         LettuceReactiveGeoCommandsImpl<K, V> reactiveGeo = (LettuceReactiveGeoCommandsImpl<K, V>) reactive
                 .geo(redisKeyType, memberType);
         return new LettuceReactiveTransactionalGeoCommandsImpl<>(this, reactiveGeo, tx);
@@ -168,8 +157,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalSortedSetCommands<K, V> sortedSet(Class<K> redisKeyType, Class<V> valueType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(valueType, "valueType");
         LettuceReactiveSortedSetCommandsImpl<K, V> reactiveSortedSet = (LettuceReactiveSortedSetCommandsImpl<K, V>) reactive
                 .sortedSet(redisKeyType, valueType);
         return new LettuceReactiveTransactionalSortedSetCommandsImpl<>(this, reactiveSortedSet, tx);
@@ -177,8 +164,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalSetCommands<K, V> set(Class<K> redisKeyType, Class<V> memberType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(memberType, "memberType");
         LettuceReactiveSetCommandsImpl<K, V> reactiveSet = (LettuceReactiveSetCommandsImpl<K, V>) reactive
                 .set(redisKeyType, memberType);
         return new LettuceReactiveTransactionalSetCommandsImpl<>(this, reactiveSet, tx);
@@ -186,8 +171,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalListCommands<K, V> list(Class<K> redisKeyType, Class<V> memberType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(memberType, "memberType");
         LettuceReactiveListCommandsImpl<K, V> reactiveList = (LettuceReactiveListCommandsImpl<K, V>) reactive
                 .list(redisKeyType, memberType);
         return new LettuceReactiveTransactionalListCommandsImpl<>(this, reactiveList, tx);
@@ -195,8 +178,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalHyperLogLogCommands<K, V> hyperloglog(Class<K> redisKeyType, Class<V> memberType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(memberType, "memberType");
         LettuceReactiveHyperLogLogCommandsImpl<K, V> reactiveHyperLogLog = (LettuceReactiveHyperLogLogCommandsImpl<K, V>) reactive
                 .hyperloglog(redisKeyType, memberType);
         return new LettuceReactiveTransactionalHyperLogLogCommandsImpl<>(this, reactiveHyperLogLog, tx);
@@ -204,7 +185,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K> ReactiveTransactionalBitMapCommands<K> bitmap(Class<K> redisKeyType) {
-        nonNull(redisKeyType, "redisKeyType");
         LettuceReactiveBitMapCommandsImpl<K> reactiveBitMap = (LettuceReactiveBitMapCommandsImpl<K>) reactive
                 .bitmap(redisKeyType);
         return new LettuceReactiveTransactionalBitMapCommandsImpl<>(this, reactiveBitMap, tx);
@@ -213,9 +193,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     @Override
     public <K, F, V> ReactiveTransactionalStreamCommands<K, F, V> stream(Class<K> redisKeyType, Class<F> typeOfField,
             Class<V> typeOfValue) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(typeOfField, "typeOfField");
-        nonNull(typeOfValue, "typeOfValue");
         LettuceReactiveStreamCommandsImpl<K, F, V> reactiveStream = (LettuceReactiveStreamCommandsImpl<K, F, V>) reactive
                 .stream(redisKeyType, typeOfField, typeOfValue);
         return new LettuceReactiveTransactionalStreamCommandsImpl<>(this, reactiveStream, tx);
@@ -223,7 +200,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K> ReactiveTransactionalJsonCommands<K> json(Class<K> redisKeyType) {
-        nonNull(redisKeyType, "redisKeyType");
         LettuceReactiveJsonCommandsImpl<K> reactiveJson = (LettuceReactiveJsonCommandsImpl<K>) reactive
                 .json(redisKeyType);
         return new LettuceReactiveTransactionalJsonCommandsImpl<>(this, reactiveJson, tx);
@@ -231,8 +207,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalBloomCommands<K, V> bloom(Class<K> redisKeyType, Class<V> valueType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(valueType, "valueType");
         LettuceReactiveBloomCommandsImpl<K, V> reactiveBloom = (LettuceReactiveBloomCommandsImpl<K, V>) reactive
                 .bloom(redisKeyType, valueType);
         return new LettuceReactiveTransactionalBloomCommandsImpl<>(this, reactiveBloom, tx);
@@ -240,8 +214,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalCuckooCommands<K, V> cuckoo(Class<K> redisKeyType, Class<V> valueType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(valueType, "valueType");
         LettuceReactiveCuckooCommandsImpl<K, V> reactiveCuckoo = (LettuceReactiveCuckooCommandsImpl<K, V>) reactive
                 .cuckoo(redisKeyType, valueType);
         return new LettuceReactiveTransactionalCuckooCommandsImpl<>(this, reactiveCuckoo, tx);
@@ -249,8 +221,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalCountMinCommands<K, V> countmin(Class<K> redisKeyType, Class<V> valueType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(valueType, "valueType");
         LettuceReactiveCountMinCommandsImpl<K, V> reactiveCountMin = (LettuceReactiveCountMinCommandsImpl<K, V>) reactive
                 .countmin(redisKeyType, valueType);
         return new LettuceReactiveTransactionalCountMinCommandsImpl<>(this, reactiveCountMin, tx);
@@ -258,8 +228,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K, V> ReactiveTransactionalTopKCommands<K, V> topk(Class<K> redisKeyType, Class<V> valueType) {
-        nonNull(redisKeyType, "redisKeyType");
-        nonNull(valueType, "valueType");
         LettuceReactiveTopKCommandsImpl<K, V> reactiveTopK = (LettuceReactiveTopKCommandsImpl<K, V>) reactive
                 .topk(redisKeyType, valueType);
         return new LettuceReactiveTransactionalTopKCommandsImpl<>(this, reactiveTopK, tx);
@@ -272,7 +240,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K> ReactiveTransactionalSearchCommands search(Class<K> redisKeyType) {
-        nonNull(redisKeyType, "redisKeyType");
         LettuceReactiveSearchCommandsImpl<K> reactiveSearch = (LettuceReactiveSearchCommandsImpl<K>) reactive
                 .search(redisKeyType);
         return new LettuceReactiveTransactionalSearchCommandsImpl<>(this, reactiveSearch, tx);
@@ -280,7 +247,6 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K> ReactiveTransactionalAutoSuggestCommands<K> autosuggest(Class<K> redisKeyType) {
-        nonNull(redisKeyType, "redisKeyType");
         LettuceReactiveAutoSuggestCommandsImpl<K> reactiveAutoSuggest = (LettuceReactiveAutoSuggestCommandsImpl<K>) reactive
                 .autosuggest(redisKeyType);
         return new LettuceReactiveTransactionalAutoSuggestCommandsImpl<>(this, reactiveAutoSuggest, tx);

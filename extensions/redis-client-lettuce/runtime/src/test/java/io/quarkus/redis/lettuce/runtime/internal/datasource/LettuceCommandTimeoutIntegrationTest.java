@@ -10,7 +10,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisCommandTimeoutException;
+import io.lettuce.core.RedisURI;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.stream.StreamMessage;
 import io.quarkus.redis.datasource.stream.XGroupCreateArgs;
@@ -39,7 +41,7 @@ class LettuceCommandTimeoutIntegrationTest extends CommandsTestBase {
     @BeforeEach
     void connectWithShortCommandTimeout() {
         factory = new LettuceConnectionFactory("timeout-test", lettuceResources.clientResources(),
-                "redis://" + REDIS.getHost() + ":" + REDIS.getFirstMappedPort(), COMMAND_TIMEOUT);
+                RedisURI.create(REDIS.getHost(), REDIS.getFirstMappedPort()), ClientOptions.create(), COMMAND_TIMEOUT);
         conn = factory.connect();
         pool = new LettuceConnectionPool(factory::connectAsync, 1, 1, 0);
         ds = new LettuceBlockingRedisDataSourceImpl(

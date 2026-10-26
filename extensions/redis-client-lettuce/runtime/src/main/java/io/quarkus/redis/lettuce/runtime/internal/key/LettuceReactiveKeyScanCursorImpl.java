@@ -10,7 +10,6 @@ import io.lettuce.core.KeyScanArgs;
 import io.lettuce.core.ScanCursor;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.quarkus.redis.datasource.keys.ReactiveKeyScanCursor;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 
@@ -51,7 +50,7 @@ public class LettuceReactiveKeyScanCursorImpl<K> implements ReactiveKeyScanCurso
     public Uni<Set<K>> next() {
         // Reset cursor when finished to copy Vert.x. behavior.
         final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
-        return LettuceResult.toUni(() -> async.scan(current, keyScanArgs))
+        return Uni.createFrom().completionStage(() -> async.scan(current, keyScanArgs))
                 .invoke(kc -> this.cursor = kc)
                 .map(kc -> decoder.apply(kc.getKeys()));
     }
