@@ -24,7 +24,6 @@ import io.lettuce.core.models.stream.PendingMessages;
 import io.lettuce.core.output.StatusOutput;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandType;
-import io.quarkus.redis.datasource.ReactiveRedisCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.stream.ClaimedMessages;
 import io.quarkus.redis.datasource.stream.PendingMessage;
@@ -55,7 +54,7 @@ import io.smallrye.mutiny.Uni;
  * @param <V> the value type
  */
 public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceCommands<K, V>
-        implements ReactiveStreamCommands<K, F, V>, ReactiveRedisCommands {
+        implements ReactiveStreamCommands<K, F, V> {
 
     private final ReactiveRedisDataSource dataSource;
     private final Type fieldType;
