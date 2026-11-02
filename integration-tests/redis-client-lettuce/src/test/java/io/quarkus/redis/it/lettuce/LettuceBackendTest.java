@@ -2370,4 +2370,213 @@ class LettuceBackendTest {
         assertEquals("false;3;[true, true, true];true;false", body);
     }
 
+    @Test
+    public void timeSeriesCreateAddGetRange() {
+        String key = getKey("ts-sync");
+
+        RestAssured.given().queryParam("retention", 0).body("sensor=" + key + ",room=kitchen")
+                .when().post("/lettuce/timeseries/create/" + key).then().statusCode(204);
+        // re-creating an existing series is a server-side error
+        RestAssured.given().when().post("/lettuce/timeseries/create/" + key).then().statusCode(500);
+        RestAssured.given().when().post("/lettuce/timeseries/alter/" + key + "/86400000").then().statusCode(204);
+
+        RestAssured.given().when().post("/lettuce/timeseries/add/" + key + "/1000/26").then().statusCode(204);
+        RestAssured.given().when().post("/lettuce/timeseries/add/" + key + "/2000/27.5").then().statusCode(204);
+        RestAssured.given().body(key + ":3000:28," + key + ":4000:30").when().post("/lettuce/timeseries/madd").then()
+                .statusCode(204);
+        // the default duplicate policy (BLOCK) rejects a second sample at an existing timestamp
+        RestAssured.given().when().post("/lettuce/timeseries/add/" + key + "/4000/31").then().statusCode(500);
+        RestAssured.given().queryParam("onDuplicate", "LAST").when().post("/lettuce/timeseries/add/" + key + "/4000/31")
+                .then().statusCode(204);
+
+        RestAssured.given().when().get("/lettuce/timeseries/get/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("4000:31.0"));
+        // reading a series that does not exist is a server-side error
+        RestAssured.given().when().get("/lettuce/timeseries/get/" + key + "-missing").then().statusCode(500);
+
+        RestAssured.given().when().get("/lettuce/timeseries/range/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("1000:26.0;2000:27.5;3000:28.0;4000:31.0"));
+        RestAssured.given().queryParam("from", 1500).queryParam("to", 3000).when()
+                .get("/lettuce/timeseries/range/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2000:27.5;3000:28.0"));
+        RestAssured.given().queryParam("to", 2000).when().get("/lettuce/timeseries/range/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("1000:26.0;2000:27.5"));
+        RestAssured.given().queryParam("from", 3000).when().get("/lettuce/timeseries/range/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("3000:28.0;4000:31.0"));
+        RestAssured.given().queryParam("min", 27).queryParam("max", 28).when()
+                .get("/lettuce/timeseries/range/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2000:27.5;3000:28.0"));
+        RestAssured.given().queryParam("count", 2).when().get("/lettuce/timeseries/revrange/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("4000:31.0;3000:28.0"));
+        // AVG over 2s buckets aligned at 1000: [1000,3000) -> 26.75, [3000,5000) -> 29.5
+        RestAssured.given().queryParam("aggregation", "AVG").queryParam("bucket", 2000).queryParam("align", 1000)
+                .when().get("/lettuce/timeseries/range/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("1000:26.75;3000:29.5"));
+        RestAssured.given().queryParam("aggregation", "MAX").queryParam("bucket", 10000)
+                .when().get("/lettuce/timeseries/revrange/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("0:31.0"));
+
+        RestAssured.given().when().delete("/lettuce/timeseries/del/" + key + "/2000/3000").then().statusCode(204);
+        RestAssured.given().when().get("/lettuce/timeseries/range/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("1000:26.0;4000:31.0"));
+    }
+
+    @Test
+    public void timeSeriesAddNowIncrDecr() {
+        String key = getKey("ts-incr");
+        String nowKey = getKey("ts-now");
+
+        // TS.INCRBY creates the series when it does not exist
+        RestAssured.given().queryParam("timestamp", 1000).when().post("/lettuce/timeseries/incrby/" + key + "/2.5").then()
+                .statusCode(200).body(CoreMatchers.is("1000:2.5"));
+        RestAssured.given().queryParam("timestamp", 2000).when().post("/lettuce/timeseries/decrby/" + key + "/1").then()
+                .statusCode(200).body(CoreMatchers.is("2000:1.5"));
+        // an increment stamped before the latest sample is a server-side error
+        RestAssured.given().queryParam("timestamp", 1000).when().post("/lettuce/timeseries/incrby/" + key + "/1").then()
+                .statusCode(500);
+        // without an explicit timestamp the increment is stamped by the server, well after the fixed timestamps above
+        String incremented = RestAssured.given().when().post("/lettuce/timeseries/incrby/" + key + "/3").then()
+                .statusCode(200).extract().asString();
+        assertTrue(incremented.endsWith(":4.5"), incremented);
+        assertTrue(Long.parseLong(incremented.substring(0, incremented.indexOf(':'))) > 1_600_000_000_000L, incremented);
+
+        String now = RestAssured.given().when().post("/lettuce/timeseries/addnow/" + nowKey + "/5").then()
+                .statusCode(200).extract().asString();
+        assertTrue(now.endsWith(":5.0"), now);
+        assertTrue(Long.parseLong(now.substring(0, now.indexOf(':'))) > 1_600_000_000_000L, now);
+    }
+
+    @Test
+    public void timeSeriesCompactionRules() {
+        String key = getKey("ts-rule");
+        String sum = getKey("ts-rule-sum");
+
+        RestAssured.given().when().post("/lettuce/timeseries/create/" + key).then().statusCode(204);
+        RestAssured.given().when().post("/lettuce/timeseries/create/" + sum).then().statusCode(204);
+        RestAssured.given().when().post("/lettuce/timeseries/rule/" + key + "/" + sum + "/SUM/1000").then()
+                .statusCode(204);
+
+        RestAssured.given().body(key + ":1000:1," + key + ":1500:2," + key + ":2000:3," + key + ":2500:4," + key
+                + ":3000:5").when().post("/lettuce/timeseries/madd").then().statusCode(204);
+
+        // the bucket is written to the destination once a sample lands in the next bucket
+        RestAssured.given().when().get("/lettuce/timeseries/range/" + sum).then()
+                .statusCode(200).body(CoreMatchers.is("1000:3.0;2000:7.0"));
+
+        RestAssured.given().when().delete("/lettuce/timeseries/rule/" + key + "/" + sum).then().statusCode(204);
+        // deleting a rule that no longer exists is a server-side error
+        RestAssured.given().when().delete("/lettuce/timeseries/rule/" + key + "/" + sum).then().statusCode(500);
+        RestAssured.given().when().post("/lettuce/timeseries/add/" + key + "/4000/6").then().statusCode(204);
+        RestAssured.given().when().get("/lettuce/timeseries/range/" + sum).then()
+                .statusCode(200).body(CoreMatchers.is("1000:3.0;2000:7.0"));
+    }
+
+    @Test
+    public void timeSeriesMultiKeyQueries() {
+        String a = getKey("ts-multi-a");
+        String b = getKey("ts-multi-b");
+        String tag = getKey("multi");
+
+        RestAssured.given().body("tag=" + tag + ",name=a,room=kitchen").when().post("/lettuce/timeseries/create/" + a)
+                .then().statusCode(204);
+        RestAssured.given().body("tag=" + tag + ",name=b,room=study").when().post("/lettuce/timeseries/create/" + b)
+                .then().statusCode(204);
+        RestAssured.given().body(a + ":1000:10," + a + ":2000:20," + b + ":1000:1," + b + ":2000:2," + b + ":3000:3")
+                .when().post("/lettuce/timeseries/madd").then().statusCode(204);
+
+        RestAssured.given().queryParam("filter", "tag=" + tag).when().get("/lettuce/timeseries/queryindex").then()
+                .statusCode(200).body(CoreMatchers.is("[\"" + a + "\",\"" + b + "\"]"));
+        RestAssured.given().queryParam("filter", "tag=" + tag).queryParam("filter", "room=study").when()
+                .get("/lettuce/timeseries/queryindex").then()
+                .statusCode(200).body(CoreMatchers.is("[\"" + b + "\"]"));
+
+        RestAssured.given().queryParam("filter", "tag=" + tag).when().get("/lettuce/timeseries/mget").then()
+                .statusCode(200).body(CoreMatchers.is(a + "{}[2000:20.0]|" + b + "{}[3000:3.0]"));
+        RestAssured.given().queryParam("filter", "tag=" + tag).queryParam("withLabels", true).when()
+                .get("/lettuce/timeseries/mget").then()
+                .statusCode(200).body(CoreMatchers.is(a + "{name=a, room=kitchen, tag=" + tag + "}[2000:20.0]|"
+                        + b + "{name=b, room=study, tag=" + tag + "}[3000:3.0]"));
+        RestAssured.given().queryParam("filter", "tag=" + tag).queryParam("selectedLabel", "room").when()
+                .get("/lettuce/timeseries/mget").then()
+                .statusCode(200).body(CoreMatchers.is(a + "{room=kitchen}[2000:20.0]|" + b + "{room=study}[3000:3.0]"));
+
+        RestAssured.given().queryParam("filter", "tag=" + tag).when().get("/lettuce/timeseries/mrange").then()
+                .statusCode(200)
+                .body(CoreMatchers.is(a + "{}[1000:10.0;2000:20.0]|" + b + "{}[1000:1.0;2000:2.0;3000:3.0]"));
+        RestAssured.given().queryParam("filter", "tag=" + tag).queryParam("from", 2000).queryParam("reverse", true)
+                .queryParam("selectedLabel", "name").when().get("/lettuce/timeseries/mrange").then()
+                .statusCode(200)
+                .body(CoreMatchers.is(a + "{name=a}[2000:20.0]|" + b + "{name=b}[3000:3.0;2000:2.0]"));
+        RestAssured.given().queryParam("filter", "tag=" + tag).queryParam("min", 2).queryParam("max", 10).when()
+                .get("/lettuce/timeseries/mrange").then()
+                .statusCode(200).body(CoreMatchers.is(a + "{}[1000:10.0]|" + b + "{}[2000:2.0;3000:3.0]"));
+        // SUM over 10s buckets
+        RestAssured.given().queryParam("filter", "tag=" + tag).queryParam("aggregation", "SUM")
+                .queryParam("bucket", 10000).when().get("/lettuce/timeseries/mrange").then()
+                .statusCode(200).body(CoreMatchers.is(a + "{}[0:30.0]|" + b + "{}[0:6.0]"));
+        // GROUPBY tag REDUCE MAX folds both series into one group keyed "tag=<value>"; without WITHLABELS the group
+        // carries no labels
+        RestAssured.given().queryParam("filter", "tag=" + tag).queryParam("groupBy", "tag")
+                .queryParam("reducer", "MAX").when().get("/lettuce/timeseries/mrange").then()
+                .statusCode(200)
+                .body(CoreMatchers.is("tag=" + tag + "{}[1000:10.0;2000:20.0;3000:3.0]"));
+        // with WITHLABELS each group carries its grouping label
+        RestAssured.given().queryParam("filter", "tag=" + tag).queryParam("groupBy", "room")
+                .queryParam("reducer", "SUM").queryParam("withLabels", true).when().get("/lettuce/timeseries/mrange")
+                .then().statusCode(200)
+                .body(CoreMatchers.is("room=kitchen{room=kitchen}[1000:10.0;2000:20.0]|"
+                        + "room=study{room=study}[1000:1.0;2000:2.0;3000:3.0]"));
+    }
+
+    @Test
+    public void timeSeriesReactive() {
+        String key = getKey("ts-reactive");
+        String tag = getKey("reactive");
+
+        RestAssured.given().body("tag=" + tag).when().post("/lettuce/timeseries/reactive/add/" + key + "/1000/1.5")
+                .then().statusCode(204);
+        RestAssured.given().when().post("/lettuce/timeseries/reactive/add/" + key + "/2000/2.5").then()
+                .statusCode(204);
+
+        RestAssured.given().when().get("/lettuce/timeseries/reactive/get/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("2000:2.5"));
+        RestAssured.given().queryParam("to", 1500).when().get("/lettuce/timeseries/reactive/range/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("1000:1.5"));
+        RestAssured.given().queryParam("filter", "tag=" + tag).queryParam("withLabels", true).when()
+                .get("/lettuce/timeseries/reactive/mrange").then()
+                .statusCode(200).body(CoreMatchers.is(key + "{tag=" + tag + "}[1000:1.5;2000:2.5]"));
+        RestAssured.given().queryParam("filter", "tag=" + tag).when().get("/lettuce/timeseries/reactive/queryindex")
+                .then().statusCode(200).body(CoreMatchers.is("[\"" + key + "\"]"));
+    }
+
+    @Test
+    public void withTransactionTimeSeries() {
+        String key = getKey("tx-ts");
+        String label = getKey("tx");
+        String body = RestAssured.given().when().post("/lettuce/with-transaction/timeseries/" + key + "/" + label)
+                .then().statusCode(200).extract().asString();
+        // 16 queued commands; the writes reply with null and the reads are decoded by the transaction:
+        // get -> 40:10 (9 incremented by 1), get(other) -> 30:3, range(0..25) -> 10:5;20:7, revrange count 2 -> 40:10;30:9,
+        // mget withlabels -> both series with their labels, mrange selected "name" -> both series,
+        // mrange groupby tx sum -> one group summing both series, queryindex -> both keys, range after del(1..15) -> 3 left
+        assertEquals("false;16;40:10.0;30:3.0;10:5.0;20:7.0;40:10.0;30:9.0;"
+                + key + "{name=a, tx=" + label + "}[40:10.0]|" + key + "-other{name=b, tx=" + label + "}[30:3.0];"
+                + key + "{name=a}[10:5.0;20:7.0;30:9.0;40:10.0]|" + key + "-other{name=b}[10:1.0;30:3.0];"
+                + "tx=" + label + "{}[10:6.0;20:7.0;30:12.0;40:10.0];"
+                + "[" + key + ", " + key + "-other];20:7.0;30:9.0;40:10.0", body);
+        RestAssured.given().when().get("/lettuce/timeseries/get/" + key).then()
+                .statusCode(200).body(CoreMatchers.is("40:10.0"));
+    }
+
+    @Test
+    public void withTransactionTimeSeriesReactive() {
+        String key = getKey("tx-ts-reactive");
+        String label = getKey("tx-reactive");
+        String body = RestAssured.given().when()
+                .post("/lettuce/with-transaction/reactive/timeseries/" + key + "/" + label)
+                .then().statusCode(200).extract().asString();
+        // add, add, get -> 20:7, range -> both samples, mget -> the single labelled series
+        assertEquals("false;5;20:7.0;10:5.0;20:7.0;" + key + "{}[20:7.0]", body);
+    }
+
 }

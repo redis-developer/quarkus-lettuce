@@ -49,6 +49,7 @@ import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
 import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
 import io.quarkus.redis.datasource.stream.StreamCommands;
 import io.quarkus.redis.datasource.string.StringCommands;
+import io.quarkus.redis.datasource.timeseries.ReactiveTimeSeriesCommands;
 import io.quarkus.redis.datasource.timeseries.TimeSeriesCommands;
 import io.quarkus.redis.datasource.topk.ReactiveTopKCommands;
 import io.quarkus.redis.datasource.topk.TopKCommands;
@@ -76,6 +77,7 @@ import io.quarkus.redis.runtime.datasource.BlockingSetCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingSortedSetCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingStreamCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingStringCommandsImpl;
+import io.quarkus.redis.runtime.datasource.BlockingTimeSeriesCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingTopKCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingTransactionalRedisDataSourceImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
@@ -521,7 +523,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K> GraphCommands<K> graph(Class<K> redisKeyType) {
-        throw groupNotImplemented("graph");
+        throw new UnsupportedOperationException("Lettuce does not support graph commands");
     }
 
     @Override
@@ -544,18 +546,14 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
 
     @Override
     public <K> TimeSeriesCommands<K> timeseries(Class<K> redisKeyType) {
-        throw groupNotImplemented("timeseries");
+        ReactiveTimeSeriesCommands<K> r = reactive.timeseries(redisKeyType);
+        return new BlockingTimeSeriesCommandsImpl<>(this, r, timeout);
     }
 
     @Override
     public <K> TimeSeriesCommands<K> timeseries(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("timeseries");
-    }
-
-    private static UnsupportedOperationException groupNotImplemented(String group) {
-        return new UnsupportedOperationException(
-                "The '" + group + "' command group is not yet implemented on the Lettuce backend. "
-                        + "Remove the quarkus-redis-client-lettuce extension to use the Vert.x backend.");
+        ReactiveTimeSeriesCommands<K> r = reactive.timeseries(redisKeyType);
+        return new BlockingTimeSeriesCommandsImpl<>(this, r, timeout);
     }
 
 }

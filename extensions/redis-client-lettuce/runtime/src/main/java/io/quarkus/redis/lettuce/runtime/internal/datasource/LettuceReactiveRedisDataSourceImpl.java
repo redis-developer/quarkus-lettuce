@@ -63,6 +63,7 @@ import io.quarkus.redis.lettuce.runtime.internal.search.LettuceReactiveSearchCom
 import io.quarkus.redis.lettuce.runtime.internal.set.LettuceReactiveSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSortedSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.stream.LettuceReactiveStreamCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.timeseries.LettuceReactiveTimeSeriesCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.topk.LettuceReactiveTopKCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveValueCommandsImpl;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
@@ -651,7 +652,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K> ReactiveGraphCommands<K> graph(Class<K> redisKeyType) {
-        throw groupNotImplemented("graph");
+        throw new UnsupportedOperationException("Lettuce does not support graph commands");
     }
 
     @Override
@@ -674,18 +675,14 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public <K> ReactiveTimeSeriesCommands<K> timeseries(Class<K> redisKeyType) {
-        throw groupNotImplemented("timeseries");
+        nonNull(redisKeyType, "redisKeyType");
+        return new LettuceReactiveTimeSeriesCommandsImpl<>(this, connection, redisKeyType);
     }
 
     @Override
     public <K> ReactiveTimeSeriesCommands<K> timeseries(TypeReference<K> redisKeyType) {
-        throw groupNotImplemented("timeseries");
-    }
-
-    private static UnsupportedOperationException groupNotImplemented(String group) {
-        return new UnsupportedOperationException(
-                "The '" + group + "' command group is not yet implemented on the Lettuce backend. "
-                        + "Remove the quarkus-redis-client-lettuce extension to use the Vert.x backend.");
+        nonNull(redisKeyType, "redisKeyType");
+        return new LettuceReactiveTimeSeriesCommandsImpl<>(this, connection, redisKeyType.getType());
     }
 
     /**
