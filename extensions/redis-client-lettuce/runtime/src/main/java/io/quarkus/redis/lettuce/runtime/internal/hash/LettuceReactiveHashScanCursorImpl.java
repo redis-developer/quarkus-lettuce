@@ -36,7 +36,7 @@ public class LettuceReactiveHashScanCursorImpl<F, V> extends AbstractReactiveSca
 
     @Override
     public Uni<Map<F, V>> next() {
-        // Reset cursor when finished to copy Vert.x. behaviour.
+        // Reset cursor when finished to copy Vert.x behavior.
         final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
         return LettuceResult.toUni(() -> async.hscan(key, current, scanArgs))
                 .invoke(mc -> this.cursor = mc)

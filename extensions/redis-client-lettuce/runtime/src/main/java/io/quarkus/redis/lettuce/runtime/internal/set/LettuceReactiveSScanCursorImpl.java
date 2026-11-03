@@ -35,7 +35,7 @@ public class LettuceReactiveSScanCursorImpl<V> extends AbstractReactiveScanCurso
 
     @Override
     public Uni<List<V>> next() {
-        // Reset cursor when finished to copy Vert.x. behaviour.
+        // Reset cursor when finished to copy Vert.x behavior.
         final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
         return LettuceResult.toUni(() -> async.sscan(key, current, scanArgs))
                 .invoke(vc -> this.cursor = vc)
