@@ -17,24 +17,24 @@ import io.quarkus.redis.client.RedisHostsProvider;
 import io.quarkus.test.QuarkusExtensionTest;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.smallrye.common.annotation.Identifier;
-import io.vertx.core.Vertx;
 
 /**
- * Verifies that the Lettuce backend only calls the {@link RedisHostsProvider} bean of a client once the synthetic
- * beans initialized at runtime are usable: the provider injects the Vert.x instance, as a provider discovering the
- * hosts would.
+ * Verifies that the Lettuce backend calls the {@link RedisHostsProvider} bean of a client once the CDI container is
+ * running: the provider injects configuration and another application bean, as a provider discovering the hosts
+ * would.
  * <p>
  * The default client is requested through a Lettuce bean only, and no {@code @RedisClientName} annotation names
- * another one, so no Vert.x Redis client is created (see {@link LettuceNoVertxBeansTest}): the Vert.x client calls
- * the provider from a {@code Phase.DATA} service, before those beans are initialized (see
+ * another one, so no Vert.x Redis client is created (see {@link LettuceNoVertxBeansTest}). Like the Vert.x client,
+ * the Lettuce backend calls the provider from a {@code Phase.DATA} service, before the synthetic beans initialized at
+ * runtime (the Vert.x instance, the data sources) are usable, so a provider must not inject such beans (see
  * {@link LettuceHostsProviderTest}).
  */
 @QuarkusTestResource(RedisTestResource.class)
-public class LettuceHostsProviderInitOrderTest {
+public class LettuceHostsProviderInjectionTest {
 
     @RegisterExtension
     static final QuarkusExtensionTest unitTest = new QuarkusExtensionTest()
-            .withApplicationRoot(jar -> jar.addClass(DatabaseTwoHostsProvider.class))
+            .withApplicationRoot(jar -> jar.addClasses(DatabaseTwoHostsProvider.class, DatabaseSelector.class))
             .overrideConfigKey("quarkus.redis.devservices.enabled", "false")
             .overrideConfigKey("quarkus.redis.hosts-provider-name", "database-two");
 
@@ -47,8 +47,7 @@ public class LettuceHostsProviderInitOrderTest {
     }
 
     /**
-     * Provides the test server, database 2. Injects the Vert.x instance, a bean initialized at runtime like a data
-     * source or a Vert.x Redis client: the backend must only call the provider once such beans are usable.
+     * Provides the test server, on the database {@link DatabaseSelector} picks.
      */
     @ApplicationScoped
     @Identifier("database-two")
@@ -58,12 +57,20 @@ public class LettuceHostsProviderInitOrderTest {
         String endpoint;
 
         @Inject
-        Vertx vertx;
+        DatabaseSelector selector;
 
         @Override
         public Set<URI> getHosts() {
-            assertThat(vertx).isNotNull();
-            return Set.of(URI.create(endpoint + "/2"));
+            assertThat(selector).isNotNull();
+            return Set.of(URI.create(endpoint + "/" + selector.database()));
+        }
+    }
+
+    @ApplicationScoped
+    public static class DatabaseSelector {
+
+        int database() {
+            return 2;
         }
     }
 }
