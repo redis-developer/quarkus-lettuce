@@ -11,7 +11,6 @@ import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.quarkus.redis.datasource.sortedset.ReactiveZScanCursor;
 import io.quarkus.redis.datasource.sortedset.ScoredValue;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractReactiveScanCursor;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 
@@ -39,7 +38,7 @@ public class LettuceReactiveZScanCursorImpl<V> extends AbstractReactiveScanCurso
     public Uni<List<ScoredValue<V>>> next() {
         // Reset cursor when finished to copy Vert.x behavior.
         final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
-        return LettuceResult.toUni(() -> async.zscan(key, current, scanArgs))
+        return Uni.createFrom().completionStage(() -> async.zscan(key, current, scanArgs))
                 .invoke(sc -> this.cursor = sc)
                 .map(sc -> decoder.apply(sc.getValues()));
     }

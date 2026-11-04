@@ -7,31 +7,15 @@ import io.smallrye.mutiny.Uni;
 import io.vertx.core.Context;
 
 /**
- * Utility for adapting Lettuce {@link CompletionStage} results to Mutiny {@link Uni}
- * and to blocking calls.
+ * Utility for awaiting Lettuce {@link CompletionStage} results from blocking callers.
  * <p>
- * Lettuce async commands return {@link io.lettuce.core.RedisFuture} which extends
- * {@link CompletionStage}. This class provides the bridge to Quarkus APIs without
- * exposing any Reactor types.
+ * Lettuce async commands return {@link io.lettuce.core.RedisFuture} which extends {@link CompletionStage}; the
+ * reactive callers adapt them with {@code Uni.createFrom().completionStage(...)} directly.
  */
 public final class LettuceResult {
 
     private LettuceResult() {
         // Utility class
-    }
-
-    /**
-     * Converts a {@link CompletionStage} to a Mutiny {@link Uni}.
-     * <p>
-     * The returned {@code Uni} subscribes lazily — the {@code CompletionStage} supplier
-     * is invoked only when a subscriber requests it.
-     *
-     * @param <T> the result type
-     * @param supplier a supplier of the {@link CompletionStage} (typically a Lettuce async command call)
-     * @return a {@link Uni} that completes with the result of the {@link CompletionStage}
-     */
-    public static <T> Uni<T> toUni(java.util.function.Supplier<? extends CompletionStage<T>> supplier) {
-        return Uni.createFrom().completionStage(supplier);
     }
 
     /**

@@ -163,8 +163,8 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         String missingKey = UUID.randomUUID().toString();
 
         Cancellable subscription = pool
-                .withPooled(conn -> LettuceResult
-                        .toUni(() -> conn.async().blpop(30L, missingKey.getBytes(StandardCharsets.UTF_8))))
+                .withPooled(conn -> Uni.createFrom()
+                        .completionStage(() -> conn.async().blpop(30L, missingKey.getBytes(StandardCharsets.UTF_8))))
                 .subscribe().with(item -> {
                 }, failure -> {
                 });
@@ -273,7 +273,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
                 });
                 Future<Long> acquire = executor.submit(() -> {
                     barrier.await();
-                    return pool.withPooled(conn -> LettuceResult.toUni(() -> conn.async().clientId()))
+                    return pool.withPooled(conn -> Uni.createFrom().completionStage(() -> conn.async().clientId()))
                             .await().atMost(TIMEOUT);
                 });
                 release.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
@@ -386,7 +386,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         assertThat(pool.getIdle()).isEqualTo(1);
 
         // With maxTotal=1, this would queue forever (and time out) had the connection leaked.
-        Long pong = pool.withPooled(conn -> LettuceResult.toUni(() -> conn.async().clientId()))
+        Long pong = pool.withPooled(conn -> Uni.createFrom().completionStage(() -> conn.async().clientId()))
                 .await().atMost(TIMEOUT);
         assertThat(pong).isNotNull();
         assertThat(pool.getIdle()).isEqualTo(1);

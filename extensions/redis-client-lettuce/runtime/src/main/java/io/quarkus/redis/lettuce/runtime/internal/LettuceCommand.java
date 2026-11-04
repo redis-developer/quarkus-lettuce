@@ -24,7 +24,7 @@ public record LettuceCommand<T, R>(Supplier<RedisFuture<T>> call, Function<? sup
     }
 
     public Uni<R> toUni() {
-        return LettuceResult.toUni(call).map(mapper);
+        return Uni.createFrom().completionStage(call).map(mapper);
     }
 
     public LettuceCommand<T, Void> discarding() {
