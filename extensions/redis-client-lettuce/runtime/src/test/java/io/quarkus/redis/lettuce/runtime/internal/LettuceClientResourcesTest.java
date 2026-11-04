@@ -11,7 +11,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.KeyValue;
@@ -33,12 +32,9 @@ import io.vertx.mutiny.core.Vertx;
  * <li>Shutdown ordering: client → resources → Vert.x</li>
  * </ul>
  */
-@SuppressWarnings("resource")
 class LettuceClientResourcesTest {
 
-    static final GenericContainer<?> REDIS = new GenericContainer<>(
-            DockerImageName.parse("redis:8-alpine"))
-            .withExposedPorts(6379);
+    static final GenericContainer<?> REDIS = RedisImage.plainServer();
 
     static Vertx vertx;
     static LettuceClientResources lettuceResources;
@@ -139,4 +135,5 @@ class LettuceClientResourcesTest {
                     .contains("vert.x-eventloop");
         }
     }
+
 }

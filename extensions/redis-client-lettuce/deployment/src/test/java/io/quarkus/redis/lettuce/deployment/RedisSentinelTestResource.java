@@ -8,7 +8,6 @@ import java.util.stream.Collectors;
 
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
@@ -53,7 +52,7 @@ public class RedisSentinelTestResource implements QuarkusTestResourceLifecycleMa
     private static final class RedisSentinelContainer extends GenericContainer<RedisSentinelContainer> {
 
         RedisSentinelContainer(List<Integer> ports) {
-            super(DockerImageName.parse(System.getProperty("redis.base.image", "redis:8-alpine")));
+            super(RedisImage.name());
             for (int port : ports) {
                 addFixedExposedPort(port, port);
             }

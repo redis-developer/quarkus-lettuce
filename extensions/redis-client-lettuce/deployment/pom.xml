@@ -38,6 +38,11 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-common</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>io.smallrye.certs</groupId>
             <artifactId>smallrye-certificate-generator</artifactId>
             <scope>test</scope>
