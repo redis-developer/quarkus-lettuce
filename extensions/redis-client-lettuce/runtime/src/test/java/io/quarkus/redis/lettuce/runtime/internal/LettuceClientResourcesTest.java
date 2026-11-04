@@ -131,8 +131,8 @@ class LettuceClientResourcesTest {
                     .toCompletableFuture();
             String[] callbackThreadName = new String[1];
 
-            future.thenAccept(result ->
-                    callbackThreadName[0] = Thread.currentThread().getName()).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            future.thenAccept(result -> callbackThreadName[0] = Thread.currentThread().getName()).toCompletableFuture().get(5,
+                    TimeUnit.SECONDS);
 
             assertThat(callbackThreadName[0])
                     .as("Lettuce callback should execute on a Vert.x event loop thread")

@@ -270,10 +270,17 @@ public class LettuceConnectionFactory {
      * Returns the database every connection this factory opens starts on: the database index of the configured URI
      * ({@code 0} unless the URI names one) for a standalone server and for a master/replica connection (the one of
      * the first node), always {@code 0} for a cluster, which has no other database (Lettuce ignores the database of
-     * the seed URIs; the recorder warns about it).
+     * the seed URIs; {@code LettuceClientSetup} warns about it).
      */
     public int getDatabase() {
         return topology.database();
+    }
+
+    /**
+     * Returns the underlying Lettuce client: a {@link RedisClient} or a {@link RedisClusterClient}.
+     */
+    public AbstractRedisClient getClient() {
+        return topology.client();
     }
 
     /**

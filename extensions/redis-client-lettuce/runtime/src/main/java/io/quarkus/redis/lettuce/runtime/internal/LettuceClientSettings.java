@@ -288,10 +288,10 @@ public final class LettuceClientSettings {
      * The name a connection to {@code host} registers with the server ({@code CLIENT SETNAME}, or {@code SETNAME} of
      * {@code HELLO} with RESP3), as the Vert.x client sets it: the {@code client} query parameter of the URI when it
      * carries one, otherwise, only when {@code configure-client-name} is set, {@code client-name} or, without it, the
-     * Quarkus client name. As with the Vert.x client, {@code client-name} alone is not applied (the recorder reports
-     * it). Lettuce applied its own {@code clientName} query parameter when it parsed the URI, so that one works too.
-     * A cluster client names the connections to the nodes it discovers after the first seed, and a Sentinel or
-     * replication client those to the master and the replicas after the first host.
+     * Quarkus client name. As with the Vert.x client, {@code client-name} alone is not applied
+     * ({@code LettuceClientSetup} reports it). Lettuce applied its own {@code clientName} query parameter when it
+     * parsed the URI, so that one works too. A cluster client names the connections to the nodes it discovers after
+     * the first seed, and a Sentinel or replication client those to the master and the replicas after the first host.
      *
      * @return the client name, {@code null} when none is configured
      */
@@ -314,8 +314,8 @@ public final class LettuceClientSettings {
      * Maps {@code tcp.connection-timeout}, {@code tcp.keep-alive} and {@code tcp.no-delay} onto the Lettuce
      * {@link SocketOptions}. Only the set properties are applied: the Lettuce defaults (ten seconds connect timeout,
      * keep-alive and no-delay on) hold otherwise, not the Vert.x ones. A connect timeout that is not positive (zero
-     * is no timeout on the Vert.x client) is not applied either, Lettuce requiring a positive one; the recorder
-     * reports it.
+     * is no timeout on the Vert.x client) is not applied either, Lettuce requiring a positive one;
+     * {@code LettuceClientSetup} reports it.
      *
      * @return the socket options, empty when none of the three properties is applied
      */
@@ -340,13 +340,14 @@ public final class LettuceClientSettings {
     /**
      * Maps {@code reconnect-interval}, overridden by {@code tcp.reconnect-interval} as with the Vert.x client, onto
      * the delay between the attempts Lettuce makes to reconnect a lost connection. Lettuce reconnects until it
-     * succeeds and does not retry the initial connection, so {@code reconnect-attempts} has no equivalent (the
-     * recorder reports it). The mapped values cannot tell a property set to the default interval (one second) from
-     * an unset one, so the configuration is asked which of the two properties is set (see {@link #isSet}); the delay
-     * is constant only then, and by default Lettuce backs off exponentially, from 100 milliseconds up to 30 seconds,
-     * instead of retrying every second. (The default of {@code quarkus.redis.*.reconnect-interval} is registered for
-     * every client and also matches {@code quarkus.redis.tcp.reconnect-interval}, so the mapped {@code tcp} property
-     * of the default client is always present, with the default: another reason not to trust the mapped values.)
+     * succeeds and does not retry the initial connection, so {@code reconnect-attempts} has no equivalent
+     * ({@code LettuceClientSetup} reports it). The mapped values cannot tell a property set to the default interval
+     * (one second) from an unset one, so the configuration is asked which of the two properties is set (see
+     * {@link #isSet}); the delay is constant only then, and by default Lettuce backs off exponentially, from 100
+     * milliseconds up to 30 seconds, instead of retrying every second. (The default of
+     * {@code quarkus.redis.*.reconnect-interval} is registered for every client and also matches
+     * {@code quarkus.redis.tcp.reconnect-interval}, so the mapped {@code tcp} property of the default client is always
+     * present, with the default: another reason not to trust the mapped values.)
      *
      * @return the constant delay, empty when neither property is set
      */
