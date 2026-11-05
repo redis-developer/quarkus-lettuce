@@ -59,6 +59,8 @@ public final class LettuceConnectionPool {
     private final int defaultDatabase;
     /** Connections whose selected database may differ from {@link #defaultDatabase}. */
     private final Set<LettuceConnection> dirty = ConcurrentHashMap.newKeySet();
+    /** Connections whose state is unknown (a transaction cleanup failed): closed on release instead of being reused. */
+    private final Set<LettuceConnection> broken = ConcurrentHashMap.newKeySet();
 
     /**
      * Serializes "connection available, else queue me" against "anyone queued, else keep the connection
@@ -144,6 +146,16 @@ public final class LettuceConnectionPool {
     }
 
     /**
+     * Records that the state of {@code connection} is unknown, so that it is closed when released instead of being
+     * handed to the next borrower. Called by a transaction whose {@code DISCARD} or {@code UNWATCH} failed: the
+     * server may still hold the transaction or the watch, and a connection in that state would hand a borrower
+     * {@code QUEUED} replies or a spurious abort.
+     */
+    public void markBroken(LettuceConnection connection) {
+        broken.add(connection);
+    }
+
+    /**
      * Blocks until a connection is available or {@code timeout} elapses. On timeout (or interrupt)
      * the request is withdrawn from the queue and a connection that arrives just as the caller
      * gives up is returned to the pool rather than leaked.
@@ -179,6 +191,9 @@ public final class LettuceConnectionPool {
      * retried before the next borrower gets it. A connection released after {@link #close()} is closed.
      */
     public Uni<Void> release(LettuceConnection connection) {
+        if (broken.remove(connection) || connection.isMulti()) {
+            return discard(connection);
+        }
         if (!dirty.contains(connection)) {
             return handOver(connection);
         }
@@ -188,6 +203,21 @@ public final class LettuceConnectionPool {
                         defaultDatabase))
                 .onFailure().recoverWithNull()
                 .chain(() -> handOver(connection));
+    }
+
+    /**
+     * Closes a released connection that cannot be reused: one still in a transaction (its borrower did not end it,
+     * or could not) or one marked {@link #markBroken broken}. The next waiter, if any, gets a fresh connection.
+     */
+    private Uni<Void> discard(LettuceConnection connection) {
+        LOGGER.warn("Closing a pooled Redis connection released with a transaction left open or after a failed "
+                + "transaction cleanup, instead of reusing it");
+        synchronized (lock) {
+            total--;
+        }
+        CompletableFuture<Void> closing = destroy(connection);
+        redrive();
+        return Uni.createFrom().completionStage(closing);
     }
 
     private Uni<Void> handOver(LettuceConnection connection) {
@@ -263,6 +293,7 @@ public final class LettuceConnectionPool {
      */
     private CompletableFuture<Void> destroy(LettuceConnection connection) {
         dirty.remove(connection);
+        broken.remove(connection);
         return connection.closeAsync().exceptionally(failure -> {
             LOGGER.debugf(failure, "Failed to close a pooled Redis connection");
             return null;
