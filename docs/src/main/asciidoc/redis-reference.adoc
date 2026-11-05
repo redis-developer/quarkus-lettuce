@@ -1069,9 +1069,9 @@ The host provider can be used to configure the redis client like shown below
 quarkus.redis.hosts-provider-name=hosts-provider
 ----
 
-The provider is consulted by the Vert.x client and by the <<lettuce-backend,Lettuce backend>> alike, once the
-beans of the application are initialized at startup: it may inject any bean, the Vert.x instance or a data source
-included, to discover the hosts.
+The provider is consulted by the Vert.x client and by the <<lettuce-backend,Lettuce backend>> alike. The Lettuce
+backend calls it once the beans of the application are initialized at startup, so it may inject any bean, the
+Vert.x instance or a data source included, to discover the hosts.
 When both `hosts` and `hosts-provider-name` are set, `hosts` is used and the provider is not called.
 
 == Customize the Redis options programmatically
@@ -1183,6 +1183,9 @@ a percent-encoded `&` or `=` is part of the value and a `+` is a space. The Vert
 the value at a percent-encoded `&`.
 * The `LDAPS` hostname verification algorithm verifies the host name with the `HTTPS` rules, the only ones Lettuce
 supports.
+* The collections returned by the command groups (`List`, `Set`, `Map`, including the ones nested in
+`StreamMessage`, `XPendingSummary` and the search responses) are unmodifiable. The Vert.x client returns mutable
+collections for non-empty replies.
 
 [[lettuce-properties]]
 .The client properties on the Lettuce backend
@@ -1358,7 +1361,9 @@ by the Lettuce backend and throw an `UnsupportedOperationException`; use `execut
 Adding the extension routes every `RedisDataSource` and `ReactiveRedisDataSource` of the application through
 Lettuce, including the ones injected by other extensions. In this initial version the Vert.x Redis client is still
 created for the same clients: the health check pings it, and `quarkus-redis-cache` and the Micrometer Redis
-metrics keep using it. This is transitional; a Lettuce-based health check and metrics are planned.
+metrics keep using it. The OpenTelemetry spans of the Redis commands are recorded by the Vert.x client too, so the
+commands sent through the Lettuce backend are not traced yet. This is transitional; a Lettuce-based health check,
+metrics and tracing are planned.
 
 [#connection-pooling-and-blocking-commands]
 === Connection pooling and blocking commands
@@ -1422,6 +1427,17 @@ the last two also as `io.lettuce.core.masterreplica.StatefulRedisMasterReplicaCo
 `io.lettuce.core.cluster.RedisClusterClient` and
 `io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>` for a cluster client, and the shared
 `io.lettuce.core.resource.ClientResources` (backed by the Vert.x event loops).
+
+[[lettuce-threading]]
+=== Threading
+
+Lettuce runs on the Vert.x event loops and owns nothing of them: the shared `ClientResources` use an
+`EventLoopGroupProvider` that returns the Vert.x event loop group and treats its release and shutdown as no-ops, so
+there is no second set of I/O threads and Lettuce never stops the loops. The timer, the computation executor and the
+DNS resolver stay Lettuce-owned. Blocking calls are rejected on an event loop thread: the blocking data source and
+the connection pool throw an `IllegalStateException` there, on top of the blocking checker Quarkus installs for
+Mutiny's `await()`. A command completes on the event loop of its connection; the Pub/Sub callbacks are re-dispatched
+to the Vert.x context of the subscriber.
 
 == Configure Redis observability
 
