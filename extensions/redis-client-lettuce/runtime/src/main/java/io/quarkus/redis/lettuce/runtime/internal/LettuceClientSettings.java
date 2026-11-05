@@ -594,12 +594,10 @@ public final class LettuceClientSettings {
                         + config.tlsConfigurationName().get() + " for the Redis client " + name + ".");
             }
             configuration = maybeConfiguration.get();
-        } else if (tlsRegistry.getDefault().isPresent() && (tlsRegistry.getDefault().get().isTrustAll())) {
-            defaultTrustAll = tlsRegistry.getDefault().get().isTrustAll();
-            if (defaultTrustAll) {
-                LOGGER.warn("The default TLS configuration is set to trust all certificates. This is a security risk."
-                        + "Please use a named TLS configuration for the Redis client " + name + " to avoid this warning.");
-            }
+        } else if (tlsRegistry.getDefault().isPresent() && tlsRegistry.getDefault().get().isTrustAll()) {
+            defaultTrustAll = true;
+            LOGGER.warn("The default TLS configuration is set to trust all certificates. This is a security risk. "
+                    + "Please use a named TLS configuration for the Redis client " + name + " to avoid this warning.");
         }
 
         if (configuration != null && !tlsFromHosts) {
