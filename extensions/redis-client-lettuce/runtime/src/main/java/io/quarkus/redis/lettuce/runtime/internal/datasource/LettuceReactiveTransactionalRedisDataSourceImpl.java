@@ -28,6 +28,7 @@ import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSo
 import io.quarkus.redis.datasource.value.ReactiveTransactionalValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveAutoSuggestCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveTransactionalAutoSuggestCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
@@ -95,7 +96,7 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public Uni<Void> discard() {
-        return Uni.createFrom().completionStage(connection::discard)
+        return LettuceResult.toUni(connection::discard)
                 .invoke(tx::discard)
                 .replaceWithVoid();
     }

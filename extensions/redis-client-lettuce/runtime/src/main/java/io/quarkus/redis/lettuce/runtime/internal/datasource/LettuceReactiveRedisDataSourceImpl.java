@@ -47,6 +47,7 @@ import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.autosuggest.LettuceReactiveAutoSuggestCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bitmap.LettuceReactiveBitMapCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.bloom.LettuceReactiveBloomCommandsImpl;
@@ -177,7 +178,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
             markDatabaseDirty();
         }
         LettuceVertxResponseOutput<byte[], byte[]> output = new LettuceVertxResponseOutput<>(ByteArrayCodec.INSTANCE);
-        return Uni.createFrom().completionStage(() -> connection.async().dispatch(type, output, commandArgs))
+        return LettuceResult.toUni(() -> connection.async().dispatch(type, output, commandArgs))
                 .map(ignored -> output.toVertxResponse());
     }
 
@@ -244,14 +245,14 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
     @Override
     public Uni<Void> flushall() {
-        return Uni.createFrom().completionStage(() -> connection.async().flushall()).replaceWithVoid();
+        return LettuceResult.toUni(() -> connection.async().flushall()).replaceWithVoid();
     }
 
     @Override
     public Uni<Void> select(long index) {
         positiveOrZero(index, "index");
         markDatabaseDirty();
-        return Uni.createFrom().completionStage(() -> connection.select((int) index)).replaceWithVoid();
+        return LettuceResult.toUni(() -> connection.select((int) index)).replaceWithVoid();
     }
 
     @Override
@@ -343,7 +344,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                     if (holder.discarded()) {
                         return Uni.createFrom().item(TransactionResultImpl.DISCARDED);
                     }
-                    return Uni.createFrom().completionStage(conn::exec)
+                    return LettuceResult.toUni(conn::exec)
                             .chain(execResult -> execResult == null || execResult.wasDiscarded()
                                     ? Uni.createFrom().item(TransactionResultImpl.DISCARDED)
                                     : Uni.createFrom().item(holder.toResult(execResult)));
@@ -370,7 +371,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                             if (holder.discarded()) {
                                 return Uni.createFrom().item(OptimisticLockingTransactionResultImpl.discarded(input));
                             }
-                            return Uni.createFrom().completionStage(conn::exec)
+                            return LettuceResult.toUni(conn::exec)
                                     .chain(execResult -> execResult == null || execResult.wasDiscarded()
                                             ? Uni.createFrom()
                                                     .item(OptimisticLockingTransactionResultImpl.discarded(input))
@@ -384,7 +385,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      */
     private Uni<Void> watch(LettuceConnection conn, String[] keys) {
         byte[][] encodedKeys = encodeKeys(keys);
-        return Uni.createFrom().completionStage(() -> conn.watch(encodedKeys)).replaceWithVoid()
+        return LettuceResult.toUni(() -> conn.watch(encodedKeys)).replaceWithVoid()
                 .onFailure().recoverWithUni(failure -> undo(conn, conn::unwatch, failure));
     }
 
@@ -394,7 +395,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * connection would then be queued instead of executed.
      */
     private Uni<Void> multi(LettuceConnection conn) {
-        return Uni.createFrom().completionStage(conn::multi).replaceWithVoid()
+        return LettuceResult.toUni(conn::multi).replaceWithVoid()
                 .onFailure().recoverWithUni(failure -> undo(conn, conn::discard, failure));
     }
 
@@ -405,7 +406,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * borrower in an unknown state.
      */
     private <T> Uni<T> undo(LettuceConnection conn, Supplier<RedisFuture<String>> command, Throwable failure) {
-        return Uni.createFrom().completionStage(command)
+        return LettuceResult.toUni(command)
                 .onItemOrFailure().transformToUni((r, f) -> {
                     if (f != null) {
                         failure.addSuppressed(f);

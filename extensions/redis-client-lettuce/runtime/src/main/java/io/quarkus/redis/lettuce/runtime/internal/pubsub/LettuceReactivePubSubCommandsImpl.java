@@ -29,6 +29,7 @@ import io.quarkus.redis.datasource.pubsub.RedisPubSubMessage;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceReactiveRedisDataSourceImpl;
 import io.quarkus.redis.runtime.datasource.DefaultRedisPubSubMessage;
 import io.quarkus.redis.runtime.datasource.Marshaller;
@@ -179,7 +180,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
             Function<StatefulRedisPubSubConnection<byte[], byte[]>, AbstractReactiveLettuceSubscriber> factory) {
         AtomicBoolean cancelled = new AtomicBoolean();
         AtomicReference<AbstractReactiveLettuceSubscriber> opened = new AtomicReference<>();
-        Uni<ReactiveRedisSubscriber> establishing = Uni.createFrom().completionStage(() -> {
+        Uni<ReactiveRedisSubscriber> establishing = LettuceResult.toUni(() -> {
             CompletableFuture<ReactiveRedisSubscriber> result = new CompletableFuture<>();
             pubSubConnector.get().whenComplete((conn, connectFailure) -> {
                 if (connectFailure != null) {
@@ -397,7 +398,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
             if (closed.get()) {
                 return Uni.createFrom().voidItem();
             }
-            return Uni.createFrom().completionStage(() -> unsubscribeFromRedis(encode(list)))
+            return LettuceResult.toUni(() -> unsubscribeFromRedis(encode(list)))
                     // A concurrent unsubscribe may have closed the connection under this one. That is the
                     // outcome the caller asked for, so it is not reported as a failure.
                     .onFailure().recoverWithUni(failure -> closed.get() ? Uni.createFrom().voidItem()
@@ -413,7 +414,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
                 return Uni.createFrom().voidItem();
             }
             removeListeners();
-            return Uni.createFrom().completionStage(connection::closeAsync).replaceWithVoid().invoke(() -> {
+            return LettuceResult.toUni(connection::closeAsync).replaceWithVoid().invoke(() -> {
                 if (onEnd != null) {
                     runOnDuplicatedContext(onEnd);
                 }
