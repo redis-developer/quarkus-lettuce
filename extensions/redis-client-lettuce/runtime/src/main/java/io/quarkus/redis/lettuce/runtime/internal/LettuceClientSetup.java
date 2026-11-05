@@ -77,9 +77,11 @@ public final class LettuceClientSetup {
     }
 
     /**
-     * The shared client resources, on the event loops of the given Vert.x instance.
+     * The shared client resources, on the event loops of the given Vert.x instance, once Lettuce's Netty transport is
+     * aligned with the one Vert.x runs on (see {@link LettuceTransport}).
      */
     public static LettuceClientResources createResources(Vertx vertx) {
+        LettuceTransport.align(vertx);
         return new LettuceClientResources(((VertxInternal) vertx).eventLoopGroup());
     }
 
