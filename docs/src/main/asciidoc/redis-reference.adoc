@@ -1128,6 +1128,7 @@ The Lettuce data sources apply `quarkus.redis[.<name>].hosts` or `hosts-provider
 
 * A standalone client connects to the first URI of `hosts`; a cluster client discovers the cluster from all of them; a Sentinel client takes them as the sentinels; a replication client as the nodes, or discovers the nodes from the first one.
 The URIs come from `hosts`, or from the `RedisHostsProvider` bean named by `hosts-provider-name` when `hosts` is not set; `hosts` wins when both are set, as with the Vert.x client.
+The `valkey://` and `valkeys://` schemes the Vert.x client accepts are not supported by the Lettuce backend, which connects to Redis: a host using one is rejected at startup with a message saying so.
 * The credentials are set with `username` and `password` or encoded in the URI, for example `redis://user:password@host:6379` or `redis://:password@host:6379`.
 The URI is read as the Vert.x Redis client reads it: a username or a password encoded in the URI takes precedence over the `username` and `password` properties, and a user info without a colon (`redis://user@host:6379`) is a username.
 The `user` and `password` query parameters (`redis://host:6379?password=secret`) are fallbacks, as with the Vert.x client.

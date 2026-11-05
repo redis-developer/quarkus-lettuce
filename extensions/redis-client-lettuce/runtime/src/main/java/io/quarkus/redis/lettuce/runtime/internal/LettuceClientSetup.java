@@ -188,23 +188,31 @@ public final class LettuceClientSetup {
      * The hosts of an active client: {@code hosts} when set, else those of the {@code RedisHostsProvider} bean
      * {@code hosts-provider-name} names, resolved as the Vert.x client resolves it (the same lookup and the same
      * failure when the bean is missing). {@code hosts} wins when both are set, as with the Vert.x client.
-     * {@link #isActive} guarantees one of the two is set.
+     * {@link #isActive} guarantees one of the two is set. A host using a scheme the Lettuce backend does not support
+     * is rejected here (see {@link LettuceClientSettings#rejectUnsupportedScheme}).
      *
-     * @throws ConfigurationException if the provider bean is missing or returns no host
+     * @throws ConfigurationException if the provider bean is missing or returns no host, or a host uses an unsupported
+     *         scheme
      */
     private static List<URI> hosts(String name, RedisClientConfig config) {
+        List<URI> hosts;
         if (hasHosts(config)) {
-            return config.hosts().get();
+            hosts = config.hosts().get();
+        } else {
+            String providerName = config.hostsProviderName().orElseThrow();
+            Collection<URI> provided = VertxRedisClientFactory.findProvider(providerName).getHosts();
+            if (provided == null || provided.isEmpty()) {
+                throw new ConfigurationException(String.format(
+                        "The Redis hosts provider '%s' of the Lettuce Redis client '%s' (configuration property '%s') "
+                                + "returned no host",
+                        providerName, name, getPropertyName(name, HOSTS_PROVIDER_NAME)));
+            }
+            hosts = new ArrayList<>(provided);
         }
-        String providerName = config.hostsProviderName().orElseThrow();
-        Collection<URI> hosts = VertxRedisClientFactory.findProvider(providerName).getHosts();
-        if (hosts == null || hosts.isEmpty()) {
-            throw new ConfigurationException(String.format(
-                    "The Redis hosts provider '%s' of the Lettuce Redis client '%s' (configuration property '%s') "
-                            + "returned no host",
-                    providerName, name, getPropertyName(name, HOSTS_PROVIDER_NAME)));
+        for (URI host : hosts) {
+            LettuceClientSettings.rejectUnsupportedScheme(name, host);
         }
-        return new ArrayList<>(hosts);
+        return hosts;
     }
 
     /**
