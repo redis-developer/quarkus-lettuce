@@ -12,7 +12,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
@@ -38,6 +37,7 @@ import io.quarkus.redis.runtime.client.RedisClientRecorder;
 import io.quarkus.redis.runtime.client.config.RedisConfig;
 import io.quarkus.redis.runtime.datasource.BlockingRedisDataSourceImpl;
 import io.quarkus.redis.runtime.datasource.ReactiveRedisDataSourceImpl;
+import io.smallrye.config.Config;
 import io.vertx.core.Vertx;
 
 public class RedisDatasourceProcessor {
@@ -69,7 +69,7 @@ public class RedisDatasourceProcessor {
                 .filter(i -> SUPPORTED_INJECTION_TYPE.contains(i.getRequiredType().name()))
                 .filter(InjectionPointInfo::isProgrammaticLookup)
                 .findAny()
-                .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, ConfigProvider.getConfig())));
+                .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, Config.get())));
 
         for (String name : names) {
             request.produce(new RequestedRedisClientBuildItem(name));
