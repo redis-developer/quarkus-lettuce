@@ -6,9 +6,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import org.jboss.logging.Logger;
@@ -34,6 +36,7 @@ import io.lettuce.core.protocol.RedisCommand;
 import io.lettuce.core.protocol.TransactionalCommand;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import io.lettuce.core.resource.ClientResources;
+import io.vertx.core.Context;
 
 /**
  * Factory for the connections of one Quarkus Redis client, backed by a Lettuce {@link RedisClient} (standalone,
@@ -70,6 +73,7 @@ public class LettuceConnectionFactory {
         STATIC
     }
 
+    private final String clientName;
     private final Topology topology;
 
     /**
@@ -89,6 +93,7 @@ public class LettuceConnectionFactory {
                 redisUri.isSsl() ? " (TLS)" : "");
         RedisClient client = RedisClient.create(clientResources, redisUri);
         client.setOptions(withCommandTimeout(clientOptions, timeout));
+        this.clientName = clientName;
         this.topology = new Standalone(client, redisUri);
     }
 
@@ -126,6 +131,7 @@ public class LettuceConnectionFactory {
         client.setOptions(ClusterClientOptions.builder(withCommandTimeout(clientOptions, timeout))
                 .topologyRefreshOptions(topologyRefresh)
                 .build());
+        this.clientName = clientName;
         this.topology = new Cluster(client, readFrom);
     }
 
@@ -181,6 +187,7 @@ public class LettuceConnectionFactory {
         }
         RedisClient client = RedisClient.create(clientResources);
         client.setOptions(withCommandTimeout(clientOptions, timeout));
+        this.clientName = clientName;
         this.topology = new MasterReplica(client, mode, List.copyOf(nodes), readFrom);
     }
 
@@ -222,12 +229,15 @@ public class LettuceConnectionFactory {
 
     /**
      * Opens a new connection using the {@link ByteArrayCodec} codec: to the server, to the master and its replicas,
-     * or to the cluster.
+     * or to the cluster. {@link #connectAsync()} awaited, as Lettuce's own blocking {@code connect} methods await
+     * their asynchronous counterparts; a connection is opened this way at startup, on the main thread. An event loop
+     * thread must use {@link #connectAsync()}: the await fails fast there instead of blocking the loop.
      *
      * @return a new {@link LettuceConnection}
+     * @throws IllegalStateException when called on an event loop thread
      */
     public LettuceConnection connect() {
-        return topology.connect();
+        return await(connectAsync());
     }
 
     /**
@@ -246,10 +256,45 @@ public class LettuceConnectionFactory {
      * Opens a new connection using the given codec, as the Lettuce connection beans do: a
      * {@link io.lettuce.core.api.StatefulRedisConnection} to a standalone server, a
      * {@link StatefulRedisClusterConnection} to a cluster, a {@link StatefulRedisMasterReplicaConnection} to a
-     * Sentinel-managed or replicated master.
+     * Sentinel-managed or replicated master. {@link #connectAsync(RedisCodec)} awaited, see {@link #connect()}.
+     *
+     * @throws IllegalStateException when called on an event loop thread
      */
     public <K, V> StatefulConnection<K, V> connect(RedisCodec<K, V> codec) {
-        return topology.connect(codec);
+        return await(connectAsync(codec));
+    }
+
+    /**
+     * Opens a new connection asynchronously using the given codec, see {@link #connect(RedisCodec)}. Never blocks
+     * the calling thread.
+     */
+    public <K, V> CompletionStage<StatefulConnection<K, V>> connectAsync(RedisCodec<K, V> codec) {
+        return topology.connectAsync(codec);
+    }
+
+    /**
+     * Awaits a connection being opened. A connection completes on an event loop thread, so awaiting one there could
+     * block the loop that would complete it: the await is rejected on an event loop thread with a message naming the
+     * client, as {@link LettuceResult#toBlocking} rejects blocking on a command result. The failure of the
+     * connection attempt is rethrown as Lettuce's blocking {@code connect} methods rethrow it: a
+     * {@link RedisException} as is, any other cause wrapped in a {@link RedisConnectionException}.
+     */
+    private <T> T await(CompletionStage<T> connecting) {
+        if (Context.isOnEventLoopThread()) {
+            throw new IllegalStateException("The Lettuce Redis client '" + clientName
+                    + "' cannot open a connection from an event loop thread: use connectAsync()");
+        }
+        try {
+            return connecting.toCompletableFuture().get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw RedisConnectionException.create(e);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof RedisException failure) {
+                throw failure;
+            }
+            throw RedisConnectionException.create(e.getCause());
+        }
     }
 
     /**
@@ -329,11 +374,9 @@ public class LettuceConnectionFactory {
 
         AbstractRedisClient client();
 
-        LettuceConnection connect();
-
         CompletionStage<LettuceConnection> connectAsync();
 
-        <K, V> StatefulConnection<K, V> connect(RedisCodec<K, V> codec);
+        <K, V> CompletionStage<StatefulConnection<K, V>> connectAsync(RedisCodec<K, V> codec);
 
         CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>> connectPubSubAsync();
 
@@ -347,18 +390,13 @@ public class LettuceConnectionFactory {
     private record Standalone(RedisClient client, RedisURI uri) implements Topology {
 
         @Override
-        public LettuceConnection connect() {
-            return LettuceConnection.standalone(client.connect(ByteArrayCodec.INSTANCE));
-        }
-
-        @Override
         public CompletionStage<LettuceConnection> connectAsync() {
             return client.connectAsync(ByteArrayCodec.INSTANCE, uri).thenApply(LettuceConnection::standalone);
         }
 
         @Override
-        public <K, V> StatefulConnection<K, V> connect(RedisCodec<K, V> codec) {
-            return client.connect(codec);
+        public <K, V> CompletionStage<StatefulConnection<K, V>> connectAsync(RedisCodec<K, V> codec) {
+            return client.connectAsync(codec, uri).thenApply(connection -> connection);
         }
 
         @Override
@@ -377,33 +415,65 @@ public class LettuceConnectionFactory {
      * A cluster: connections routing each command to the node owning its key and reading from the nodes
      * {@code readFrom} selects. A cluster only has database {@code 0}.
      */
-    private record Cluster(RedisClusterClient client, ReadFrom readFrom) implements Topology {
+    private record Cluster(RedisClusterClient client, ReadFrom readFrom, AtomicReference<CompletionStage<Void>> partitions)
+            implements
+                Topology {
 
-        @Override
-        public LettuceConnection connect() {
-            StatefulRedisClusterConnection<byte[], byte[]> connection = client.connect(ByteArrayCodec.INSTANCE);
-            connection.setReadFrom(readFrom);
-            return LettuceConnection.cluster(connection);
+        Cluster(RedisClusterClient client, ReadFrom readFrom) {
+            this(client, readFrom, new AtomicReference<>());
         }
 
         @Override
         public CompletionStage<LettuceConnection> connectAsync() {
-            return client.connectAsync(ByteArrayCodec.INSTANCE).thenApply(connection -> {
-                connection.setReadFrom(readFrom);
-                return LettuceConnection.cluster(connection);
-            });
+            return connectCluster(ByteArrayCodec.INSTANCE).thenApply(LettuceConnection::cluster);
         }
 
         @Override
-        public <K, V> StatefulConnection<K, V> connect(RedisCodec<K, V> codec) {
-            StatefulRedisClusterConnection<K, V> connection = client.connect(codec);
-            connection.setReadFrom(readFrom);
-            return connection;
+        public <K, V> CompletionStage<StatefulConnection<K, V>> connectAsync(RedisCodec<K, V> codec) {
+            return connectCluster(codec).thenApply(connection -> connection);
         }
 
         @Override
         public CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>> connectPubSubAsync() {
-            return client.connectPubSubAsync(ByteArrayCodec.INSTANCE).thenApply(connection -> connection);
+            return partitionsLoaded().thenCompose(ignored -> client.connectPubSubAsync(ByteArrayCodec.INSTANCE))
+                    .thenApply(connection -> connection);
+        }
+
+        /**
+         * Opens a cluster connection reading from the nodes {@code readFrom} selects. Lettuce's asynchronous connects
+         * require the partitions to be loaded first, which only its blocking connect does on its own, so they are
+         * loaded before the first connection (see {@link #partitionsLoaded()}).
+         */
+        private <K, V> CompletionStage<StatefulRedisClusterConnection<K, V>> connectCluster(RedisCodec<K, V> codec) {
+            return partitionsLoaded().thenCompose(ignored -> client.connectAsync(codec)).thenApply(connection -> {
+                connection.setReadFrom(readFrom);
+                return connection;
+            });
+        }
+
+        /**
+         * The partitions, loaded from the seed nodes once, when the first connection is opened, and loaded again after
+         * a failed attempt so that a cluster that was unreachable can be reached later. Lettuce refreshes them itself
+         * afterwards, as the topology refresh options say.
+         */
+        private CompletionStage<Void> partitionsLoaded() {
+            CompletionStage<Void> loaded = partitions.get();
+            if (loaded != null) {
+                return loaded;
+            }
+            CompletableFuture<Void> loading = new CompletableFuture<>();
+            if (!partitions.compareAndSet(null, loading)) {
+                return partitions.get();
+            }
+            client.refreshPartitionsAsync().whenComplete((ignored, failure) -> {
+                if (failure != null) {
+                    partitions.compareAndSet(loading, null);
+                    loading.completeExceptionally(failure);
+                } else {
+                    loading.complete(null);
+                }
+            });
+            return loading;
         }
 
         @Override
@@ -428,18 +498,13 @@ public class LettuceConnectionFactory {
                 Topology {
 
         @Override
-        public LettuceConnection connect() {
-            return LettuceConnection.standalone(connectMasterReplica(ByteArrayCodec.INSTANCE));
-        }
-
-        @Override
         public CompletionStage<LettuceConnection> connectAsync() {
             return connectMasterReplicaAsync(ByteArrayCodec.INSTANCE).thenApply(LettuceConnection::standalone);
         }
 
         @Override
-        public <K, V> StatefulConnection<K, V> connect(RedisCodec<K, V> codec) {
-            return connectMasterReplica(codec);
+        public <K, V> CompletionStage<StatefulConnection<K, V>> connectAsync(RedisCodec<K, V> codec) {
+            return connectMasterReplicaAsync(codec).thenApply(connection -> connection);
         }
 
         @Override
@@ -459,16 +524,6 @@ public class LettuceConnectionFactory {
             return nodes.getFirst().getDatabase();
         }
 
-        private <K, V> StatefulRedisMasterReplicaConnection<K, V> connectMasterReplica(RedisCodec<K, V> codec) {
-            StatefulRedisMasterReplicaConnection<K, V> connection = switch (mode) {
-                case SENTINEL -> io.lettuce.core.masterreplica.MasterReplica.connect(client, codec, nodes.getFirst());
-                case DISCOVER -> discover(codec);
-                case STATIC -> io.lettuce.core.masterreplica.MasterReplica.connect(client, codec, nodes);
-            };
-            connection.setReadFrom(readFrom);
-            return connection;
-        }
-
         private <K, V> CompletionStage<StatefulRedisMasterReplicaConnection<K, V>> connectMasterReplicaAsync(
                 RedisCodec<K, V> codec) {
             CompletionStage<StatefulRedisMasterReplicaConnection<K, V>> connecting = switch (mode) {
@@ -484,24 +539,9 @@ public class LettuceConnectionFactory {
 
         /**
          * Discovers the topology from the first node that answers, trying the nodes in order as the Vert.x client
-         * does (Lettuce's Autodiscovery connector takes a single node): {@link #discoverAsync} awaited, as Lettuce's
-         * blocking {@code connect} methods await their asynchronous counterparts. The failure of the last attempt is
-         * thrown, the earlier ones suppressed on it.
+         * does (Lettuce's Autodiscovery connector takes a single node). The failure of the last attempt is reported,
+         * the earlier ones suppressed on it.
          */
-        private <K, V> StatefulRedisMasterReplicaConnection<K, V> discover(RedisCodec<K, V> codec) {
-            try {
-                return discoverAsync(codec).toCompletableFuture().get();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw RedisConnectionException.create(describe(nodes), e);
-            } catch (ExecutionException e) {
-                if (e.getCause() instanceof RedisException failure) {
-                    throw failure;
-                }
-                throw RedisConnectionException.create(describe(nodes), e.getCause());
-            }
-        }
-
         private <K, V> CompletionStage<StatefulRedisMasterReplicaConnection<K, V>> discoverAsync(RedisCodec<K, V> codec) {
             return tryInOrder(0, node -> io.lettuce.core.masterreplica.MasterReplica.connectAsync(client, codec, node),
                     "discover the replication topology from");
