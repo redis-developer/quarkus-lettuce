@@ -347,18 +347,29 @@ public final class LettuceConnectionPool {
 
     private <T> Uni<T> run(Function<LettuceConnection, Uni<T>> body, boolean scoped) {
         return Uni.createFrom().emitter(emitter -> {
+            // The request completes on whichever thread hands the connection over (a release, a connect); the body
+            // and its outcome go back to the caller's event loop context, as a command's result does (see
+            // LettuceResult.toUni).
+            Context context = Vertx.currentContext();
             Request request = new Request();
             AtomicReference<Cancellable> running = new AtomicReference<>();
             request.whenComplete((conn, failure) -> {
-                if (failure != null) {
-                    emitter.fail(failure);
-                    return;
-                }
-                Cancellable subscription = Uni.createFrom().deferred(() -> body.apply(conn))
-                        .onTermination().call(() -> releaseQuietly(conn))
-                        .subscribe().with(emitter::complete, emitter::fail);
-                if (scoped) {
-                    running.set(subscription);
+                Runnable proceed = () -> {
+                    if (failure != null) {
+                        emitter.fail(failure);
+                        return;
+                    }
+                    Cancellable subscription = Uni.createFrom().deferred(() -> body.apply(conn))
+                            .onTermination().call(() -> releaseQuietly(conn))
+                            .subscribe().with(emitter::complete, emitter::fail);
+                    if (scoped) {
+                        running.set(subscription);
+                    }
+                };
+                if (context == null || !context.isEventLoopContext() || Vertx.currentContext() == context) {
+                    proceed.run();
+                } else {
+                    context.runOnContext(ignored -> proceed.run());
                 }
             });
             emitter.onTermination(() -> {
