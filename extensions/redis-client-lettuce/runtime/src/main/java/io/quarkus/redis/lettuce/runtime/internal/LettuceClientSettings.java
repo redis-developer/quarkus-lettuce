@@ -47,6 +47,7 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelOption;
 import io.quarkus.redis.runtime.client.config.NetConfig;
 import io.quarkus.redis.runtime.client.config.RedisClientConfig;
+import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.tls.TlsConfiguration;
 import io.quarkus.tls.TlsConfigurationRegistry;
 import io.quarkus.tls.runtime.config.TlsConfigUtils;
@@ -192,6 +193,25 @@ public final class LettuceClientSettings {
         }
         return new LettuceClientSettings(List.copyOf(redisUris), options.build(), reconnectDelay(name, config),
                 nettyCustomizer(config.tcp()));
+    }
+
+    /**
+     * Rejects a host using one of the Valkey URI schemes, {@code valkey://} and {@code valkeys://}. The Vert.x client
+     * accepts them in {@code hosts}; the Lettuce backend connects to Redis and does not, and Lettuce would only say
+     * "Scheme valkey not supported" when the client is created, so the host is rejected up front with a message naming
+     * the client, the host and what to use instead.
+     *
+     * @throws ConfigurationException for a {@code valkey://} or {@code valkeys://} host
+     */
+    static void rejectUnsupportedScheme(String name, URI host) {
+        String scheme = host.getScheme();
+        if (scheme != null && (scheme.equalsIgnoreCase("valkey") || scheme.equalsIgnoreCase("valkeys"))) {
+            throw new ConfigurationException(String.format(
+                    "The host %s of the Lettuce Redis client '%s' uses the '%s' scheme, which the Lettuce backend does not "
+                            + "support: it connects to Redis with a redis:// or rediss:// URI (the Vert.x client accepts "
+                            + "valkey:// and valkeys://). Use a redis:// or rediss:// URI, or the Vert.x backend.",
+                    host, name, scheme));
+        }
     }
 
     /**
