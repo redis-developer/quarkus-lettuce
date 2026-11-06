@@ -174,6 +174,12 @@ public class LettuceProcessor {
         for (String holder : REACTIVE_FACTORY_HOLDERS) {
             runtimeInit.produce(new RuntimeInitializedClassBuildItem(holder));
         }
+        // Lettuce's transport providers read their io.lettuce.core.epoll/kqueue/iouring switches when they initialize.
+        // LettuceTransport sets the switches at startup from the transport Vert.x selected, so the providers must
+        // initialize at runtime, after that, in native images too.
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.EpollProvider"));
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.KqueueProvider"));
+        runtimeInit.produce(new RuntimeInitializedClassBuildItem("io.lettuce.core.resource.IOUringProvider"));
     }
 
     @BuildStep
