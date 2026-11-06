@@ -89,6 +89,15 @@ public final class LettuceConnection implements AutoCloseable {
     }
 
     /**
+     * Whether a transaction is open on this connection ({@code MULTI} sent, neither {@code EXEC} nor {@code DISCARD}
+     * yet), as far as Lettuce knows; never on a cluster connection, which has no transactions. The pool closes such a
+     * connection instead of handing it to the next borrower.
+     */
+    public boolean isMulti() {
+        return standalone != null && standalone.getStatefulConnection().isMulti();
+    }
+
+    /**
      * The wrapped Lettuce connection: a {@link StatefulRedisConnection} or a {@link StatefulRedisClusterConnection}.
      */
     public StatefulConnection<byte[], byte[]> connection() {
