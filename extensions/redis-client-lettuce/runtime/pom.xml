@@ -36,16 +36,6 @@
             <groupId>io.lettuce</groupId>
             <artifactId>lettuce-core</artifactId>
         </dependency>
-        <!-- Declared optional by Lettuce, but referenced from DefaultCommandLatencyCollector
-             signatures that native-image link-at-build-time analysis must be able to resolve. -->
-        <dependency>
-            <groupId>org.latencyutils</groupId>
-            <artifactId>LatencyUtils</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.hdrhistogram</groupId>
-            <artifactId>HdrHistogram</artifactId>
-        </dependency>
 
         <dependency>
             <groupId>org.assertj</groupId>
