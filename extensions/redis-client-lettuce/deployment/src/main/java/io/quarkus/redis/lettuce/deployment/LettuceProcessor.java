@@ -147,14 +147,14 @@ public class LettuceProcessor {
     public void registerNativeImageHints(
             BuildProducer<ExcludeConfigBuildItem> excludeConfig,
             BuildProducer<RuntimeInitializedClassBuildItem> runtimeInit) {
-        // Lettuce ships a native-image.properties that explicitly lists DefaultCommandLatencyCollector and
-        // its pause detector wrappers for build-time initialization. native-image eagerly initializes
-        // explicitly listed classes, and linking DefaultPauseDetectorWrapper requires LatencyUtils and
-        // HdrHistogram. Both are hard dependencies of this extension, but the vendor file must still be
-        // dropped so that Quarkus's own default (build-time initialization, which only touches the
-        // pause detector when both libraries are present) applies. Do NOT pin these classes to runtime
-        // initialization: that compiles the <clinit> into the image and makes --link-at-build-time reject
-        // the DefaultPauseDetectorWrapper reference.
+        // Lettuce ships a native-image.properties that lists DefaultCommandLatencyCollector and its pause
+        // detector wrappers for build-time initialization. Initializing DefaultPauseDetectorWrapper links
+        // org.LatencyUtils.PauseDetector, so with the optional LatencyUtils and HdrHistogram absent (they are
+        // not dependencies of this extension) the image build fails. Without the vendor file Quarkus's own
+        // defaults apply, and the collector is never constructed because the client resources configure the
+        // disabled latency recorder. Do NOT pin these classes to runtime initialization: that compiles the
+        // <clinit> into the image and makes --link-at-build-time reject the DefaultPauseDetectorWrapper
+        // reference.
         excludeConfig.produce(new ExcludeConfigBuildItem("io\\.lettuce\\.lettuce-core",
                 "/META-INF/native-image/io\\.lettuce/lettuce-core/native-image\\.properties"));
         // RedisClient.create() is folded at build time, which transitively materializes a
