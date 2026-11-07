@@ -42,9 +42,10 @@ public class LettuceClientResources {
 
         this.clientResources = ClientResources.builder()
                 .eventLoopGroupProvider(eventLoopGroupProvider)
-                // LatencyUtils and HdrHistogram are on the classpath (needed for native images), which would make
-                // Lettuce enable its command latency collector by default: every command gets wrapped and recorded,
-                // a pause detector thread is started and latency events are published with no consumer.
+                // With LatencyUtils and HdrHistogram on the class path (optional in Lettuce, not dependencies of
+                // this extension, but an application may bring them) Lettuce enables its command latency collector
+                // by default: every command gets wrapped and recorded, a pause detector thread is started and
+                // latency events are published with no consumer. Keep it off either way.
                 .commandLatencyRecorder(CommandLatencyRecorder.disabled())
                 .build();
     }
