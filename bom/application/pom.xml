@@ -48,7 +48,7 @@
         <microprofile-lra.version>2.0.2</microprofile-lra.version>
         <microprofile-openapi.version>4.2</microprofile-openapi.version>
         <smallrye-common.version>2.20.0</smallrye-common.version>
-        <smallrye-config.version>4.2.0</smallrye-config.version> <!-- keep in sync with microprofile-config-api -->
+        <smallrye-config.version>4.2.2</smallrye-config.version> <!-- keep in sync with microprofile-config-api -->
         <smallrye-health.version>4.3.0</smallrye-health.version>
         <smallrye-modules.version>1.0.beta1</smallrye-modules.version>
         <smallrye-open-api.version>4.4.0</smallrye-open-api.version>
@@ -142,7 +142,7 @@
         <brotli4j.version>1.24.0</brotli4j.version>
         <reactive-streams.version>1.0.4</reactive-streams.version>
         <jboss-logging.version>3.6.3.Final</jboss-logging.version>
-        <mutiny.version>3.3.0</mutiny.version>
+        <mutiny.version>3.3.1</mutiny.version>
         <jctools-core.version>4.0.5</jctools-core.version>
         <kafka.version>4.2.2</kafka.version>
         <lz4.version>1.11.4</lz4.version> <!-- dependency of the kafka-clients that could be overridden by other imported BOMs in the platform -->
@@ -165,7 +165,7 @@
         <maven-invoker.version>3.2.0</maven-invoker.version>
         <awaitility.version>4.3.0</awaitility.version>
         <jboss-logmanager.version>3.2.2.Final</jboss-logmanager.version>
-        <flyway.version>13.11.1</flyway.version>
+        <flyway.version>13.12.0</flyway.version>
         <yasson.version>3.0.5</yasson.version>
         <!-- liquibase-mongodb is not released everytime with liquibase anymore, but the two versions need to be compatible -->
         <liquibase.version>4.33.0</liquibase.version>
@@ -174,14 +174,14 @@
         <!-- Aligns the conflicting versions brought in by kubernetes-client-api and jackson-dataformat-yaml -->
         <snakeyaml-engine.version>3.1.1</snakeyaml-engine.version>
         <osgi.version>6.0.0</osgi.version>
-        <mongo-client.version>5.6.5</mongo-client.version>
+        <mongo-client.version>5.14.0</mongo-client.version>
         <proton-j.version>0.35.0</proton-j.version>
         <javaparser.version>3.28.2</javaparser.version>
         <flapdoodle.mongo.version>4.33.0</flapdoodle.mongo.version>
         <quarkus-spring-api.version>7.0.SP1</quarkus-spring-api.version>
         <quarkus-spring-data-api.version>4.1</quarkus-spring-data-api.version>
         <quarkus-spring-security-api.version>7.1.SP1</quarkus-spring-security-api.version>
-        <quarkus-spring-boot-api.version>4.1.SP1</quarkus-spring-boot-api.version>
+        <quarkus-spring-boot-api.version>4.1.SP2</quarkus-spring-boot-api.version>
         <quarkus-spring-test-api.version>4.1</quarkus-spring-test-api.version>
         <mockito.version>5.24.0</mockito.version>
         <jna.version>5.8.0</jna.version><!-- should satisfy both testcontainers and mongodb -->
@@ -189,7 +189,7 @@
         <keycloak-client.version>26.0.12</keycloak-client.version>
         <logstash-gelf.version>1.15.1</logstash-gelf.version>
         <checker-qual.version>4.3.1</checker-qual.version>
-        <error-prone-annotations.version>2.51.0</error-prone-annotations.version>
+        <error-prone-annotations.version>2.52.0</error-prone-annotations.version>
         <jib-core.version>0.28.2</jib-core.version>
         <google-http-client.version>2.2.0</google-http-client.version>
         <scram-client.version>3.3</scram-client.version>
@@ -197,7 +197,7 @@
         <google-cloud-functions.version>2.0.2</google-cloud-functions.version>
         <commons-compress.version>1.28.0</commons-compress.version> <!-- Please check with Java Operator SDK / Fabric8 team before updating -->
         <commons-text.version>1.15.0</commons-text.version>
-        <gson.version>2.14.0</gson.version>
+        <gson.version>2.15.0</gson.version>
         <log4j2-jboss-logmanager.version>2.0.1.Final</log4j2-jboss-logmanager.version>
         <log4j2-api.version>2.26.1</log4j2-api.version>
         <avro.version>1.12.2</avro.version>
@@ -229,7 +229,6 @@
         <jsoup.version>1.23.2</jsoup.version> <!-- JSoup is used by Camel and LangChain4J so be careful when updating -->
         <reactor.version>3.8.7</reactor.version>
         <zstd-jni.version>1.5.7-16</zstd-jni.version> <!-- used by kafka-clients and some Camel components -->
-        <guava.version>33.7.2-jre</guava.version> <!-- keep in sync with guava.version from independent-project/bootstrap/pom.xml -->
     </properties>
 
     <pluginRepositories>
@@ -1450,6 +1449,16 @@
             <dependency>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-liquibase-mongodb-deployment</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-hibernate-accessor-deployment</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-hibernate-accessor</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -5898,6 +5907,11 @@
             </dependency>
             <dependency>
                 <groupId>org.hibernate.accessor</groupId>
+                <artifactId>hibernate-accessor-asm</artifactId>
+                <version>${hibernate-accessor.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.hibernate.accessor</groupId>
                 <artifactId>hibernate-accessor-bytebuddy</artifactId>
                 <version>${hibernate-accessor.version}</version>
             </dependency>
@@ -7050,23 +7064,6 @@
                 <groupId>com.webauthn4j</groupId>
                 <artifactId>webauthn4j-metadata-async</artifactId>
                 <version>${webauthn4j.version}</version>
-            </dependency>
-
-            <!-- Used by quarkus-opentelemetry, camel extensions, quarkus-langchain4j, etc. -->
-            <dependency>
-                <groupId>com.google.guava</groupId>
-                <artifactId>guava</artifactId>
-                <version>${guava.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>com.google.code.findbugs</groupId>
-                        <artifactId>jsr305</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>com.google.guava</groupId>
-                        <artifactId>listenablefuture</artifactId>
-                    </exclusion>
-                </exclusions>
             </dependency>
 
             <!-- Relocations -->

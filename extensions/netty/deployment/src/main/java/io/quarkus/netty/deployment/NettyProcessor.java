@@ -7,7 +7,6 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.function.BiFunction;
@@ -41,6 +40,7 @@ import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
 import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
 import io.quarkus.core.Phase;
 import io.quarkus.core.deployment.service.ServiceRegistrar;
+import io.quarkus.deployment.IsNormal;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.builditem.BytecodeTransformerBuildItem;
@@ -94,6 +94,18 @@ class NettyProcessor {
         InternalLoggerFactory.setDefaultFactory(new JBossNettyLoggerFactory());
     }
 
+    /**
+     * In dev and test mode, make sure Netty's {@code PlatformDependent} classes do not retain the augmentation class
+     * loader through the backtrace of the exceptions they store, see {@link NettyRecorder#initializePlatformDependent()}.
+     */
+    @BuildStep(onlyIfNot = IsNormal.class)
+    void initializePlatformDependent(ServiceRegistrar serviceRegistrar) {
+        serviceRegistrar
+                .forService("io.quarkus.netty.initialize-platform-dependent")
+                .atPhase(Phase.STATIC_INIT)
+                .onStart(ctx -> NettyRecorder.initializePlatformDependent());
+    }
+
     @BuildStep
     public NativeImageSystemPropertyBuildItem limitMem() {
         //in native mode we limit the size of the epoll array
@@ -114,9 +126,8 @@ class NettyProcessor {
     }
 
     @BuildStep
-    public SystemPropertyBuildItem limitArenaSize(NettyBuildTimeConfig config,
-            List<MinNettyAllocatorMaxOrderBuildItem> minMaxOrderBuildItems) {
-        String maxOrder = calculateMaxOrder(config.allocatorMaxOrder(), minMaxOrderBuildItems, true);
+    public SystemPropertyBuildItem limitArenaSize(List<MinNettyAllocatorMaxOrderBuildItem> minMaxOrderBuildItems) {
+        String maxOrder = calculateMaxOrder(minMaxOrderBuildItems);
 
         // Set maxOrder for PooledByteBufAllocator (does not affect the default AdaptiveByteBufAllocator)
         return new SystemPropertyBuildItem("io.netty.allocator.maxOrder", maxOrder);
@@ -203,7 +214,6 @@ class NettyProcessor {
 
     @BuildStep
     NativeImageConfigBuildItem build(
-            NettyBuildTimeConfig config,
             BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
             BuildProducer<ReflectiveMethodBuildItem> reflectiveMethods,
             BuildProducer<ReflectiveFieldBuildItem> reflectiveFields,
@@ -236,7 +246,7 @@ class NettyProcessor {
                 .produce(ReflectiveClassBuildItem.builder("java.util.LinkedHashMap").build());
         reflectiveClass.produce(ReflectiveClassBuildItem.builder("sun.nio.ch.SelectorImpl").methods().fields().build());
 
-        String maxOrder = calculateMaxOrder(config.allocatorMaxOrder(), minMaxOrderBuildItems, false);
+        String maxOrder = calculateMaxOrder(minMaxOrderBuildItems);
 
         NativeImageConfigBuildItem.Builder builder = NativeImageConfigBuildItem.builder()
                 // Set maxOrder for PooledByteBufAllocator (not used by the default AdaptiveByteBufAllocator)
@@ -571,26 +581,13 @@ class NettyProcessor {
         return new NativeImageResourceBuildItem("META-INF/io.netty.versions.properties");
     }
 
-    private String calculateMaxOrder(OptionalInt userConfig, List<MinNettyAllocatorMaxOrderBuildItem> minMaxOrderBuildItems,
-            boolean shouldWarn) {
+    private String calculateMaxOrder(List<MinNettyAllocatorMaxOrderBuildItem> minMaxOrderBuildItems) {
         int result = DEFAULT_NETTY_ALLOCATOR_MAX_ORDER;
         for (MinNettyAllocatorMaxOrderBuildItem minMaxOrderBuildItem : minMaxOrderBuildItems) {
             if (minMaxOrderBuildItem.getMaxOrder() > result) {
                 result = minMaxOrderBuildItem.getMaxOrder();
             }
         }
-
-        if (userConfig.isPresent()) {
-            int v = userConfig.getAsInt();
-            if (result > v && shouldWarn) {
-                log.warnf(
-                        "The configuration set `quarkus.netty.allocator-max-order` to %d. This value is lower than the value requested by the extensions (%d). %d will be used anyway.",
-                        v, result, v);
-
-            }
-            return Integer.toString(v);
-        }
-
         return Integer.toString(result);
     }
 
