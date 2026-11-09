@@ -19,17 +19,9 @@ import io.smallrye.mutiny.Uni;
 public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveCuckooCommands<K, V> {
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveCuckooCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, Type keyType, Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, valueType));
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, valueType));
     }
 
     @Override

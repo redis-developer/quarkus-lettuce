@@ -45,21 +45,14 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
 
     static final GeoAddArgs DEFAULT_INSTANCE = new GeoAddArgs();
 
-    private final ReactiveRedisDataSource dataSource;
     private final Codec keyCodec;
     private final Codec valueCodec;
 
     public LettuceReactiveGeoCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, Type keyType, Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, valueType));
-        this.dataSource = dataSource;
+        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, valueType));
         this.keyCodec = Codecs.getDefaultCodecFor(keyType);
         this.valueCodec = Codecs.getDefaultCodecFor(valueType);
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
     }
 
     @Override

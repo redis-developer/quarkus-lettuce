@@ -53,17 +53,9 @@ import io.vertx.redis.client.impl.types.MultiType;
 public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommands<K, K>
         implements ReactiveSearchCommands<K> {
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveSearchCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, Type keyType) {
-        super(connection, keyType, keyType, new Marshaller(keyType));
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+        super(dataSource, connection, keyType, keyType, new Marshaller(keyType));
     }
 
     @Override

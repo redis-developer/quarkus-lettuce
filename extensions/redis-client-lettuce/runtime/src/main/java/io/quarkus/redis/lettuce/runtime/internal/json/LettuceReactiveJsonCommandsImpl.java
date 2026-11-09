@@ -30,17 +30,9 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
 
     private static final JsonSetArgs JSON_SET_DEFAULT = new JsonSetArgs();
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveJsonCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, Type keyType) {
-        super(connection, keyType, keyType, new Marshaller(keyType));
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+        super(dataSource, connection, keyType, keyType, new Marshaller(keyType));
     }
 
     @Override

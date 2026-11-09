@@ -18,13 +18,16 @@ import java.util.stream.Collectors;
 
 import io.lettuce.core.KeyValue;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
+import io.quarkus.redis.datasource.ReactiveRedisCommands;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
 /**
  * Base class for Lettuce-backed reactive command group implementations.
  * <p>
- * Holds the async command handle and helper methods. The handle is the {@link RedisClusterAsyncCommands}
+ * Holds the owning data source, the async command handle and helper methods. The handle is the
+ * {@link RedisClusterAsyncCommands}
  * surface shared by the standalone and the cluster connections (see {@link LettuceConnection}), so a
  * command group works on both topologies. Subclasses whose command group has blocking
  * commands pass a {@code pool}, used by {@link #blocking(Function)} to route
@@ -33,30 +36,38 @@ import io.smallrye.mutiny.Uni;
  * @param <K> the key type
  * @param <V> the value type
  */
-public abstract class AbstractLettuceCommands<K, V> {
+public abstract class AbstractLettuceCommands<K, V> implements ReactiveRedisCommands {
 
+    protected final ReactiveRedisDataSource dataSource;
     protected final RedisClusterAsyncCommands<byte[], byte[]> async;
     protected final Type keyType;
     protected final Type valueType;
     protected final Marshaller marshaller;
     protected final LettuceConnectionPool pool;
 
-    protected AbstractLettuceCommands(LettuceConnection connection, Type keyType, Type valueType,
-            Marshaller marshaller) {
-        this(connection, keyType, valueType, marshaller, null);
+    protected AbstractLettuceCommands(ReactiveRedisDataSource dataSource, LettuceConnection connection, Type keyType,
+            Type valueType, Marshaller marshaller) {
+        this(dataSource, connection, keyType, valueType, marshaller, null);
     }
 
-    protected AbstractLettuceCommands(LettuceConnection connection, Type keyType, Type valueType,
-            Marshaller marshaller, LettuceConnectionPool pool) {
+    protected AbstractLettuceCommands(ReactiveRedisDataSource dataSource, LettuceConnection connection, Type keyType,
+            Type valueType, Marshaller marshaller, LettuceConnectionPool pool) {
+        nonNull(dataSource, "dataSource");
         nonNull(connection, "connection");
         nonNull(keyType, "keyType");
         nonNull(valueType, "valueType");
         nonNull(marshaller, "marshaller");
+        this.dataSource = dataSource;
         this.async = connection.async();
         this.keyType = keyType;
         this.valueType = valueType;
         this.marshaller = marshaller;
         this.pool = pool;
+    }
+
+    @Override
+    public ReactiveRedisDataSource getDataSource() {
+        return dataSource;
     }
 
     // ---------------------------------------------------------------------------------------------

@@ -56,20 +56,13 @@ import io.smallrye.mutiny.Uni;
 public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveStreamCommands<K, F, V> {
 
-    private final ReactiveRedisDataSource dataSource;
     private final Type fieldType;
 
     public LettuceReactiveStreamCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, LettuceConnectionPool pool, Type keyType,
             Type fieldType, Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, fieldType, valueType), pool);
-        this.dataSource = dataSource;
+        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, fieldType, valueType), pool);
         this.fieldType = fieldType;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
     }
 
     @Override

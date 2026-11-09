@@ -32,18 +32,10 @@ public class LettuceReactiveListCommandsImpl<K, V> extends AbstractLettuceComman
 
     private static final SortArgs DEFAULT_SORT_ARGS = new SortArgs();
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveListCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, LettuceConnectionPool pool, Type keyType,
             Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, valueType), pool);
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, valueType), pool);
     }
 
     @Override

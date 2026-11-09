@@ -23,17 +23,9 @@ import io.smallrye.mutiny.Uni;
 public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveTopKCommands<K, V> {
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveTopKCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, Type keyType, Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, valueType));
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, valueType));
     }
 
     @Override

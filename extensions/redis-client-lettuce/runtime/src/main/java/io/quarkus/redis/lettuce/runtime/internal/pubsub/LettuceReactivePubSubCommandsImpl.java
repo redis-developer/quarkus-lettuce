@@ -23,7 +23,6 @@ import io.lettuce.core.RedisFuture;
 import io.lettuce.core.pubsub.RedisPubSubAdapter;
 import io.lettuce.core.pubsub.RedisPubSubListener;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
-import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.pubsub.ReactivePubSubCommands;
 import io.quarkus.redis.datasource.pubsub.RedisPubSubMessage;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
@@ -44,20 +43,15 @@ import io.vertx.mutiny.core.Vertx;
 public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommands<V, V>
         implements ReactivePubSubCommands<V> {
 
-    private final LettuceReactiveRedisDataSourceImpl dataSource;
+    private final Vertx vertx;
     private final Supplier<CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>>> pubSubConnector;
 
     public LettuceReactivePubSubCommandsImpl(LettuceReactiveRedisDataSourceImpl dataSource, LettuceConnection connection,
             Supplier<CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>>> pubSubConnector,
             Type classOfMessage) {
-        super(connection, classOfMessage, classOfMessage, new Marshaller(classOfMessage));
-        this.dataSource = dataSource;
+        super(dataSource, connection, classOfMessage, classOfMessage, new Marshaller(classOfMessage));
+        this.vertx = dataSource.getVertx();
         this.pubSubConnector = pubSubConnector;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
     }
 
     @Override
@@ -281,7 +275,6 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
         final BiConsumer<String, V> onMessage;
         final Runnable onEnd;
         final Consumer<Throwable> onException;
-        final Vertx vertx = dataSource.getVertx();
         private final AtomicBoolean closed = new AtomicBoolean();
         private final RedisPubSubListener<byte[], byte[]> listener = new RedisPubSubAdapter<>() {
             @Override
