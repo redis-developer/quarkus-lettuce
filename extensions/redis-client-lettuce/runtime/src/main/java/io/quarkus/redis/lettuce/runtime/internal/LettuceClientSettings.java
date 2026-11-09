@@ -91,8 +91,8 @@ public final class LettuceClientSettings {
 
     private static final Logger LOGGER = Logger.getLogger(LettuceClientSettings.class);
 
-    /** The default of {@code topology-cache-ttl}. */
-    public static final Duration DEFAULT_TOPOLOGY_CACHE_TTL = Duration.ofSeconds(1);
+    /** The default of {@code topology-cache-ttl}, applied when the property is blank. */
+    private static final Duration DEFAULT_TOPOLOGY_CACHE_TTL = Duration.ofSeconds(1);
 
     /** The Vert.x query parameter naming the connection ({@code redis://host?client=name}). */
     static final String CLIENT_QUERY_PARAMETER = "client";
@@ -500,7 +500,9 @@ public final class LettuceClientSettings {
     }
 
     /**
-     * The TTL of the topology cache, {@code topology-cache-ttl}, which always has its default.
+     * The TTL of the topology cache, {@code topology-cache-ttl}: its upstream default of one second unless set, or
+     * {@link #DEFAULT_TOPOLOGY_CACHE_TTL} when the property is blank. Whether it is reported as not applied is decided
+     * by {@link #isSet}, not by comparing the value with the default.
      */
     public static Duration topologyCacheTtl(RedisClientConfig config) {
         return config.topologyCacheTtl().orElse(DEFAULT_TOPOLOGY_CACHE_TTL);
