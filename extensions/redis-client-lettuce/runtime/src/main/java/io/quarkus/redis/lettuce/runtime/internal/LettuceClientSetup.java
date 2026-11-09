@@ -53,7 +53,7 @@ public final class LettuceClientSetup {
     private static final Duration POOL_CLOSE_TIMEOUT = Duration.ofSeconds(10);
     /** The default of {@code master-name}, as documented for the Vert.x client. */
     private static final String DEFAULT_MASTER_NAME = "mymaster";
-    /** The default of {@code pool-recycle-timeout}. */
+    /** The default of {@code pool-recycle-timeout}, applied when the property is blank. */
     private static final Duration DEFAULT_POOL_RECYCLE_TIMEOUT = Duration.ofMinutes(3);
     /** The default of the Vert.x client's pool cleaner interval, applied when {@code pool-cleaner-interval} is unset. */
     private static final Duration DEFAULT_POOL_CLEANER_INTERVAL = Duration.ofSeconds(30);
@@ -227,8 +227,9 @@ public final class LettuceClientSetup {
      * {@code role}, {@code auto-failover} (a failover is always followed) and {@code replicas}, unless
      * {@code role=replica} already decides where the reads go; for a replication client {@code topology} and
      * {@code replicas}. A standalone client only uses the first host. Tell users at startup which other configured
-     * properties are not applied, and why, instead of silently connecting differently than configured. Properties
-     * with a default value are reported only when set to something else.
+     * properties are not applied, and why, instead of silently connecting differently than configured. A property is
+     * reported only when the configuration sets it (see {@link LettuceClientSettings#isSet}): one left to its upstream
+     * default is not, and that default is never copied here, so a change of it upstream cannot start or stop a warning.
      */
     private static void warnAboutUnsupportedConfiguration(String name, RedisClientConfig config, List<URI> hosts) {
         List<String> ignored = new ArrayList<>();
@@ -244,7 +245,7 @@ public final class LettuceClientSetup {
         } else {
             // a Sentinel connection gets the topology from the sentinels, a replication connection keeps the one it
             // discovered: neither refreshes it periodically
-            if (!LettuceClientSettings.topologyCacheTtl(config).equals(LettuceClientSettings.DEFAULT_TOPOLOGY_CACHE_TTL)) {
+            if (LettuceClientSettings.isSet(getPropertyName(name, "topology-cache-ttl"))) {
                 ignored.add(getPropertyName(name, "topology-cache-ttl"));
             }
         }
@@ -279,10 +280,10 @@ public final class LettuceClientSetup {
             ignored.add(getPropertyName(name, "cluster-transactions")
                     + " (Lettuce does not route MULTI/EXEC on a cluster, so transactions are not supported there)");
         }
-        if (config.maxNestedArrays() != 32) {
+        if (LettuceClientSettings.isSet(getPropertyName(name, "max-nested-arrays"))) {
             ignored.add(getPropertyName(name, "max-nested-arrays") + " (Lettuce does not limit the nesting of replies)");
         }
-        if (config.reconnectAttempts() != 0) {
+        if (LettuceClientSettings.isSet(getPropertyName(name, "reconnect-attempts"))) {
             ignored.add(getPropertyName(name, "reconnect-attempts") + RECONNECT_ATTEMPTS_REASON);
         }
         // applied only with configure-client-name, as with the Vert.x client (see LettuceClientSettings.clientName)
@@ -290,7 +291,7 @@ public final class LettuceClientSetup {
             ignored.add(getPropertyName(name, "client-name") + " (applied only with "
                     + getPropertyName(name, "configure-client-name") + "=true, as with the Vert.x client)");
         }
-        for (String tcpProperty : unsupportedTcpProperties(config.tcp())) {
+        for (String tcpProperty : unsupportedTcpProperties(name, config.tcp())) {
             ignored.add(getPropertyName(name, "tcp." + tcpProperty));
         }
         if (!ignored.isEmpty()) {
@@ -306,7 +307,7 @@ public final class LettuceClientSetup {
      * {@code send-buffer-size}, {@code so-linger}, {@code traffic-class}, {@code reuse-address} and
      * {@code local-address}, which are applied (see {@link LettuceClientSettings}).
      */
-    private static List<String> unsupportedTcpProperties(NetConfig tcp) {
+    private static List<String> unsupportedTcpProperties(String name, NetConfig tcp) {
         Map<String, Boolean> present = new LinkedHashMap<>();
         // the Vert.x client takes a connect timeout of zero as no timeout; Lettuce requires a positive one (see
         // LettuceClientSettings.socketOptions)
@@ -322,12 +323,12 @@ public final class LettuceClientSetup {
         present.put("write-idle-timeout" + noIdleHandler, tcp.writeIdleTimeout().isPresent());
         String noProxy = " (Lettuce does not connect through a proxy)";
         present.put("proxy-configuration-name" + noProxy, tcp.proxyConfigurationName().isPresent());
-        // The default of the client-level reconnect-attempts (0) is registered for every client as
+        // The default of the client-level reconnect-attempts is registered for every client as
         // quarkus.redis.*.reconnect-attempts, which the tcp group of the default client (quarkus.redis.tcp.*) also
-        // matches: the tcp property is always present for that client. Treat it like a defaulted property and report
-        // it only when set to something else.
+        // matches: the mapped tcp property is always present for that client, with the default. Ask the configuration
+        // whether it is set instead (see LettuceClientSettings.isSet).
         present.put("reconnect-attempts" + RECONNECT_ATTEMPTS_REASON,
-                tcp.reconnectAttempts().isPresent() && tcp.reconnectAttempts().getAsInt() != 0);
+                LettuceClientSettings.isSet(getPropertyName(name, "tcp.reconnect-attempts")));
         String nativeTransport = " (an option of the Linux native transport)";
         present.put("reuse-port" + nativeTransport, tcp.reusePort().isPresent());
         present.put("cork" + nativeTransport, tcp.cork().isPresent());
