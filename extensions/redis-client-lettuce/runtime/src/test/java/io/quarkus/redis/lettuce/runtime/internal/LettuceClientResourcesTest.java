@@ -1,9 +1,12 @@
 package io.quarkus.redis.lettuce.runtime.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 
@@ -11,10 +14,12 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
+import io.lettuce.core.ClientOptions;
 import io.lettuce.core.KeyValue;
+import io.lettuce.core.RedisURI;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
+import io.lettuce.core.codec.StringCodec;
 import io.netty.channel.EventLoopGroup;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.internal.VertxInternal;
@@ -31,12 +36,9 @@ import io.vertx.mutiny.core.Vertx;
  * <li>Shutdown ordering: client → resources → Vert.x</li>
  * </ul>
  */
-@SuppressWarnings("resource")
 class LettuceClientResourcesTest {
 
-    static final GenericContainer<?> REDIS = new GenericContainer<>(
-            DockerImageName.parse("redis:8-alpine"))
-            .withExposedPorts(6379);
+    static final GenericContainer<?> REDIS = RedisImage.plainServer();
 
     static Vertx vertx;
     static LettuceClientResources lettuceResources;
@@ -53,8 +55,8 @@ class LettuceClientResourcesTest {
         lettuceResources = new LettuceClientResources(vertxEventLoops);
 
         String redisUri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
-        connectionFactory = new LettuceConnectionFactory("test", lettuceResources.clientResources(), redisUri,
-                Duration.ofSeconds(10));
+        connectionFactory = new LettuceConnectionFactory("test", lettuceResources.clientResources(),
+                RedisURI.create(redisUri), ClientOptions.create(), Duration.ofSeconds(10));
     }
 
     @AfterAll
@@ -129,13 +131,32 @@ class LettuceClientResourcesTest {
                     .toCompletableFuture();
             String[] callbackThreadName = new String[1];
 
-            future.thenAccept(result -> {
-                callbackThreadName[0] = Thread.currentThread().getName();
-            }).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            future.thenAccept(result -> callbackThreadName[0] = Thread.currentThread().getName()).toCompletableFuture().get(5,
+                    TimeUnit.SECONDS);
 
             assertThat(callbackThreadName[0])
                     .as("Lettuce callback should execute on a Vert.x event loop thread")
                     .contains("vert.x-eventloop");
         }
     }
+
+    @Test
+    void blockingConnectIsRejectedOnAnEventLoopThread() throws Exception {
+        // A connection completes on an event loop thread, so awaiting one from an event loop could block the loop
+        // that would complete it: the blocking connect methods fail fast there. Startup opens its connections on the
+        // main thread (LettuceClientSetup), an event loop must use connectAsync().
+        CompletableFuture<Throwable> plain = new CompletableFuture<>();
+        CompletableFuture<Throwable> typed = new CompletableFuture<>();
+        vertx.getDelegate().runOnContext(ignored -> {
+            plain.complete(catchThrowable(() -> connectionFactory.connect().close()));
+            typed.complete(catchThrowable(() -> connectionFactory.connect(StringCodec.UTF8).close()));
+        });
+        for (CompletableFuture<Throwable> failure : List.of(plain, typed)) {
+            assertThat(failure.get(5, TimeUnit.SECONDS))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("client 'test'")
+                    .hasMessageContaining("event loop thread");
+        }
+    }
+
 }

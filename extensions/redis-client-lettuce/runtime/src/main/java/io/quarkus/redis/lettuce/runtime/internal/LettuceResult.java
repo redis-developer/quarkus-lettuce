@@ -2,17 +2,17 @@ package io.quarkus.redis.lettuce.runtime.internal;
 
 import java.time.Duration;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Supplier;
 
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Context;
+import io.vertx.core.Vertx;
 
 /**
- * Utility for adapting Lettuce {@link CompletionStage} results to Mutiny {@link Uni}
- * and to blocking calls.
+ * Utility for adapting Lettuce {@link CompletionStage} results to Mutiny {@link Uni}s that emit on the caller's
+ * Vert.x context, and to blocking calls.
  * <p>
- * Lettuce async commands return {@link io.lettuce.core.RedisFuture} which extends
- * {@link CompletionStage}. This class provides the bridge to Quarkus APIs without
- * exposing any Reactor types.
+ * Lettuce async commands return {@link io.lettuce.core.RedisFuture} which extends {@link CompletionStage}.
  */
 public final class LettuceResult {
 
@@ -21,17 +21,36 @@ public final class LettuceResult {
     }
 
     /**
-     * Converts a {@link CompletionStage} to a Mutiny {@link Uni}.
+     * Converts a Lettuce {@link CompletionStage} into a {@link Uni} that emits on the Vert.x context of the caller.
      * <p>
-     * The returned {@code Uni} subscribes lazily — the {@code CompletionStage} supplier
-     * is invoked only when a subscriber requests it.
+     * Lettuce completes a command on the event loop of its connection, which is rarely the one serving the caller,
+     * whereas the Vert.x Redis client completes on the caller's context. So the Vert.x context current at
+     * subscription is captured and, when it is an event loop context (the duplicated context of the request being
+     * served included), the item or failure is re-dispatched to it: the continuation runs where the caller runs and
+     * finds the context locals of the request. Without a context, or on a worker context, the continuation runs
+     * where Lettuce completed the command: a worker context runs its tasks in order, so dispatching to it from a
+     * task that may be blocked on the result would deadlock, and a blocking caller does not need the context.
+     * {@code supplier} is invoked at subscription, so the command is sent lazily.
      *
      * @param <T> the result type
-     * @param supplier a supplier of the {@link CompletionStage} (typically a Lettuce async command call)
-     * @return a {@link Uni} that completes with the result of the {@link CompletionStage}
+     * @param supplier the Lettuce call, typically an asynchronous command
+     * @return a {@link Uni} completing with the result of the {@link CompletionStage}, on the caller's context
      */
-    public static <T> Uni<T> toUni(java.util.function.Supplier<? extends CompletionStage<T>> supplier) {
-        return Uni.createFrom().completionStage(supplier);
+    public static <T> Uni<T> toUni(Supplier<? extends CompletionStage<T>> supplier) {
+        return Uni.createFrom().deferred(() -> {
+            Context context = Vertx.currentContext();
+            Uni<T> uni = Uni.createFrom().completionStage(supplier);
+            if (context == null || !context.isEventLoopContext()) {
+                return uni;
+            }
+            return uni.emitOn(task -> {
+                if (Vertx.currentContext() == context) {
+                    task.run();
+                } else {
+                    context.runOnContext(ignored -> task.run());
+                }
+            });
+        });
     }
 
     /**

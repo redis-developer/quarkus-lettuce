@@ -16,7 +16,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.utility.DockerImageName;
 
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
@@ -34,7 +33,6 @@ import io.vertx.mutiny.core.Vertx;
 public abstract class CommandsTestBase {
 
     protected static final Duration TIMEOUT = Duration.ofSeconds(5);
-    protected static final String REDIS_DEFAULT_IMAGE = "redis:8-alpine";
     protected static final GenericContainer<?> REDIS = createContainer();
     protected static final int MAX_POOL_SIZE = 6;
     protected static final int MAX_POOL_WAITING = 24;
@@ -93,9 +91,7 @@ public abstract class CommandsTestBase {
     }
 
     private static GenericContainer<?> createContainer() {
-        GenericContainer<?> container = new GenericContainer<>(
-                DockerImageName.parse(System.getProperty("redis.base.image", REDIS_DEFAULT_IMAGE)));
-        container.withExposedPorts(6379);
+        GenericContainer<?> container = RedisImage.plainServer();
         // The mapped port can accept TCP connections before Redis serves RESP; wait for the server's ready log line.
         container.waitingFor(Wait.forLogMessage(".*Ready to accept connections.*\\n", 1));
         return container;

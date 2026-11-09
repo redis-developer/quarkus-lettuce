@@ -14,6 +14,7 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import io.lettuce.core.RedisFuture;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandType;
@@ -334,7 +335,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
         Uni<Void> watch = watchedKeys == null ? Uni.createFrom().voidItem() : watch(conn, watchedKeys);
         return watch
-                .chain(() -> LettuceResult.toUni(conn::multi).replaceWithVoid())
+                .chain(() -> multi(conn))
                 .chain(() -> Uni.createFrom().deferred(() -> tx.apply(txDs)))
                 .onItemOrFailure().transformToUni((x, failure) -> {
                     if (failure != null) {
@@ -360,14 +361,8 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
 
         return watch(conn, watchedKeys)
                 .chain(() -> Uni.createFrom().deferred(() -> preTx.apply(pinnedDs)))
-                .onFailure().recoverWithUni(failure -> LettuceResult.toUni(conn::unwatch)
-                        .onItemOrFailure().transformToUni((r, f) -> {
-                            if (f != null) {
-                                failure.addSuppressed(f);
-                            }
-                            return Uni.createFrom().failure(failure);
-                        }))
-                .chain(input -> LettuceResult.toUni(conn::multi).replaceWithVoid()
+                .onFailure().recoverWithUni(failure -> undo(conn, conn::unwatch, failure))
+                .chain(input -> multi(conn)
                         .chain(() -> Uni.createFrom().deferred(() -> tx.apply(input, txDs)))
                         .onItemOrFailure().transformToUni((x, failure) -> {
                             if (failure != null) {
@@ -384,9 +379,43 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                         }));
     }
 
+    /**
+     * Issues {@code WATCH}. A failed {@code WATCH} is undone with {@code UNWATCH}: the server may have registered the
+     * watch although the reply did not arrive.
+     */
     private Uni<Void> watch(LettuceConnection conn, String[] keys) {
         byte[][] encodedKeys = encodeKeys(keys);
-        return LettuceResult.toUni(() -> conn.watch(encodedKeys)).replaceWithVoid();
+        return LettuceResult.toUni(() -> conn.watch(encodedKeys)).replaceWithVoid()
+                .onFailure().recoverWithUni(failure -> undo(conn, conn::unwatch, failure));
+    }
+
+    /**
+     * Opens the transaction. A failed {@code MULTI} is undone with {@code DISCARD}: the server may have entered the
+     * transaction although the reply did not arrive (a timeout, for instance), and every later command on the
+     * connection would then be queued instead of executed.
+     */
+    private Uni<Void> multi(LettuceConnection conn) {
+        return LettuceResult.toUni(conn::multi).replaceWithVoid()
+                .onFailure().recoverWithUni(failure -> undo(conn, conn::discard, failure));
+    }
+
+    /**
+     * Undoes a transaction step after {@code failure}, with {@code DISCARD} (which also unwatches) or
+     * {@code UNWATCH}, and re-propagates {@code failure}: best effort, the failure of the undo is attached as
+     * suppressed and the connection is marked broken, so that the pool closes it instead of handing it to the next
+     * borrower in an unknown state.
+     */
+    private <T> Uni<T> undo(LettuceConnection conn, Supplier<RedisFuture<String>> command, Throwable failure) {
+        return LettuceResult.toUni(command)
+                .onItemOrFailure().transformToUni((r, f) -> {
+                    if (f != null) {
+                        failure.addSuppressed(f);
+                        if (pool != null) {
+                            pool.markBroken(conn);
+                        }
+                    }
+                    return Uni.createFrom().failure(failure);
+                });
     }
 
     static byte[][] encodeKeys(String[] keys) {
@@ -402,18 +431,12 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * (unless the user already discarded) and re-propagates the original failure, attaching any
      * {@code DISCARD} failure as suppressed. Mirrors the Vert.x backend's abort path.
      */
-    private static <T> Uni<T> abort(LettuceConnection conn, LettuceTransactionHolder holder,
+    private <T> Uni<T> abort(LettuceConnection conn, LettuceTransactionHolder holder,
             Throwable failure) {
         if (holder.discarded()) {
             return Uni.createFrom().failure(failure);
         }
-        return LettuceResult.toUni(conn::discard)
-                .onItemOrFailure().transformToUni((r, f) -> {
-                    if (f != null) {
-                        failure.addSuppressed(f);
-                    }
-                    return Uni.createFrom().failure(failure);
-                });
+        return undo(conn, conn::discard, failure);
     }
 
     @Override

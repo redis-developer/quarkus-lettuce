@@ -13,7 +13,7 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.lettuce.deployment.RedisClusterTestResource;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceRecorder;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceClientSetup;
 import io.quarkus.test.QuarkusExtensionTest;
 import io.quarkus.test.common.QuarkusTestResource;
 
@@ -33,7 +33,7 @@ public class LettuceClusterConfigurationWarningTest {
             .overrideConfigKey("quarkus.redis.replicas", "share")
             .overrideConfigKey("quarkus.redis.topology-cache-ttl", "2s")
             .overrideConfigKey("quarkus.redis.cluster-transactions", "single-node")
-            .setLogRecordPredicate(record -> LettuceRecorder.class.getName().equals(record.getLoggerName())
+            .setLogRecordPredicate(record -> LettuceClientSetup.class.getName().equals(record.getLoggerName())
                     && record.getLevel().intValue() >= Level.WARNING.intValue())
             .assertLogRecords(records -> assertThat(records)
                     .extracting(LettuceClusterConfigurationWarningTest::message)

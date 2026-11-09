@@ -37,7 +37,6 @@ import org.aesh.command.completer.CompleterInvocation;
 import org.aesh.command.completer.OptionCompleter;
 import org.aesh.command.invocation.CommandInvocation;
 import org.aesh.command.option.Option;
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationTarget;
 import org.jboss.jandex.ClassInfo;
@@ -141,7 +140,7 @@ import io.quarkus.runtime.logging.LoggingCompatRecorder;
 import io.quarkus.runtime.logging.LoggingSetup;
 import io.quarkus.runtime.logging.LoggingSetupRecorder;
 import io.quarkus.runtime.logging.NamedHandlerType;
-import io.smallrye.config.SmallRyeConfig;
+import io.smallrye.config.Config;
 
 public final class LoggingResourceProcessor {
 
@@ -279,7 +278,7 @@ public final class LoggingResourceProcessor {
             // Captured by the finalizer service. BUILD_AND_RUN_TIME_FIXED config mappings are capturable, and
             // InheritableLevel is Constable, so the min-level defaults map can be captured directly once copied
             // into an immutable map.
-            final LogBuildTimeConfig buildTimeConfig = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class)
+            final LogBuildTimeConfig buildTimeConfig = Config.get()
                     .getConfigMapping(LogBuildTimeConfig.class);
             final Map<String, InheritableLevel> categoryDefaultMinLevels = Map.copyOf(categoryMinLevelDefaults.content);
 
@@ -442,12 +441,18 @@ public final class LoggingResourceProcessor {
                     .require(LogRuntimeConfig.class)
                     .require(ConsoleRuntimeConfig.class)
                     .onStart((ctx, handlers, namedFilters, consoleFmt, fileFmt, syslogFmt, socketFmt, bridge, notifier,
-                            cleanup, errorManager, config, consoleRt) -> LoggingSetup.configureRuntimeLogging(buildTimeConfig,
-                                    config, consoleRt, categoryDefaultMinLevels, notifier, cleanup, errorManager, namedFilters,
-                                    handlers.values(), bridge.additionalHandlers(), bridge.streaming(),
-                                    consoleFmt.orElse(null), fileFmt.orElse(null), syslogFmt.orElse(null),
-                                    socketFmt.orElse(null), bridge.namedHandlerFormatters(), bridge.banner(), launchMode,
-                                    alwaysEnableLogStream, includeFilters));
+                            cleanup, errorManager, config, consoleRt) -> {
+                        LoggingSetup.configureRuntimeLogging(buildTimeConfig,
+                                config, consoleRt, categoryDefaultMinLevels, notifier, cleanup, errorManager, namedFilters,
+                                handlers.values(), bridge.additionalHandlers(), bridge.streaming(),
+                                consoleFmt.orElse(null), fileFmt.orElse(null), syslogFmt.orElse(null),
+                                socketFmt.orElse(null), bridge.namedHandlerFormatters(), bridge.banner(), launchMode,
+                                alwaysEnableLogStream, includeFilters);
+                        if (launchMode.isDevOrTest()) {
+                            // the root handlers outlive the application in dev and test mode only
+                            ctx.onStop(() -> LoggingSetup.releaseCleanupFilter(cleanup));
+                        }
+                    });
 
             // ── build-time logging (runs now, during the deployment build) ──
             List<LogCleanupFilterElement> additionalLogCleanupFilters = new ArrayList<>(logCleanupFilters.size());
@@ -459,7 +464,7 @@ public final class LoggingResourceProcessor {
                                 : filterElement.getTargetLevel(),
                         filterElement.getMessageStarts()));
             }
-            SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
+            Config config = Config.get();
             LogBuildTimeConfig logBuildTimeConfig = config.getConfigMapping(LogBuildTimeConfig.class);
             LogRuntimeConfig logRuntimeConfigInBuild = config.getConfigMapping(LogRuntimeConfig.class);
             ConsoleRuntimeConfig consoleRuntimeConfig = config.getConfigMapping(ConsoleRuntimeConfig.class);

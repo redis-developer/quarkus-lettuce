@@ -37,6 +37,25 @@
             <artifactId>quarkus-junit-internal</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- A native transport on the test class path: Lettuce must follow the transport Vert.x selected, not pick
+             epoll because the jar is there (LettuceTransportAlignmentTest, LettuceNativeTransportTest) -->
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-transport-native-epoll</artifactId>
+            <classifier>linux-x86_64</classifier>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-transport-native-epoll</artifactId>
+            <classifier>linux-aarch_64</classifier>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-common</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.smallrye.certs</groupId>
             <artifactId>smallrye-certificate-generator</artifactId>

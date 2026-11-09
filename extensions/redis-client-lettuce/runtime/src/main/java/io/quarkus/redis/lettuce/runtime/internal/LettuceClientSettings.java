@@ -47,6 +47,7 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelOption;
 import io.quarkus.redis.runtime.client.config.NetConfig;
 import io.quarkus.redis.runtime.client.config.RedisClientConfig;
+import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.tls.TlsConfiguration;
 import io.quarkus.tls.TlsConfigurationRegistry;
 import io.quarkus.tls.runtime.config.TlsConfigUtils;
@@ -195,6 +196,25 @@ public final class LettuceClientSettings {
     }
 
     /**
+     * Rejects a host using one of the Valkey URI schemes, {@code valkey://} and {@code valkeys://}. The Vert.x client
+     * accepts them in {@code hosts}; the Lettuce backend connects to Redis and does not, and Lettuce would only say
+     * "Scheme valkey not supported" when the client is created, so the host is rejected up front with a message naming
+     * the client, the host and what to use instead.
+     *
+     * @throws ConfigurationException for a {@code valkey://} or {@code valkeys://} host
+     */
+    static void rejectUnsupportedScheme(String name, URI host) {
+        String scheme = host.getScheme();
+        if (scheme != null && (scheme.equalsIgnoreCase("valkey") || scheme.equalsIgnoreCase("valkeys"))) {
+            throw new ConfigurationException(String.format(
+                    "The host %s of the Lettuce Redis client '%s' uses the '%s' scheme, which the Lettuce backend does not "
+                            + "support: it connects to Redis with a redis:// or rediss:// URI (the Vert.x client accepts "
+                            + "valkey:// and valkeys://). Use a redis:// or rediss:// URI, or the Vert.x backend.",
+                    host, name, scheme));
+        }
+    }
+
+    /**
      * The URI of the first configured host: the one the standalone client connects to.
      */
     public RedisURI redisUri() {
@@ -288,10 +308,10 @@ public final class LettuceClientSettings {
      * The name a connection to {@code host} registers with the server ({@code CLIENT SETNAME}, or {@code SETNAME} of
      * {@code HELLO} with RESP3), as the Vert.x client sets it: the {@code client} query parameter of the URI when it
      * carries one, otherwise, only when {@code configure-client-name} is set, {@code client-name} or, without it, the
-     * Quarkus client name. As with the Vert.x client, {@code client-name} alone is not applied (the recorder reports
-     * it). Lettuce applied its own {@code clientName} query parameter when it parsed the URI, so that one works too.
-     * A cluster client names the connections to the nodes it discovers after the first seed, and a Sentinel or
-     * replication client those to the master and the replicas after the first host.
+     * Quarkus client name. As with the Vert.x client, {@code client-name} alone is not applied
+     * ({@code LettuceClientSetup} reports it). Lettuce applied its own {@code clientName} query parameter when it
+     * parsed the URI, so that one works too. A cluster client names the connections to the nodes it discovers after
+     * the first seed, and a Sentinel or replication client those to the master and the replicas after the first host.
      *
      * @return the client name, {@code null} when none is configured
      */
@@ -314,8 +334,8 @@ public final class LettuceClientSettings {
      * Maps {@code tcp.connection-timeout}, {@code tcp.keep-alive} and {@code tcp.no-delay} onto the Lettuce
      * {@link SocketOptions}. Only the set properties are applied: the Lettuce defaults (ten seconds connect timeout,
      * keep-alive and no-delay on) hold otherwise, not the Vert.x ones. A connect timeout that is not positive (zero
-     * is no timeout on the Vert.x client) is not applied either, Lettuce requiring a positive one; the recorder
-     * reports it.
+     * is no timeout on the Vert.x client) is not applied either, Lettuce requiring a positive one;
+     * {@code LettuceClientSetup} reports it.
      *
      * @return the socket options, empty when none of the three properties is applied
      */
@@ -340,13 +360,14 @@ public final class LettuceClientSettings {
     /**
      * Maps {@code reconnect-interval}, overridden by {@code tcp.reconnect-interval} as with the Vert.x client, onto
      * the delay between the attempts Lettuce makes to reconnect a lost connection. Lettuce reconnects until it
-     * succeeds and does not retry the initial connection, so {@code reconnect-attempts} has no equivalent (the
-     * recorder reports it). The mapped values cannot tell a property set to the default interval (one second) from
-     * an unset one, so the configuration is asked which of the two properties is set (see {@link #isSet}); the delay
-     * is constant only then, and by default Lettuce backs off exponentially, from 100 milliseconds up to 30 seconds,
-     * instead of retrying every second. (The default of {@code quarkus.redis.*.reconnect-interval} is registered for
-     * every client and also matches {@code quarkus.redis.tcp.reconnect-interval}, so the mapped {@code tcp} property
-     * of the default client is always present, with the default: another reason not to trust the mapped values.)
+     * succeeds and does not retry the initial connection, so {@code reconnect-attempts} has no equivalent
+     * ({@code LettuceClientSetup} reports it). The mapped values cannot tell a property set to the default interval
+     * (one second) from an unset one, so the configuration is asked which of the two properties is set (see
+     * {@link #isSet}); the delay is constant only then, and by default Lettuce backs off exponentially, from 100
+     * milliseconds up to 30 seconds, instead of retrying every second. (The default of
+     * {@code quarkus.redis.*.reconnect-interval} is registered for every client and also matches
+     * {@code quarkus.redis.tcp.reconnect-interval}, so the mapped {@code tcp} property of the default client is always
+     * present, with the default: another reason not to trust the mapped values.)
      *
      * @return the constant delay, empty when neither property is set
      */
@@ -593,12 +614,10 @@ public final class LettuceClientSettings {
                         + config.tlsConfigurationName().get() + " for the Redis client " + name + ".");
             }
             configuration = maybeConfiguration.get();
-        } else if (tlsRegistry.getDefault().isPresent() && (tlsRegistry.getDefault().get().isTrustAll())) {
-            defaultTrustAll = tlsRegistry.getDefault().get().isTrustAll();
-            if (defaultTrustAll) {
-                LOGGER.warn("The default TLS configuration is set to trust all certificates. This is a security risk."
-                        + "Please use a named TLS configuration for the Redis client " + name + " to avoid this warning.");
-            }
+        } else if (tlsRegistry.getDefault().isPresent() && tlsRegistry.getDefault().get().isTrustAll()) {
+            defaultTrustAll = true;
+            LOGGER.warn("The default TLS configuration is set to trust all certificates. This is a security risk. "
+                    + "Please use a named TLS configuration for the Redis client " + name + " to avoid this warning.");
         }
 
         if (configuration != null && !tlsFromHosts) {

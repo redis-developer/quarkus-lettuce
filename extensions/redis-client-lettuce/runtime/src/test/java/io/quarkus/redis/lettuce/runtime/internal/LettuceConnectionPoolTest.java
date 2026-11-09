@@ -163,8 +163,8 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         String missingKey = UUID.randomUUID().toString();
 
         Cancellable subscription = pool
-                .withPooled(conn -> LettuceResult
-                        .toUni(() -> conn.async().blpop(30L, missingKey.getBytes(StandardCharsets.UTF_8))))
+                .withPooled(conn -> Uni.createFrom()
+                        .completionStage(() -> conn.async().blpop(30L, missingKey.getBytes(StandardCharsets.UTF_8))))
                 .subscribe().with(item -> {
                 }, failure -> {
                 });
@@ -273,7 +273,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
                 });
                 Future<Long> acquire = executor.submit(() -> {
                     barrier.await();
-                    return pool.withPooled(conn -> LettuceResult.toUni(() -> conn.async().clientId()))
+                    return pool.withPooled(conn -> Uni.createFrom().completionStage(() -> conn.async().clientId()))
                             .await().atMost(TIMEOUT);
                 });
                 release.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
@@ -386,7 +386,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         assertThat(pool.getIdle()).isEqualTo(1);
 
         // With maxTotal=1, this would queue forever (and time out) had the connection leaked.
-        Long pong = pool.withPooled(conn -> LettuceResult.toUni(() -> conn.async().clientId()))
+        Long pong = pool.withPooled(conn -> Uni.createFrom().completionStage(() -> conn.async().clientId()))
                 .await().atMost(TIMEOUT);
         assertThat(pong).isNotNull();
         assertThat(pool.getIdle()).isEqualTo(1);
@@ -549,6 +549,39 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
 
     private static void rawPush(String key, String value) {
         connection.sync().rpush(key.getBytes(StandardCharsets.UTF_8), value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void connectionReleasedWithATransactionOpenIsClosedNotReused() {
+        // a borrower that left MULTI open (or could not close it) must not poison the next borrower
+        LettuceConnectionPool pool = pool(1, 1);
+        LettuceConnection first = pool.acquireBlocking(TIMEOUT);
+        sync(first).multi();
+        assertThat(first.isMulti()).isTrue();
+        pool.release(first).await().atMost(TIMEOUT);
+        assertThat(first.isOpen()).isFalse();
+        assertThat(pool.getObjectCount()).isZero();
+
+        LettuceConnection second = pool.acquireBlocking(TIMEOUT);
+        assertThat(second).isNotSameAs(first);
+        assertThat(second.isMulti()).isFalse();
+        assertThat(sync(second).ping()).isEqualTo("PONG");
+        pool.release(second).await().atMost(TIMEOUT);
+        assertThat(pool.getIdle()).isEqualTo(1);
+    }
+
+    @Test
+    void connectionMarkedBrokenIsClosedOnRelease() {
+        LettuceConnectionPool pool = pool(1, 1);
+        LettuceConnection first = pool.acquireBlocking(TIMEOUT);
+        pool.markBroken(first);
+        pool.release(first).await().atMost(TIMEOUT);
+        assertThat(first.isOpen()).isFalse();
+
+        LettuceConnection second = pool.acquireBlocking(TIMEOUT);
+        assertThat(second).isNotSameAs(first);
+        assertThat(sync(second).ping()).isEqualTo("PONG");
+        pool.release(second).await().atMost(TIMEOUT);
     }
 
 }

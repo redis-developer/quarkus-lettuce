@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
@@ -90,7 +89,7 @@ public class RedisTlsTestResource implements QuarkusTestResourceLifecycleManager
         if (password != null) {
             command.addAll(List.of("--requirepass", password));
         }
-        return new GenericContainer<>(DockerImageName.parse("redis:8-alpine"))
+        return new GenericContainer<>(RedisImage.name())
                 .withCopyFileToContainer(cert(CERT_NAME + ".crt"), "/certs/server.crt")
                 .withCopyFileToContainer(cert(CERT_NAME + ".key"), "/certs/server.key")
                 .withCopyFileToContainer(cert(CERT_NAME + "-server-ca.crt"), "/certs/clients-ca.crt")

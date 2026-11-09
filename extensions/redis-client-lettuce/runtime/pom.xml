@@ -36,16 +36,6 @@
             <groupId>io.lettuce</groupId>
             <artifactId>lettuce-core</artifactId>
         </dependency>
-        <!-- Declared optional by Lettuce, but referenced from DefaultCommandLatencyCollector
-             signatures that native-image link-at-build-time analysis must be able to resolve. -->
-        <dependency>
-            <groupId>org.latencyutils</groupId>
-            <artifactId>LatencyUtils</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.hdrhistogram</groupId>
-            <artifactId>HdrHistogram</artifactId>
-        </dependency>
 
         <dependency>
             <groupId>org.assertj</groupId>
@@ -65,6 +55,11 @@
         <dependency>
             <groupId>org.awaitility</groupId>
             <artifactId>awaitility</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-common</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -120,18 +115,12 @@
                     <name>test-containers</name>
                 </property>
             </activation>
-            <properties>
-                <redis.base.image>redis:8-alpine</redis.base.image>
-            </properties>
             <build>
                 <plugins>
                     <plugin>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
                             <skip>false</skip>
-                            <systemProperties>
-                                <redis.base.image>${redis.base.image}</redis.base.image>
-                            </systemProperties>
                         </configuration>
                     </plugin>
                     <plugin>

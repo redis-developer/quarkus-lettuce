@@ -169,6 +169,7 @@ public final class LoggingSetup {
             final Supplier<String> bannerSupplier,
             boolean includeFilters) {
         boolean color = false;
+        Supplier<String> deferredBannerSupplier = null;
         if (formatter == null) {
             if (isColorEnabled(consoleRuntimeConfig, config)) {
                 formatter = new ColorPatternFormatter(config.darken(), config.format());
@@ -176,13 +177,16 @@ public final class LoggingSetup {
             } else {
                 formatter = new PatternFormatter(config.format());
             }
-            if (bannerSupplier != null) {
-                formatter = new TextBannerFormatter(bannerSupplier, ExtFormatter.wrap(formatter, false));
-            }
+            deferredBannerSupplier = bannerSupplier;
         }
         final ConsoleHandler consoleHandler = new ConsoleHandler(
                 config.stderr() ? ConsoleHandler.Target.SYSTEM_ERR : ConsoleHandler.Target.SYSTEM_OUT, formatter);
-        // Use current System.out/err, not the static reference captured at class-load time
+        if (deferredBannerSupplier != null) {
+            consoleHandler.setFormatter(
+                    new TextBannerFormatter(deferredBannerSupplier, ExtFormatter.wrap(formatter, false)));
+        }
+        // Use current System.out/err, not the static reference captured at class-load time;
+        // this also triggers writeHead, which prints the banner exactly once to the correct stream
         consoleHandler.setOutputStream(config.stderr() ? System.err : System.out);
         consoleHandler.setLevel(config.level());
         consoleHandler.setErrorManager(errorManager);
@@ -1215,6 +1219,22 @@ public final class LoggingSetup {
         addNamedHandlersToRootHandlers(config.handlers(), namedHandlers, handlers, errorManager);
         InitialConfigurator.DELAYED_HANDLER.setAutoFlush(false);
         InitialConfigurator.DELAYED_HANDLER.setHandlers(handlers.toArray(LogContextInitializer.NO_HANDLERS));
+    }
+
+    /**
+     * Remove the cleanup filter from the handlers installed on the root logger, which outlive the application in
+     * dev and test mode (in particular the static delayed handler), so that they do not retain the application
+     * class loader through the filter once the application is stopped.
+     *
+     * @param cleanupFilter the cleanup filter applied by {@link #configureRuntimeLogging}
+     */
+    public static void releaseCleanupFilter(final LogCleanupFilter cleanupFilter) {
+        final java.util.logging.Logger julRootLogger = LogManager.getLogManager().getLogger("");
+        for (Handler handler : julRootLogger.getHandlers()) {
+            if (handler.getFilter() == cleanupFilter) {
+                handler.setFilter(null);
+            }
+        }
     }
 
     /**

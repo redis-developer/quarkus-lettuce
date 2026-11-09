@@ -3,15 +3,12 @@ package io.quarkus.redis.lettuce.deployment;
 import java.util.Map;
 
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 
 public class RedisTestResource implements QuarkusTestResourceLifecycleManager {
 
-    static GenericContainer<?> server = new GenericContainer<>(
-            DockerImageName.parse("redis:8-alpine"))
-            .withExposedPorts(6379);
+    static GenericContainer<?> server = RedisImage.plainServer();
 
     @Override
     public Map<String, String> start() {

@@ -33,6 +33,15 @@ final class LettuceSortedSetCommandsConverters {
         return toLettuceScoreRange(range, false);
     }
 
+    /**
+     * Converts a score range, optionally swapping its bounds.
+     * <p>
+     * Lettuce writes {@code REV} ranges as {@code max min} on the wire, swapping the bounds itself. The Vert.x
+     * backend swaps unconditionally for {@code ZRANGE ... BYLEX} but for {@code ZRANGE ... BYSCORE} only on an
+     * unbounded range; everywhere else it sends the bounds exactly as the caller ordered them, so callers pass
+     * {@code (max, min)} when reversing. Swapping here lets Lettuce's own swap restore the caller's order, keeping
+     * both backends byte-identical.
+     */
     private static io.lettuce.core.Range<Number> toLettuceScoreRange(ScoreRange<Double> range, boolean swapBounds) {
         String lowerBound = swapBounds ? range.getUpperBound() : range.getLowerBound();
         String upperBound = swapBounds ? range.getLowerBound() : range.getUpperBound();
