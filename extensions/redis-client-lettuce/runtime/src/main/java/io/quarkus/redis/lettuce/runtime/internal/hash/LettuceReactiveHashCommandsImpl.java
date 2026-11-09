@@ -24,19 +24,12 @@ import io.smallrye.mutiny.Uni;
 public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveHashCommands<K, F, V> {
 
-    private final ReactiveRedisDataSource dataSource;
     private final Type fieldType;
 
     public LettuceReactiveHashCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, Type keyType, Type fieldType, Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, fieldType, valueType));
-        this.dataSource = dataSource;
+        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, fieldType, valueType));
         this.fieldType = fieldType;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
     }
 
     @SafeVarargs

@@ -43,18 +43,10 @@ public class LettuceReactiveSortedSetCommandsImpl<K, V> extends AbstractLettuceC
     private static final ZAggregateArgs DEFAULT_INSTANCE_AGG = new ZAggregateArgs();
     private static final ZRangeArgs DEFAULT_INSTANCE_RANGE = new ZRangeArgs();
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveSortedSetCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, LettuceConnectionPool pool, Type keyType,
             Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, valueType), pool);
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, valueType), pool);
     }
 
     @Override

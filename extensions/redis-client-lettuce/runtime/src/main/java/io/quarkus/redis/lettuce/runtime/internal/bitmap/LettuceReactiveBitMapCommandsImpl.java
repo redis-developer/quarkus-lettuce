@@ -19,17 +19,9 @@ import io.smallrye.mutiny.Uni;
 public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommands<K, K>
         implements ReactiveBitMapCommands<K> {
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveBitMapCommandsImpl(ReactiveRedisDataSource dataSource,
             LettuceConnection connection, Type keyType) {
-        super(connection, keyType, keyType, new Marshaller(keyType));
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+        super(dataSource, connection, keyType, keyType, new Marshaller(keyType));
     }
 
     @Override
