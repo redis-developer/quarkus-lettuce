@@ -27,8 +27,7 @@ import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import io.quarkus.redis.datasource.pubsub.ReactivePubSubCommands;
 import io.quarkus.redis.datasource.pubsub.RedisPubSubMessage;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceReactiveRedisDataSourceImpl;
 import io.quarkus.redis.runtime.datasource.DefaultRedisPubSubMessage;
@@ -47,10 +46,10 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
     private final Vertx vertx;
     private final Supplier<CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>>> pubSubConnector;
 
-    public LettuceReactivePubSubCommandsImpl(LettuceReactiveRedisDataSourceImpl dataSource, LettuceConnection connection,
+    public LettuceReactivePubSubCommandsImpl(LettuceReactiveRedisDataSourceImpl dataSource, LettuceConnectionSource source,
             Supplier<CompletionStage<StatefulRedisPubSubConnection<byte[], byte[]>>> pubSubConnector,
             Type classOfMessage) {
-        super(dataSource, connection, classOfMessage, classOfMessage, new Marshaller(classOfMessage));
+        super(dataSource, source, classOfMessage, classOfMessage, new Marshaller(classOfMessage));
         this.vertx = dataSource.getVertx();
         this.pubSubConnector = pubSubConnector;
     }
@@ -59,7 +58,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
     public Uni<Void> publish(String channel, V message) {
         nonNull(channel, "channel");
         nonNull(message, "message");
-        return LettuceCommand.discarding(() -> async.publish(marshaller.encode(channel), marshaller.encode(message)))
+        return discarding(async -> async.publish(marshaller.encode(channel), marshaller.encode(message)))
                 .toUni();
     }
 

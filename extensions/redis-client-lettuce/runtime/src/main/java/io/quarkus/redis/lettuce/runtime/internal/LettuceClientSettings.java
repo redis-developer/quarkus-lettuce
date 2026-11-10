@@ -360,7 +360,8 @@ public final class LettuceClientSettings {
     /**
      * Maps {@code reconnect-interval}, overridden by {@code tcp.reconnect-interval} as with the Vert.x client, onto
      * the delay between the attempts Lettuce makes to reconnect a lost connection. Lettuce reconnects until it
-     * succeeds and does not retry the initial connection, so {@code reconnect-attempts} has no equivalent
+     * succeeds, and a connection that cannot be opened is tried again by the next command, so {@code reconnect-attempts} has no
+     * equivalent
      * ({@code LettuceClientSetup} reports it). The mapped values cannot tell a property set to the default interval
      * (one second) from an unset one, so the configuration is asked which of the two properties is set (see
      * {@link #isSet}); the delay is constant only then, and by default Lettuce backs off exponentially, from 100

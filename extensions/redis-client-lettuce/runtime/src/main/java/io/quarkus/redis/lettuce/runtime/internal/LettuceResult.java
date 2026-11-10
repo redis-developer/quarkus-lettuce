@@ -2,6 +2,7 @@ package io.quarkus.redis.lettuce.runtime.internal;
 
 import java.time.Duration;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import io.smallrye.mutiny.Uni;
@@ -37,9 +38,35 @@ public final class LettuceResult {
      * @return a {@link Uni} completing with the result of the {@link CompletionStage}, on the caller's context
      */
     public static <T> Uni<T> toUni(Supplier<? extends CompletionStage<T>> supplier) {
+        return onCallerContext(() -> Uni.createFrom().completionStage(supplier));
+    }
+
+    /**
+     * Like {@link #toUni(Supplier)}, for a call needing the connection of a {@link LettuceConnectionSource}: sent at
+     * once on an established connection, and once a shared connection that is still to be opened is established
+     * otherwise, failing when it cannot be.
+     *
+     * @param <T> the result type
+     * @param source where the connection comes from
+     * @param call the Lettuce call on that connection, typically an asynchronous command
+     * @return a {@link Uni} completing with the result of the {@link CompletionStage}, on the caller's context
+     */
+    public static <T> Uni<T> toUni(LettuceConnectionSource source,
+            Function<? super LettuceConnection, ? extends CompletionStage<T>> call) {
+        return onCallerContext(() -> {
+            LettuceConnection established = source.established();
+            if (established != null) {
+                return Uni.createFrom().completionStage(() -> call.apply(established));
+            }
+            return source.connect()
+                    .chain(connection -> Uni.createFrom().completionStage(() -> call.apply(connection)));
+        });
+    }
+
+    private static <T> Uni<T> onCallerContext(Supplier<Uni<T>> source) {
         return Uni.createFrom().deferred(() -> {
             Context context = Vertx.currentContext();
-            Uni<T> uni = Uni.createFrom().completionStage(supplier);
+            Uni<T> uni = source.get();
             if (context == null || !context.isEventLoopContext()) {
                 return uni;
             }

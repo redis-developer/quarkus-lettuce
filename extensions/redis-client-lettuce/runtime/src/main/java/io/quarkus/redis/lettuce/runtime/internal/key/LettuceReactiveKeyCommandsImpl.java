@@ -22,7 +22,7 @@ import io.quarkus.redis.datasource.keys.RedisKeyNotFoundException;
 import io.quarkus.redis.datasource.keys.RedisValueType;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -30,8 +30,8 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
         implements ReactiveKeyCommands<K> {
 
     public LettuceReactiveKeyCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType) {
-        super(dataSource, connection, keyType, keyType, new Marshaller(keyType));
+            LettuceConnectionSource source, Type keyType) {
+        super(dataSource, source, keyType, keyType, new Marshaller(keyType));
     }
 
     @Override
@@ -42,7 +42,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     LettuceCommand<Boolean, Boolean> _copy(K source, K destination) {
         nonNull(source, "source");
         nonNull(destination, "destination");
-        return LettuceCommand.of(() -> async.copy(marshaller.encode(source), marshaller.encode(destination)));
+        return command(async -> async.copy(marshaller.encode(source), marshaller.encode(destination)));
     }
 
     @Override
@@ -55,7 +55,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
         nonNull(destination, "destination");
         nonNull(copyArgs, "copyArgs");
         io.lettuce.core.CopyArgs lettuceArgs = LettuceKeyCommandsConverters.toLettuceCopyArgs(copyArgs);
-        return LettuceCommand.of(() -> async.copy(marshaller.encode(source), marshaller.encode(destination), lettuceArgs));
+        return command(async -> async.copy(marshaller.encode(source), marshaller.encode(destination), lettuceArgs));
     }
 
     @SafeVarargs
@@ -68,7 +68,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     final LettuceCommand<Long, Integer> _del(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return LettuceCommand.of(() -> async.del(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
+        return command(async -> async.del(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
     }
 
     @Override
@@ -78,7 +78,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     LettuceCommand<byte[], String> _dump(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.dump(marshaller.encode(key)), this::decodeString);
+        return command(async -> async.dump(marshaller.encode(key)), this::decodeString);
     }
 
     @Override
@@ -88,7 +88,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     LettuceCommand<Long, Boolean> _exists(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.exists(marshaller.encode(key)), c -> c != null && c > 0);
+        return command(async -> async.exists(marshaller.encode(key)), c -> c != null && c > 0);
     }
 
     @SafeVarargs
@@ -101,7 +101,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     final LettuceCommand<Long, Integer> _exists(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return LettuceCommand.of(() -> async.exists(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
+        return command(async -> async.exists(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
     }
 
     @Override
@@ -114,7 +114,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
         positive(seconds, "seconds");
         nonNull(expireArgs, "expireArgs");
         io.lettuce.core.ExpireArgs lettuceArgs = LettuceKeyCommandsConverters.toLettuceExpireArgs(expireArgs);
-        return LettuceCommand.of(() -> async.expire(marshaller.encode(key), seconds, lettuceArgs));
+        return command(async -> async.expire(marshaller.encode(key), seconds, lettuceArgs));
     }
 
     @Override
@@ -154,7 +154,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     LettuceCommand<Boolean, Boolean> _expireat(K key, long timestamp) {
         nonNull(key, "key");
         positive(timestamp, "timestamp");
-        return LettuceCommand.of(() -> async.expireat(marshaller.encode(key), timestamp));
+        return command(async -> async.expireat(marshaller.encode(key), timestamp));
     }
 
     @Override
@@ -177,7 +177,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
         positive(timestamp, "timestamp");
         nonNull(expireArgs, "expireArgs");
         io.lettuce.core.ExpireArgs lettuceArgs = LettuceKeyCommandsConverters.toLettuceExpireArgs(expireArgs);
-        return LettuceCommand.of(() -> async.expireat(marshaller.encode(key), timestamp, lettuceArgs));
+        return command(async -> async.expireat(marshaller.encode(key), timestamp, lettuceArgs));
     }
 
     @Override
@@ -197,7 +197,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     LettuceCommand<Long, Long> _expiretime(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.expiretime(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
+        return command(async -> async.expiretime(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
     }
 
     @Override
@@ -210,7 +210,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
         if (pattern.isBlank()) {
             throw new IllegalArgumentException("`pattern` must not be blank");
         }
-        return LettuceCommand.of(() -> async.keys(pattern), this::decodeListOfKeys);
+        return command(async -> async.keys(pattern), this::decodeListOfKeys);
     }
 
     @Override
@@ -224,7 +224,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
         if (db > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("`db` must fit in a positive int");
         }
-        return LettuceCommand.of(() -> async.move(marshaller.encode(key), (int) db));
+        return command(async -> async.move(marshaller.encode(key), (int) db));
     }
 
     @Override
@@ -234,7 +234,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     LettuceCommand<Boolean, Boolean> _persist(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.persist(marshaller.encode(key)));
+        return command(async -> async.persist(marshaller.encode(key)));
     }
 
     @Override
@@ -247,7 +247,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
         positive(milliseconds, "milliseconds");
         nonNull(expireArgs, "expireArgs");
         io.lettuce.core.ExpireArgs lettuceArgs = LettuceKeyCommandsConverters.toLettuceExpireArgs(expireArgs);
-        return LettuceCommand.of(() -> async.pexpire(marshaller.encode(key), milliseconds, lettuceArgs));
+        return command(async -> async.pexpire(marshaller.encode(key), milliseconds, lettuceArgs));
     }
 
     @Override
@@ -287,7 +287,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     LettuceCommand<Boolean, Boolean> _pexpireat(K key, long timestamp) {
         nonNull(key, "key");
         positive(timestamp, "timestamp");
-        return LettuceCommand.of(() -> async.pexpireat(marshaller.encode(key), timestamp));
+        return command(async -> async.pexpireat(marshaller.encode(key), timestamp));
     }
 
     @Override
@@ -310,7 +310,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
         positive(timestamp, "timestamp");
         nonNull(expireArgs, "expireArgs");
         io.lettuce.core.ExpireArgs lettuceArgs = LettuceKeyCommandsConverters.toLettuceExpireArgs(expireArgs);
-        return LettuceCommand.of(() -> async.pexpireat(marshaller.encode(key), timestamp, lettuceArgs));
+        return command(async -> async.pexpireat(marshaller.encode(key), timestamp, lettuceArgs));
     }
 
     @Override
@@ -330,7 +330,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     LettuceCommand<Long, Long> _pexpiretime(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.pexpiretime(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
+        return command(async -> async.pexpiretime(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
     }
 
     @Override
@@ -340,7 +340,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     LettuceCommand<Long, Long> _pttl(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.pttl(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
+        return command(async -> async.pttl(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
     }
 
     @Override
@@ -349,7 +349,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     }
 
     LettuceCommand<byte[], K> _randomkey() {
-        return LettuceCommand.of(async::randomkey, this::decodeKey);
+        return command(async -> async.randomkey(), this::decodeKey);
     }
 
     @Override
@@ -362,7 +362,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     LettuceCommand<String, Void> _rename(K key, K newkey) {
         nonNull(key, "key");
         nonNull(newkey, "newkey");
-        return LettuceCommand.discarding(() -> async.rename(marshaller.encode(key), marshaller.encode(newkey)));
+        return discarding(async -> async.rename(marshaller.encode(key), marshaller.encode(newkey)));
     }
 
     @Override
@@ -375,7 +375,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     LettuceCommand<Boolean, Boolean> _renamenx(K key, K newkey) {
         nonNull(key, "key");
         nonNull(newkey, "newkey");
-        return LettuceCommand.of(() -> async.renamenx(marshaller.encode(key), marshaller.encode(newkey)));
+        return command(async -> async.renamenx(marshaller.encode(key), marshaller.encode(newkey)));
     }
 
     private Throwable mapNoSuchKey(K key, Throwable t) {
@@ -388,13 +388,13 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     @Override
     public ReactiveKeyScanCursor<K> scan() {
-        return new LettuceReactiveKeyScanCursorImpl<>(async, this::decodeSetOfKeys);
+        return new LettuceReactiveKeyScanCursorImpl<>(source, this::decodeSetOfKeys);
     }
 
     @Override
     public ReactiveKeyScanCursor<K> scan(KeyScanArgs args) {
         nonNull(args, "args");
-        return new LettuceReactiveKeyScanCursorImpl<>(async, LettuceKeyCommandsConverters.toLettuceKeyScanArgs(args),
+        return new LettuceReactiveKeyScanCursorImpl<>(source, LettuceKeyCommandsConverters.toLettuceKeyScanArgs(args),
                 this::decodeSetOfKeys);
     }
 
@@ -407,7 +407,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     @SafeVarargs
     final LettuceCommand<Long, Integer> _touch(K... keys) {
         notNullOrEmpty(keys, "keys");
-        return LettuceCommand.of(() -> async.touch(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
+        return command(async -> async.touch(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
     }
 
     @Override
@@ -417,7 +417,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     LettuceCommand<Long, Long> _ttl(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.ttl(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
+        return command(async -> async.ttl(marshaller.encode(key)), r -> decodeExpireResponse(key, r));
     }
 
     @Override
@@ -427,7 +427,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
 
     LettuceCommand<String, RedisValueType> _type(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.type(marshaller.encode(key)),
+        return command(async -> async.type(marshaller.encode(key)),
                 s -> s == null ? null : RedisValueType.valueOf(s.toUpperCase()));
     }
 
@@ -440,7 +440,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     @SafeVarargs
     final LettuceCommand<Long, Integer> _unlink(K... keys) {
         notNullOrEmpty(keys, "keys");
-        return LettuceCommand.of(() -> async.unlink(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
+        return command(async -> async.unlink(marshaller.encodeAsArray(keys)), AbstractLettuceCommands::toInteger);
     }
 
     private long decodeExpireResponse(K key, Long r) {

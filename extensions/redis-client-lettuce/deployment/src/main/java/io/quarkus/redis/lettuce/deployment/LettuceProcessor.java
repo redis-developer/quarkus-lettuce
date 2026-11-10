@@ -49,10 +49,10 @@ import io.quarkus.redis.deployment.client.RedisDataSourceProviderBuildItem;
 import io.quarkus.redis.deployment.client.RequestedRedisClientBuildItem;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceClientResources;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceClientSetup;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionFactory;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceRecorder;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceSharedConnection;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceBlockingRedisDataSourceImpl;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceReactiveRedisDataSourceImpl;
 import io.quarkus.redis.runtime.client.config.RedisClientConfig;
@@ -68,7 +68,10 @@ import io.vertx.core.Vertx;
  * instead of the Vert.x Redis client; the {@link RedisDataSourceProviderBuildItem} tells the
  * {@code quarkus-redis-client} extension to skip its own data source beans.
  * <p>
- * Additionally, for every client injected through a Lettuce type, the following beans are produced:
+ * The data sources open their connection with their first command, not at startup.
+ * <p>
+ * Additionally, for every client injected through a Lettuce type, the following beans are produced, the connection
+ * beans only when a connection type is injected for the client: their connection is opened at startup.
  * <ul>
  * <li>{@code io.lettuce.core.RedisClient} and {@code io.lettuce.core.api.StatefulRedisConnection<String, String>},
  * active when the client is not configured as a cluster;</li>
@@ -113,6 +116,11 @@ public class LettuceProcessor {
     private static final Type STATEFUL_CONNECTION_STRING_STRING = stringString(LETTUCE_STATEFUL_CONNECTION);
     private static final Type STATEFUL_CLUSTER_CONNECTION_STRING_STRING = stringString(LETTUCE_STATEFUL_CLUSTER_CONNECTION);
     private static final Type STATEFUL_MASTER_REPLICA_CONNECTION_STRING_STRING = stringString(
+            LETTUCE_STATEFUL_MASTER_REPLICA_CONNECTION);
+
+    private static final Set<DotName> LETTUCE_CONNECTION_TYPES = Set.of(
+            LETTUCE_STATEFUL_CONNECTION,
+            LETTUCE_STATEFUL_CLUSTER_CONNECTION,
             LETTUCE_STATEFUL_MASTER_REPLICA_CONNECTION);
 
     private static final List<DotName> LETTUCE_INJECTION_TYPES = List.of(
@@ -187,16 +195,27 @@ public class LettuceProcessor {
             BeanDiscoveryFinishedBuildItem beans) {
 
         Set<String> names = new HashSet<>();
+        // the clients a connection type is injected for: the others get no connection beans, so that injecting
+        // a RedisClient, a RedisClusterClient or the ClientResources does not open a connection at startup
+        Set<String> connectionNames = new HashSet<>();
 
         for (InjectionPointInfo ip : beans.getInjectionPoints()) {
-            if (!LETTUCE_INJECTION_TYPES.contains(ip.getRequiredType().name())) {
+            DotName type = ip.getRequiredType().name();
+            if (!LETTUCE_INJECTION_TYPES.contains(type)) {
                 continue;
             }
             AnnotationInstance clientName = ip.getRequiredQualifier(REDIS_CLIENT_ANNOTATION);
+            String name;
             if (clientName != null) {
-                names.add(clientName.value().asString());
+                name = clientName.value().asString();
             } else if (ip.hasDefaultedQualifier()) {
-                names.add(DEFAULT_CLIENT_NAME);
+                name = DEFAULT_CLIENT_NAME;
+            } else {
+                continue;
+            }
+            names.add(name);
+            if (LETTUCE_CONNECTION_TYPES.contains(type)) {
+                connectionNames.add(name);
             }
         }
 
@@ -205,7 +224,7 @@ public class LettuceProcessor {
         // otherwise create a Vert.x Redis client for every Lettuce injection. The Lettuce beans own
         // their own lifecycle.
         for (String name : names) {
-            requestLettuce.produce(new RequestedLettuceClientBuildItem(name));
+            requestLettuce.produce(new RequestedLettuceClientBuildItem(name, connectionNames.contains(name)));
         }
     }
 
@@ -229,8 +248,12 @@ public class LettuceProcessor {
             BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
 
         Set<String> lettuceNames = new HashSet<>();
+        Set<String> connectionNames = new HashSet<>();
         for (RequestedLettuceClientBuildItem client : lettuceClients) {
             lettuceNames.add(client.name);
+            if (client.connection) {
+                connectionNames.add(client.name);
+            }
         }
         Set<String> dataSourceNames = new HashSet<>();
         for (RequestedRedisClientBuildItem client : dataSourceClients) {
@@ -261,8 +284,9 @@ public class LettuceProcessor {
             registerClientService(reg, name);
         }
         for (String name : lettuceNames) {
-            registerLettuceServices(reg, name);
-            registerLettuceBeans(syntheticBeans, recorder, name);
+            boolean connection = connectionNames.contains(name);
+            registerLettuceServices(reg, name, connection);
+            registerLettuceBeans(syntheticBeans, recorder, name, connection);
         }
         for (String name : dataSourceNames) {
             registerDataSourceServices(reg, name);
@@ -304,11 +328,12 @@ public class LettuceProcessor {
     }
 
     /**
-     * The services behind the Lettuce beans of a client: its {@code RedisClient} or {@code RedisClusterClient}, and
-     * the {@code String} connection the three connection beans share (the beans of the other topologies being
-     * inactive, see {@link #registerLettuceBeans}), registered under {@link AsyncCloseable}.
+     * The services behind the Lettuce beans of a client: its {@code RedisClient} or {@code RedisClusterClient}, and,
+     * when a connection type is injected for the client, the {@code String} connection the three connection beans
+     * share (the beans of the other topologies being inactive, see {@link #registerLettuceBeans}), registered under
+     * {@link AsyncCloseable} and opened at startup.
      */
-    private static void registerLettuceServices(ServiceRegistrar reg, String name) {
+    private static void registerLettuceServices(ServiceRegistrar reg, String name, boolean connection) {
         reg.forService(RedisClient.class, name)
                 .atPhase(Phase.DATA)
                 .request(LettuceConnectionFactory.class, name)
@@ -319,6 +344,9 @@ public class LettuceProcessor {
                 .request(LettuceConnectionFactory.class, name)
                 .optional()
                 .onStart((ctx, factoryOpt) -> factoryOpt.flatMap(LettuceClientSetup::clusterClient));
+        if (!connection) {
+            return;
+        }
         // A service type cannot be generic, and every Lettuce connection type is: the connection is registered under
         // AsyncCloseable, the non-generic Lettuce supertype of all of them, and the beans cast it.
         reg.forService(AsyncCloseable.class, name)
@@ -326,9 +354,9 @@ public class LettuceProcessor {
                 .request(LettuceConnectionFactory.class, name)
                 .optional()
                 .onStart((ctx, factoryOpt) -> factoryOpt.map(factory -> {
-                    StatefulConnection<String, String> connection = LettuceClientSetup.connectStrings(name, factory);
-                    ctx.onStop(connection::close);
-                    return connection;
+                    StatefulConnection<String, String> strings = LettuceClientSetup.connectStrings(name, factory);
+                    ctx.onStop(strings::close);
+                    return strings;
                 }));
         // A bean takes its value out of the service graph on first access, so two beans cannot read the same service:
         // the master/replica connection bean, active together with the StatefulRedisConnection one, reads the same
@@ -341,19 +369,11 @@ public class LettuceProcessor {
     }
 
     /**
-     * The services behind the data source beans of a client: the shared connection and the pool of its data sources,
-     * the reactive data source and the blocking one wrapping it.
+     * The services behind the data source beans of a client: the pool of its data sources, the reactive data source
+     * and the blocking one wrapping it. Starting them connects to nothing: the reactive data source owns the shared
+     * connection, which its first command opens, and the pool opens its connections when they are borrowed.
      */
     private static void registerDataSourceServices(ServiceRegistrar reg, String name) {
-        reg.forService(LettuceConnection.class, name)
-                .atPhase(Phase.DATA)
-                .request(LettuceConnectionFactory.class, name)
-                .optional()
-                .onStart((ctx, factoryOpt) -> factoryOpt.map(factory -> {
-                    LettuceConnection connection = LettuceClientSetup.connect(name, factory);
-                    ctx.onStop(connection::close);
-                    return connection;
-                }));
         reg.forService(LettuceConnectionPool.class, name)
                 .atPhase(Phase.DATA)
                 .request(LettuceConnectionFactory.class, name)
@@ -369,15 +389,16 @@ public class LettuceProcessor {
         reg.forService(ReactiveRedisDataSource.class, name)
                 .atPhase(Phase.DATA)
                 .after(REDIS_CODECS_SERVICE)
-                .request(LettuceConnection.class, name)
                 .request(LettuceConnectionPool.class, name)
                 .request(LettuceConnectionFactory.class, name)
                 .require(Vertx.class)
                 .optional()
-                .onStart((ctx, connectionOpt, poolOpt, factoryOpt, vertx) -> connectionOpt
-                        .map(connection -> new LettuceReactiveRedisDataSourceImpl(
-                                io.vertx.mutiny.core.Vertx.newInstance(vertx), connection, poolOpt.orElseThrow(),
-                                factoryOpt.orElseThrow()::connectPubSubAsync)));
+                .onStart((ctx, poolOpt, factoryOpt, vertx) -> factoryOpt.map(factory -> {
+                    LettuceSharedConnection connection = LettuceClientSetup.sharedConnection(name, factory);
+                    ctx.onStop(connection::close);
+                    return new LettuceReactiveRedisDataSourceImpl(io.vertx.mutiny.core.Vertx.newInstance(vertx),
+                            connection, poolOpt.orElseThrow(), factory::connectPubSubAsync);
+                }));
         reg.forService(RedisDataSource.class, name)
                 .atPhase(Phase.DATA)
                 .request(ReactiveRedisDataSource.class, name)
@@ -389,20 +410,16 @@ public class LettuceProcessor {
     }
 
     private static void registerLettuceBeans(BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
-            LettuceRecorder recorder, String name) {
+            LettuceRecorder recorder, String name, boolean connection) {
         // The client type is runtime configuration: the standalone, cluster and master/replica beans are all
         // registered, and the ones of the other topologies are inactive, with a message naming the types to inject
         // instead.
         Supplier<ActiveResult> checkActiveStandalone = recorder.checkActiveStandalone(name);
         Supplier<ActiveResult> checkActiveCluster = recorder.checkActiveCluster(name);
-        Supplier<ActiveResult> checkActiveMasterReplica = recorder.checkActiveMasterReplica(name);
 
         syntheticBeans.produce(
                 createLettuceBean(name, RedisClient.class, ClassType.create(LETTUCE_REDIS_CLIENT),
                         checkActiveStandalone, RedisClient.class, List.of(name), ApplicationScoped.class));
-        syntheticBeans.produce(
-                createLettuceBean(name, StatefulRedisConnection.class, STATEFUL_CONNECTION_STRING_STRING,
-                        checkActiveStandalone, AsyncCloseable.class, List.of(name), ApplicationScoped.class));
         // A singleton, unlike the other Lettuce beans: the client proxy ArC would generate for an application
         // scoped RedisClusterClient lives in io.lettuce.core.cluster and overrides methods whose signatures
         // name the package-private io.lettuce.core.RedisHandshake, which the native image build rejects when
@@ -410,6 +427,15 @@ public class LettuceProcessor {
         syntheticBeans.produce(
                 createLettuceBean(name, RedisClusterClient.class, ClassType.create(LETTUCE_REDIS_CLUSTER_CLIENT),
                         checkActiveCluster, RedisClusterClient.class, List.of(name), Singleton.class));
+        if (!connection) {
+            // no connection type is injected for the client: no connection service to read (see
+            // registerLettuceServices), and nothing to open at startup
+            return;
+        }
+        Supplier<ActiveResult> checkActiveMasterReplica = recorder.checkActiveMasterReplica(name);
+        syntheticBeans.produce(
+                createLettuceBean(name, StatefulRedisConnection.class, STATEFUL_CONNECTION_STRING_STRING,
+                        checkActiveStandalone, AsyncCloseable.class, List.of(name), ApplicationScoped.class));
         syntheticBeans.produce(
                 createLettuceBean(name, StatefulRedisClusterConnection.class, STATEFUL_CLUSTER_CONNECTION_STRING_STRING,
                         checkActiveCluster, AsyncCloseable.class, List.of(name), ApplicationScoped.class));

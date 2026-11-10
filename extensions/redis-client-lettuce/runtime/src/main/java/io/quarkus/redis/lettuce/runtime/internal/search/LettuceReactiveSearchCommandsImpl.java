@@ -42,7 +42,7 @@ import io.quarkus.redis.datasource.search.SynDumpResponse;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.lettuce.runtime.internal.VertxResponseParser;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
@@ -54,8 +54,8 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         implements ReactiveSearchCommands<K> {
 
     public LettuceReactiveSearchCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType) {
-        super(dataSource, connection, keyType, keyType, new Marshaller(keyType));
+            LettuceConnectionSource source, Type keyType) {
+        super(dataSource, source, keyType, keyType, new Marshaller(keyType));
     }
 
     @Override
@@ -64,7 +64,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     }
 
     LettuceCommand<List<String>, List<K>> _ft_list() {
-        return LettuceCommand.of(async::ftList, this::decodeIndexNames);
+        return command(async -> async.ftList(), this::decodeIndexNames);
     }
 
     @Override
@@ -79,7 +79,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         CommandArgs<byte[], byte[]> commandArgs = commandArgs(indexName, query);
         ArgReplay.replay(args.toArgs(), commandArgs);
         boolean cursor = args.hasCursor();
-        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_AGGREGATE, responseOutput(), commandArgs),
+        return command(async -> async.dispatch(CommandType.FT_AGGREGATE, responseOutput(), commandArgs),
                 reply -> decodeAggregateResponse(reply, cursor));
     }
 
@@ -92,7 +92,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         notNullOrBlank(indexName, "indexName");
         notNullOrBlank(query, "query");
         CommandArgs<byte[], byte[]> commandArgs = commandArgs(indexName, query);
-        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_AGGREGATE, responseOutput(), commandArgs),
+        return command(async -> async.dispatch(CommandType.FT_AGGREGATE, responseOutput(), commandArgs),
                 reply -> decodeAggregateResponse(reply, false));
     }
 
@@ -104,7 +104,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<String, Void> _ftAliasAdd(String alias, String index) {
         notNullOrBlank(alias, "alias");
         notNullOrBlank(index, "index");
-        return LettuceCommand.discarding(() -> async.ftAliasadd(alias, index));
+        return discarding(async -> async.ftAliasadd(alias, index));
     }
 
     @Override
@@ -114,7 +114,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<String, Void> _ftAliasDel(String alias) {
         notNullOrBlank(alias, "alias");
-        return LettuceCommand.discarding(() -> async.ftAliasdel(alias));
+        return discarding(async -> async.ftAliasdel(alias));
     }
 
     @Override
@@ -125,7 +125,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<String, Void> _ftAliasUpdate(String alias, String index) {
         notNullOrBlank(alias, "alias");
         notNullOrBlank(index, "index");
-        return LettuceCommand.discarding(() -> async.ftAliasupdate(alias, index));
+        return discarding(async -> async.ftAliasupdate(alias, index));
     }
 
     @Override
@@ -142,8 +142,8 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         }
         commandArgs.add(CommandKeyword.SCHEMA).add(CommandKeyword.ADD);
         ArgReplay.replay(field.toArgs(), commandArgs);
-        return LettuceCommand.discarding(
-                () -> async.dispatch(CommandType.FT_ALTER, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
+        return discarding(
+                async -> async.dispatch(CommandType.FT_ALTER, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
     }
 
     @Override
@@ -157,8 +157,8 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         CommandArgs<byte[], byte[]> commandArgs = commandArgs(index);
         // toArgs() rejects an empty schema and `ON HASH` combined with `ON JSON`, before the command is issued
         ArgReplay.replay(args.toArgs(), commandArgs);
-        return LettuceCommand.discarding(
-                () -> async.dispatch(CommandType.FT_CREATE, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
+        return discarding(
+                async -> async.dispatch(CommandType.FT_CREATE, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
     }
 
     @Override
@@ -171,8 +171,8 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         positiveOrZero(cursor, "cursor");
         CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.DEL).add(index)
                 .add(cursor);
-        return LettuceCommand.discarding(
-                () -> async.dispatch(CommandType.FT_CURSOR, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
+        return discarding(
+                async -> async.dispatch(CommandType.FT_CURSOR, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
     }
 
     @Override
@@ -185,7 +185,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         positiveOrZero(cursor, "cursor");
         CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.READ).add(index)
                 .add(cursor);
-        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_CURSOR, responseOutput(), commandArgs),
+        return command(async -> async.dispatch(CommandType.FT_CURSOR, responseOutput(), commandArgs),
                 reply -> decodeAggregateResponse(reply, true));
     }
 
@@ -201,7 +201,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE).add(CommandKeyword.READ).add(index)
                 .add(cursor)
                 .add(CommandKeyword.COUNT).add(count);
-        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_CURSOR, responseOutput(), commandArgs),
+        return command(async -> async.dispatch(CommandType.FT_CURSOR, responseOutput(), commandArgs),
                 reply -> decodeAggregateResponse(reply, true));
     }
 
@@ -212,7 +212,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<String, Void> _ftDropIndex(String index) {
         notNullOrBlank(index, "index");
-        return LettuceCommand.discarding(() -> async.ftDropindex(index));
+        return discarding(async -> async.ftDropindex(index));
     }
 
     @Override
@@ -222,7 +222,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<String, Void> _ftDropIndex(String index, boolean dd) {
         notNullOrBlank(index, "index");
-        return LettuceCommand.discarding(() -> async.ftDropindex(index, dd));
+        return discarding(async -> async.ftDropindex(index, dd));
     }
 
     @Override
@@ -234,7 +234,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         notNullOrBlank(dict, "dict");
         notNullOrEmpty(words, "words");
         doesNotContainNull(words, "words");
-        return LettuceCommand.discarding(() -> async.ftDictadd(dict, words));
+        return discarding(async -> async.ftDictadd(dict, words));
     }
 
     @Override
@@ -246,7 +246,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         notNullOrBlank(dict, "dict");
         notNullOrEmpty(words, "words");
         doesNotContainNull(words, "words");
-        return LettuceCommand.discarding(() -> async.ftDictdel(dict, words));
+        return discarding(async -> async.ftDictdel(dict, words));
     }
 
     @Override
@@ -256,7 +256,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<List<String>, List<String>> _ftDictDump(String dict) {
         notNullOrBlank(dict, "dict");
-        return LettuceCommand.of(() -> async.ftDictdump(dict), AbstractLettuceCommands::decodeList);
+        return command(async -> async.ftDictdump(dict), AbstractLettuceCommands::decodeList);
     }
 
     @Override
@@ -273,7 +273,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         List<Object> tokens = args.toArgs();
         ArgReplay.replay(tokens, commandArgs);
         ResultLayout layout = ResultLayout.of(args, tokens);
-        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_SEARCH, responseOutput(), commandArgs),
+        return command(async -> async.dispatch(CommandType.FT_SEARCH, responseOutput(), commandArgs),
                 reply -> decodeSearchResponse(reply, layout));
     }
 
@@ -286,7 +286,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         notNullOrBlank(index, "index");
         notNullOrBlank(query, "query");
         CommandArgs<byte[], byte[]> commandArgs = commandArgs(index, query);
-        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_SEARCH, responseOutput(), commandArgs),
+        return command(async -> async.dispatch(CommandType.FT_SEARCH, responseOutput(), commandArgs),
                 reply -> decodeSearchResponse(reply, ResultLayout.DEFAULT));
     }
 
@@ -298,7 +298,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<SpellCheckResult, SpellCheckResponse> _ftSpellCheck(String index, String query) {
         notNullOrBlank(index, "index");
         notNullOrBlank(query, "query");
-        return LettuceCommand.of(() -> async.ftSpellcheck(index, query),
+        return command(async -> async.ftSpellcheck(index, query),
                 LettuceReactiveSearchCommandsImpl::decodeSpellCheckResult);
     }
 
@@ -314,7 +314,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         CommandArgs<byte[], byte[]> commandArgs = commandArgs(index, query);
         // toArgs() rejects `includes` combined with `excludes`, before the command is issued
         ArgReplay.replay(args.toArgs(), commandArgs);
-        return LettuceCommand.of(() -> async.dispatch(CommandType.FT_SPELLCHECK,
+        return command(async -> async.dispatch(CommandType.FT_SPELLCHECK,
                 new EncodedComplexOutput<>(ByteArrayCodec.INSTANCE, new SpellCheckResultParser()), commandArgs),
                 LettuceReactiveSearchCommandsImpl::decodeSpellCheckResult);
     }
@@ -326,7 +326,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<Map<String, List<String>>, SynDumpResponse> _ftSynDump(String index) {
         notNullOrBlank(index, "index");
-        return LettuceCommand.of(() -> async.ftSyndump(index), LettuceReactiveSearchCommandsImpl::decodeSynDump);
+        return command(async -> async.ftSyndump(index), LettuceReactiveSearchCommandsImpl::decodeSynDump);
     }
 
     @Override
@@ -339,7 +339,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         notNullOrBlank(groupId, "groupId");
         doesNotContainNull(words, "words");
         notNullOrEmpty(words, "words");
-        return LettuceCommand.discarding(() -> async.ftSynupdate(index, groupId, words));
+        return discarding(async -> async.ftSynupdate(index, groupId, words));
     }
 
     @Override
@@ -353,10 +353,9 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
         doesNotContainNull(words, "words");
         notNullOrEmpty(words, "words");
         if (skipInitialScan) {
-            return LettuceCommand
-                    .discarding(() -> async.ftSynupdate(index, groupId, SynUpdateArgs.Builder.skipInitialScan(), words));
+            return discarding(async -> async.ftSynupdate(index, groupId, SynUpdateArgs.Builder.skipInitialScan(), words));
         }
-        return LettuceCommand.discarding(() -> async.ftSynupdate(index, groupId, words));
+        return discarding(async -> async.ftSynupdate(index, groupId, words));
     }
 
     @Override
@@ -367,7 +366,7 @@ public class LettuceReactiveSearchCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<List<String>, Set<String>> _ftTagVals(String index, String field) {
         notNullOrBlank(index, "index");
         notNullOrBlank(field, "field");
-        return LettuceCommand.of(() -> async.ftTagvals(index, field), AbstractLettuceCommands::decodeSet);
+        return command(async -> async.ftTagvals(index, field), AbstractLettuceCommands::decodeSet);
     }
 
     private static CommandArgs<byte[], byte[]> commandArgs(String... leading) {

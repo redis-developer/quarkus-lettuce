@@ -15,6 +15,7 @@ import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.output.StatusOutput;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandType;
+import io.smallrye.mutiny.Uni;
 
 /**
  * A byte-array connection to a standalone Redis server or to a Redis cluster, as opened by
@@ -35,7 +36,7 @@ import io.lettuce.core.protocol.CommandType;
  * the Vert.x client does, and the pool skips the database reset for cluster connections.</li>
  * </ul>
  */
-public final class LettuceConnection implements AutoCloseable {
+public final class LettuceConnection implements LettuceConnectionSource, AutoCloseable {
 
     /**
      * The message of the failure {@code withTransaction} and the transaction commands raise on a cluster.
@@ -83,9 +84,20 @@ public final class LettuceConnection implements AutoCloseable {
         return async;
     }
 
+    @Override
+    public Uni<LettuceConnection> connect() {
+        return Uni.createFrom().item(this);
+    }
+
+    @Override
+    public LettuceConnection established() {
+        return this;
+    }
+
     /**
      * Whether this connection is to a cluster, where transactions and database selection are not available.
      */
+    @Override
     public boolean isCluster() {
         return standalone == null;
     }

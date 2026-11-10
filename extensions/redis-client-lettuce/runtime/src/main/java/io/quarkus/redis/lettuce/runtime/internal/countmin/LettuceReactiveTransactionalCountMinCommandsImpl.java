@@ -5,7 +5,6 @@ import java.util.Map;
 
 import io.quarkus.redis.datasource.countmin.ReactiveTransactionalCountMinCommands;
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.datasource.LettuceTransactionHolder;
 import io.smallrye.mutiny.Uni;
 
@@ -37,7 +36,7 @@ public class LettuceReactiveTransactionalCountMinCommandsImpl<K, V>
     public Uni<Void> cmsIncrBy(K key, Map<V, Long> couples) {
         // The Vert.x backend records the raw List<Long> of counts in the TransactionResult, not the Map the
         // non-transactional API returns. Keep the validation and encoding, but drop the map-building mapper.
-        return tx.enqueue(LettuceCommand.of(reactive._cmsIncrBy(key, couples).call()));
+        return tx.enqueue(reactive._cmsIncrBy(key, couples).raw());
     }
 
     @Override

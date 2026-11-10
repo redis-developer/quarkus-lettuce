@@ -18,7 +18,6 @@ import io.lettuce.core.Limit;
 import io.lettuce.core.Range;
 import io.lettuce.core.XAutoClaimArgs;
 import io.lettuce.core.XReadArgs.StreamOffset;
-import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.models.stream.PendingMessages;
 import io.lettuce.core.output.StatusOutput;
@@ -41,8 +40,8 @@ import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.redis.datasource.stream.XTrimArgs;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -59,9 +58,9 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
     private final Type fieldType;
 
     public LettuceReactiveStreamCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, LettuceConnectionPool pool, Type keyType,
+            LettuceConnectionSource source, LettuceConnectionPool pool, Type keyType,
             Type fieldType, Type valueType) {
-        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, fieldType, valueType), pool);
+        super(dataSource, source, keyType, valueType, new Marshaller(keyType, fieldType, valueType), pool);
         this.fieldType = fieldType;
     }
 
@@ -75,7 +74,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(group, "group");
         notNullOrEmpty(ids, "ids");
         doesNotContainNull(ids, "ids");
-        return LettuceCommand.of(() -> async.xack(marshaller.encode(key), marshaller.encode(group), ids),
+        return command(async -> async.xack(marshaller.encode(key), marshaller.encode(group), ids),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -98,7 +97,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(args, "args");
         notNullOrEmpty(payload, "payload");
         io.lettuce.core.XAddArgs lettuceArgs = LettuceStreamCommandsConverters.toXAddArgs(args);
-        return LettuceCommand.of(() -> async.xadd(marshaller.encode(key), lettuceArgs, encodeMapWithNullableValues(payload)));
+        return command(async -> async.xadd(marshaller.encode(key), lettuceArgs, encodeMapWithNullableValues(payload)));
     }
 
     @Override
@@ -111,7 +110,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         validateXAutoClaimParams(key, group, consumer, minIdleTime, start);
         XAutoClaimArgs<byte[]> args = XAutoClaimArgs.Builder
                 .xautoclaim(consumer(group, consumer), minIdleTime, start);
-        return LettuceCommand.of(() -> async.xautoclaim(marshaller.encode(key), args), this::decodeClaimedMessages);
+        return command(async -> async.xautoclaim(marshaller.encode(key), args), this::decodeClaimedMessages);
     }
 
     @Override
@@ -127,7 +126,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         XAutoClaimArgs<byte[]> args = XAutoClaimArgs.Builder
                 .xautoclaim(consumer(group, consumer), minIdleTime, start);
         args.count(count);
-        return LettuceCommand.of(() -> async.xautoclaim(marshaller.encode(key), args), this::decodeClaimedMessages);
+        return command(async -> async.xautoclaim(marshaller.encode(key), args), this::decodeClaimedMessages);
     }
 
     @Override
@@ -146,7 +145,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         if (justId) {
             args.justid();
         }
-        return LettuceCommand.of(() -> async.xautoclaim(marshaller.encode(key), args), this::decodeClaimedMessages);
+        return command(async -> async.xautoclaim(marshaller.encode(key), args), this::decodeClaimedMessages);
     }
 
     private void validateXAutoClaimParams(K key, String group, String consumer, Duration minIdleTime, String start) {
@@ -172,7 +171,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         notNullOrEmpty(id, "id");
         doesNotContainNull(id, "id");
         Consumer<byte[]> lettuceConsumer = consumer(group, consumer);
-        return LettuceCommand.of(() -> async.xclaim(marshaller.encode(key), lettuceConsumer, minIdleTime.toMillis(), id),
+        return command(async -> async.xclaim(marshaller.encode(key), lettuceConsumer, minIdleTime.toMillis(), id),
                 this::decodeStreamMessages);
     }
 
@@ -193,7 +192,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         doesNotContainNull(id, "id");
         Consumer<byte[]> lettuceConsumer = consumer(group, consumer);
         io.lettuce.core.XClaimArgs lettuceArgs = LettuceStreamCommandsConverters.toXClaimArgs(args, minIdleTime);
-        return LettuceCommand.of(() -> async.xclaim(marshaller.encode(key), lettuceConsumer, lettuceArgs, id),
+        return command(async -> async.xclaim(marshaller.encode(key), lettuceConsumer, lettuceArgs, id),
                 this::decodeStreamMessages);
     }
 
@@ -206,7 +205,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(key, "key");
         notNullOrEmpty(id, "id");
         doesNotContainNull(id, "id");
-        return LettuceCommand.of(() -> async.xdel(marshaller.encode(key), id), AbstractLettuceCommands::toInteger);
+        return command(async -> async.xdel(marshaller.encode(key), id), AbstractLettuceCommands::toInteger);
     }
 
     @Override
@@ -218,8 +217,8 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(key, "key");
         notNullOrBlank(groupname, "groupname");
         notNullOrBlank(from, "from");
-        return LettuceCommand.discarding(
-                () -> async.xgroupCreate(StreamOffset.from(marshaller.encode(key), from), marshaller.encode(groupname)));
+        return discarding(
+                async -> async.xgroupCreate(StreamOffset.from(marshaller.encode(key), from), marshaller.encode(groupname)));
     }
 
     @Override
@@ -233,7 +232,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         notNullOrBlank(from, "from");
         nonNull(args, "args");
         io.lettuce.core.XGroupCreateArgs lettuceArgs = LettuceStreamCommandsConverters.toXGroupCreateArgs(args);
-        return LettuceCommand.discarding(() -> async.xgroupCreate(StreamOffset.from(marshaller.encode(key), from),
+        return discarding(async -> async.xgroupCreate(StreamOffset.from(marshaller.encode(key), from),
                 marshaller.encode(groupname), lettuceArgs));
     }
 
@@ -247,7 +246,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         notNullOrBlank(groupname, "groupname");
         notNullOrBlank(consumername, "consumername");
         Consumer<byte[]> lettuceConsumer = consumer(groupname, consumername);
-        return LettuceCommand.of(() -> async.xgroupCreateconsumer(marshaller.encode(key), lettuceConsumer));
+        return command(async -> async.xgroupCreateconsumer(marshaller.encode(key), lettuceConsumer));
     }
 
     @Override
@@ -260,7 +259,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         notNullOrBlank(groupname, "groupname");
         notNullOrBlank(consumername, "consumername");
         Consumer<byte[]> lettuceConsumer = consumer(groupname, consumername);
-        return LettuceCommand.of(() -> async.xgroupDelconsumer(marshaller.encode(key), lettuceConsumer));
+        return command(async -> async.xgroupDelconsumer(marshaller.encode(key), lettuceConsumer));
     }
 
     @Override
@@ -271,7 +270,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
     LettuceCommand<Boolean, Boolean> _xgroupDestroy(K key, String groupname) {
         nonNull(key, "key");
         notNullOrBlank(groupname, "groupname");
-        return LettuceCommand.of(() -> async.xgroupDestroy(marshaller.encode(key), marshaller.encode(groupname)));
+        return command(async -> async.xgroupDestroy(marshaller.encode(key), marshaller.encode(groupname)));
     }
 
     @Override
@@ -283,8 +282,8 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(key, "key");
         notNullOrBlank(groupname, "groupname");
         notNullOrBlank(from, "from");
-        return LettuceCommand.discarding(
-                () -> async.xgroupSetid(StreamOffset.from(marshaller.encode(key), from), marshaller.encode(groupname)));
+        return discarding(
+                async -> async.xgroupSetid(StreamOffset.from(marshaller.encode(key), from), marshaller.encode(groupname)));
     }
 
     @Override
@@ -299,8 +298,8 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(args, "args");
         CommandArgs<byte[], byte[]> commandArgs = LettuceStreamCommandsConverters.toXGroupSetIdCommandArgs(
                 marshaller.encode(key), marshaller.encode(groupname), from, args);
-        return LettuceCommand.discarding(
-                () -> async.dispatch(CommandType.XGROUP, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
+        return discarding(
+                async -> async.dispatch(CommandType.XGROUP, new StatusOutput<>(ByteArrayCodec.INSTANCE), commandArgs));
     }
 
     @Override
@@ -310,7 +309,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
 
     LettuceCommand<Long, Long> _xlen(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.xlen(marshaller.encode(key)));
+        return command(async -> async.xlen(marshaller.encode(key)));
     }
 
     @Override
@@ -324,7 +323,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(range, "range");
         positive(count, "count");
         Range<String> lettuceRange = LettuceStreamCommandsConverters.toRange(range);
-        return LettuceCommand.of(() -> async.xrange(marshaller.encode(key), lettuceRange, Limit.from(count)),
+        return command(async -> async.xrange(marshaller.encode(key), lettuceRange, Limit.from(count)),
                 this::decodeStreamMessages);
     }
 
@@ -338,7 +337,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(range, "range");
         Range<String> lettuceRange = LettuceStreamCommandsConverters.toRange(range);
-        return LettuceCommand.of(() -> async.xrange(marshaller.encode(key), lettuceRange), this::decodeStreamMessages);
+        return command(async -> async.xrange(marshaller.encode(key), lettuceRange), this::decodeStreamMessages);
     }
 
     @Override
@@ -351,7 +350,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(key, "key");
         notNullOrBlank(id, "id");
         StreamOffset<byte[]>[] offsets = toStreamOffsets(key, id);
-        return LettuceCommand.of(() -> async.xread(offsets), this::decodeStreamMessages);
+        return command(async -> async.xread(offsets), this::decodeStreamMessages);
     }
 
     @Override
@@ -363,52 +362,42 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
             Map<K, String> lastIdsPerStream) {
         nonNull(lastIdsPerStream, "lastIdsPerStream");
         StreamOffset<byte[]>[] offsets = toStreamOffsets(lastIdsPerStream);
-        return LettuceCommand.of(() -> async.xread(offsets), this::decodeStreamMessages);
+        return command(async -> async.xread(offsets), this::decodeStreamMessages);
     }
 
     @Override
     public Uni<List<StreamMessage<K, F, V>>> xread(K key, String id, XReadArgs args) {
         if (LettuceStreamCommandsConverters.blocks(args)) {
-            return blocking(cmds -> _xread(cmds, key, id, args));
+            return blocking(_xread(key, id, args));
         }
         return _xread(key, id, args).toUni();
     }
 
-    LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xread(K key,
-            String id, XReadArgs args) {
-        return _xread(async, key, id, args);
-    }
-
-    LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xread(
-            RedisClusterAsyncCommands<byte[], byte[]> cmds, K key, String id, XReadArgs args) {
+    LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xread(K key, String id,
+            XReadArgs args) {
         nonNull(key, "key");
         notNullOrBlank(id, "id");
         nonNull(args, "args");
         io.lettuce.core.XReadArgs lettuceArgs = LettuceStreamCommandsConverters.toXReadArgs(args);
         StreamOffset<byte[]>[] offsets = toStreamOffsets(key, id);
-        return LettuceCommand.of(() -> cmds.xread(lettuceArgs, offsets), this::decodeStreamMessages);
+        return command(async -> async.xread(lettuceArgs, offsets), this::decodeStreamMessages);
     }
 
     @Override
     public Uni<List<StreamMessage<K, F, V>>> xread(Map<K, String> lastIdsPerStream, XReadArgs args) {
         if (LettuceStreamCommandsConverters.blocks(args)) {
-            return blocking(cmds -> _xread(cmds, lastIdsPerStream, args));
+            return blocking(_xread(lastIdsPerStream, args));
         }
         return _xread(lastIdsPerStream, args).toUni();
     }
 
     LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xread(
             Map<K, String> lastIdsPerStream, XReadArgs args) {
-        return _xread(async, lastIdsPerStream, args);
-    }
-
-    LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xread(
-            RedisClusterAsyncCommands<byte[], byte[]> cmds, Map<K, String> lastIdsPerStream, XReadArgs args) {
         nonNull(lastIdsPerStream, "lastIdsPerStream");
         nonNull(args, "args");
         io.lettuce.core.XReadArgs lettuceArgs = LettuceStreamCommandsConverters.toXReadArgs(args);
         StreamOffset<byte[]>[] offsets = toStreamOffsets(lastIdsPerStream);
-        return LettuceCommand.of(() -> cmds.xread(lettuceArgs, offsets), this::decodeStreamMessages);
+        return command(async -> async.xread(lettuceArgs, offsets), this::decodeStreamMessages);
     }
 
     @Override
@@ -424,7 +413,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         notNullOrBlank(id, "id");
         Consumer<byte[]> lettuceConsumer = consumer(group, consumer);
         StreamOffset<byte[]>[] offsets = toStreamOffsets(key, id);
-        return LettuceCommand.of(() -> async.xreadgroup(lettuceConsumer, offsets), this::decodeStreamMessages);
+        return command(async -> async.xreadgroup(lettuceConsumer, offsets), this::decodeStreamMessages);
     }
 
     @Override
@@ -439,25 +428,20 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(lastIdsPerStream, "lastIdsPerStream");
         Consumer<byte[]> lettuceConsumer = consumer(group, consumer);
         StreamOffset<byte[]>[] offsets = toStreamOffsets(lastIdsPerStream);
-        return LettuceCommand.of(() -> async.xreadgroup(lettuceConsumer, offsets), this::decodeStreamMessages);
+        return command(async -> async.xreadgroup(lettuceConsumer, offsets), this::decodeStreamMessages);
     }
 
     @Override
     public Uni<List<StreamMessage<K, F, V>>> xreadgroup(String group, String consumer, K key, String id,
             XReadGroupArgs args) {
         if (LettuceStreamCommandsConverters.blocks(args)) {
-            return blocking(cmds -> _xreadgroup(cmds, group, consumer, key, id, args));
+            return blocking(_xreadgroup(group, consumer, key, id, args));
         }
         return _xreadgroup(group, consumer, key, id, args).toUni();
     }
 
-    LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xreadgroup(
-            String group, String consumer, K key, String id, XReadGroupArgs args) {
-        return _xreadgroup(async, group, consumer, key, id, args);
-    }
-
-    LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xreadgroup(
-            RedisClusterAsyncCommands<byte[], byte[]> cmds, String group, String consumer, K key, String id,
+    LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xreadgroup(String group,
+            String consumer, K key, String id,
             XReadGroupArgs args) {
         notNullOrBlank(group, "group");
         notNullOrBlank(consumer, "consumer");
@@ -467,25 +451,20 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         Consumer<byte[]> lettuceConsumer = consumer(group, consumer);
         io.lettuce.core.XReadArgs lettuceArgs = LettuceStreamCommandsConverters.toXReadArgs(args);
         StreamOffset<byte[]>[] offsets = toStreamOffsets(key, id);
-        return LettuceCommand.of(() -> cmds.xreadgroup(lettuceConsumer, lettuceArgs, offsets), this::decodeStreamMessages);
+        return command(async -> async.xreadgroup(lettuceConsumer, lettuceArgs, offsets), this::decodeStreamMessages);
     }
 
     @Override
     public Uni<List<StreamMessage<K, F, V>>> xreadgroup(String group, String consumer, Map<K, String> lastIdsPerStream,
             XReadGroupArgs args) {
         if (LettuceStreamCommandsConverters.blocks(args)) {
-            return blocking(cmds -> _xreadgroup(cmds, group, consumer, lastIdsPerStream, args));
+            return blocking(_xreadgroup(group, consumer, lastIdsPerStream, args));
         }
         return _xreadgroup(group, consumer, lastIdsPerStream, args).toUni();
     }
 
-    LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xreadgroup(
-            String group, String consumer, Map<K, String> lastIdsPerStream, XReadGroupArgs args) {
-        return _xreadgroup(async, group, consumer, lastIdsPerStream, args);
-    }
-
-    LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xreadgroup(
-            RedisClusterAsyncCommands<byte[], byte[]> cmds, String group, String consumer, Map<K, String> lastIdsPerStream,
+    LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> _xreadgroup(String group,
+            String consumer, Map<K, String> lastIdsPerStream,
             XReadGroupArgs args) {
         notNullOrBlank(group, "group");
         notNullOrBlank(consumer, "consumer");
@@ -494,7 +473,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         Consumer<byte[]> lettuceConsumer = consumer(group, consumer);
         io.lettuce.core.XReadArgs lettuceArgs = LettuceStreamCommandsConverters.toXReadArgs(args);
         StreamOffset<byte[]>[] offsets = toStreamOffsets(lastIdsPerStream);
-        return LettuceCommand.of(() -> cmds.xreadgroup(lettuceConsumer, lettuceArgs, offsets), this::decodeStreamMessages);
+        return command(async -> async.xreadgroup(lettuceConsumer, lettuceArgs, offsets), this::decodeStreamMessages);
     }
 
     @Override
@@ -508,7 +487,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(range, "range");
         positive(count, "count");
         Range<String> lettuceRange = LettuceStreamCommandsConverters.toReverseRange(range);
-        return LettuceCommand.of(() -> async.xrevrange(marshaller.encode(key), lettuceRange, Limit.from(count)),
+        return command(async -> async.xrevrange(marshaller.encode(key), lettuceRange, Limit.from(count)),
                 this::decodeStreamMessages);
     }
 
@@ -522,7 +501,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(range, "range");
         Range<String> lettuceRange = LettuceStreamCommandsConverters.toReverseRange(range);
-        return LettuceCommand.of(() -> async.xrevrange(marshaller.encode(key), lettuceRange), this::decodeStreamMessages);
+        return command(async -> async.xrevrange(marshaller.encode(key), lettuceRange), this::decodeStreamMessages);
     }
 
     @Override
@@ -544,7 +523,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(key, "key");
         nonNull(args, "args");
         io.lettuce.core.XTrimArgs lettuceArgs = LettuceStreamCommandsConverters.toXTrimArgs(args);
-        return LettuceCommand.of(() -> async.xtrim(marshaller.encode(key), lettuceArgs));
+        return command(async -> async.xtrim(marshaller.encode(key), lettuceArgs));
     }
 
     @Override
@@ -555,7 +534,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
     LettuceCommand<PendingMessages, XPendingSummary> _xpending(K key, String group) {
         nonNull(key, "key");
         nonNull(group, "group");
-        return LettuceCommand.of(() -> async.xpending(marshaller.encode(key), marshaller.encode(group)),
+        return command(async -> async.xpending(marshaller.encode(key), marshaller.encode(group)),
                 LettuceReactiveStreamCommandsImpl::decodePendingSummary);
     }
 
@@ -577,7 +556,7 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         positive(count, "count");
         io.lettuce.core.XPendingArgs<byte[]> lettuceArgs = LettuceStreamCommandsConverters.toXPendingArgs(
                 marshaller.encode(group), range, count, args);
-        return LettuceCommand.of(() -> async.xpending(marshaller.encode(key), lettuceArgs),
+        return command(async -> async.xpending(marshaller.encode(key), lettuceArgs),
                 LettuceReactiveStreamCommandsImpl::decodePendingMessages);
     }
 

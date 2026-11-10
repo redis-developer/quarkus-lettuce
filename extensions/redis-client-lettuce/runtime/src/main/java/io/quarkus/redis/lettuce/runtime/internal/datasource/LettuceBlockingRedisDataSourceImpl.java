@@ -161,7 +161,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         nonNull(tx, "tx");
         LettuceConnection conn = acquire();
         return releasing(conn, () -> {
-            LettuceTransactionHolder holder = new LettuceTransactionHolder();
+            LettuceTransactionHolder holder = new LettuceTransactionHolder(conn);
             BlockingTransactionalRedisDataSourceImpl source = transactionalSource(conn, holder);
             multi(conn);
             runTxBlock(conn, source, () -> tx.accept(source));
@@ -176,7 +176,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         doesNotContainNull(watchedKeys, "watchedKeys");
         LettuceConnection conn = acquire();
         return releasing(conn, () -> {
-            LettuceTransactionHolder holder = new LettuceTransactionHolder();
+            LettuceTransactionHolder holder = new LettuceTransactionHolder(conn);
             BlockingTransactionalRedisDataSourceImpl source = transactionalSource(conn, holder);
             watch(conn, watchedKeys);
             multi(conn);
@@ -194,7 +194,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         doesNotContainNull(watchedKeys, "watchedKeys");
         LettuceConnection conn = acquire();
         return releasing(conn, () -> {
-            LettuceTransactionHolder holder = new LettuceTransactionHolder();
+            LettuceTransactionHolder holder = new LettuceTransactionHolder(conn);
             LettuceReactiveRedisDataSourceImpl pinnedReactive = reactive.pinnedTo(conn);
             BlockingTransactionalRedisDataSourceImpl source = new BlockingTransactionalRedisDataSourceImpl(
                     new LettuceReactiveTransactionalRedisDataSourceImpl(pinnedReactive, holder), timeout);
@@ -227,10 +227,10 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
      * of {@link LettuceConnection#TRANSACTIONS_NOT_SUPPORTED_ON_CLUSTER}.
      */
     private LettuceConnection acquire() {
-        if (reactive.getConnection().isCluster()) {
+        if (reactive.isCluster()) {
             throw new UnsupportedOperationException(LettuceConnection.TRANSACTIONS_NOT_SUPPORTED_ON_CLUSTER);
         }
-        return pinned ? reactive.getConnection() : reactive.acquireConnection(timeout);
+        return pinned ? reactive.pinnedConnection() : reactive.acquireConnection(timeout);
     }
 
     /**
