@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletionStage;
@@ -175,6 +176,38 @@ public abstract class CommandsTestBase {
             }
         }
         throw new AssertionError("No client with id " + clientId + " in CLIENT LIST");
+    }
+
+    /** The fields of the {@code CLIENT LIST} line of the client {@code clientId}; {@code null} once it is gone. */
+    protected static Map<String, String> clientInfo(long clientId) {
+        for (String line : connection.sync().clientList().split("\n")) {
+            Map<String, String> info = parseClientLine(line);
+            if (String.valueOf(clientId).equals(info.get("id"))) {
+                return info;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * As upstream's {@code TransactionInternalErrorHandlingTest}: no client of the server is in a transaction
+     * ({@code multi=-1}, no {@code x} flag).
+     */
+    protected static void assertNoClientInTransaction() {
+        connection.sync().clientList().lines().forEach(line -> {
+            Map<String, String> info = parseClientLine(line);
+            assertThat(info.getOrDefault("multi", "")).as(line).isEqualTo("-1");
+            assertThat(info.getOrDefault("flags", "")).as(line).doesNotContain("x");
+        });
+    }
+
+    private static Map<String, String> parseClientLine(String line) {
+        Map<String, String> result = new HashMap<>();
+        for (String element : line.split("\\s+")) {
+            String[] parts = element.split("=", 2);
+            result.put(parts[0], parts.length > 1 ? parts[1] : "");
+        }
+        return result;
     }
 
     protected static void assertImmutable(Collection<?> collection) {

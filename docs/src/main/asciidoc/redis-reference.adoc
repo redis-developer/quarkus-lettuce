@@ -1308,6 +1308,7 @@ Ordinary commands share one multiplexed, pipelined connection per client, Lettuc
 Blocking commands (`BLPOP`, `BZPOPMIN` and the other blocking list and sorted set commands, and `XREAD` and `XREADGROUP` when `BLOCK` is set) instead borrow a connection, for their duration, from a bounded pool sized by `quarkus.redis.max-pool-size` (default `6`), with up to `quarkus.redis.max-pool-waiting` (default `24`) additional callers allowed to queue before a further caller fails immediately.
 This keeps a blocked consumer from starving every other command on the same data source.
 `withConnection(...)` and `withTransaction(...)` borrow from the same pool for the duration of the block or transaction, instead of opening a fresh TCP connection per call.
+When the subscriber of such a reactive block or transaction cancels, the connection is closed instead of going back to the pool: a cancelled command may or may not have reached the server, so the connection may still be watching keys, be inside a transaction or have a blocking command pending, and the next caller gets a new one.
 
 Idle pooled connections are recycled as with the Vert.x client: every `quarkus.redis.pool-cleaner-interval` (default `30s`), the connections idle for longer than `quarkus.redis.pool-recycle-timeout` (default `3m`) are closed; a connection in use is never recycled.
 Setting either property to `0` keeps the idle connections open.

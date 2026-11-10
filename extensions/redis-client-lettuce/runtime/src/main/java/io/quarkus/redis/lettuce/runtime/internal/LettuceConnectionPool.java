@@ -22,6 +22,7 @@ import org.jboss.logging.Logger;
 
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.Cancellable;
+import io.smallrye.mutiny.subscription.UniEmitter;
 import io.vertx.core.Context;
 import io.vertx.core.Vertx;
 
@@ -47,6 +48,11 @@ import io.vertx.core.Vertx;
  * before it is next handed out; a borrower is never given a connection on the wrong database.
  * A cluster has a single database, so cluster connections are never marked: a {@code SELECT} is
  * rejected by the server and leaves nothing to reset.
+ * <p>
+ * A connection whose state cannot be restored does not go back: one released inside a transaction or marked broken
+ * (see {@link LettuceConnection#markBroken()}) is closed, and so is the connection of a scope that was cancelled
+ * (see {@link #withScoped(Function)}), as nothing says what the cancelled body left on the server. The next request
+ * opens a fresh connection.
  */
 public final class LettuceConnectionPool {
 
@@ -59,8 +65,6 @@ public final class LettuceConnectionPool {
     private final int defaultDatabase;
     /** Connections whose selected database may differ from {@link #defaultDatabase}. */
     private final Set<LettuceConnection> dirty = ConcurrentHashMap.newKeySet();
-    /** Connections whose state is unknown (a transaction cleanup failed): closed on release instead of being reused. */
-    private final Set<LettuceConnection> broken = ConcurrentHashMap.newKeySet();
 
     /**
      * Serializes "connection available, else queue me" against "anyone queued, else keep the connection
@@ -146,16 +150,6 @@ public final class LettuceConnectionPool {
     }
 
     /**
-     * Records that the state of {@code connection} is unknown, so that it is closed when released instead of being
-     * handed to the next borrower. Called by a transaction whose {@code DISCARD} or {@code UNWATCH} failed: the
-     * server may still hold the transaction or the watch, and a connection in that state would hand a borrower
-     * {@code QUEUED} replies or a spurious abort.
-     */
-    public void markBroken(LettuceConnection connection) {
-        broken.add(connection);
-    }
-
-    /**
      * Blocks until a connection is available or {@code timeout} elapses. On timeout (or interrupt)
      * the request is withdrawn from the queue and a connection that arrives just as the caller
      * gives up is returned to the pool rather than leaked.
@@ -188,11 +182,14 @@ public final class LettuceConnectionPool {
      * Releases a connection back to the pool, handing it straight to the next waiter if any. A
      * connection marked by {@link #markDirty(LettuceConnection)} is first put back on
      * {@link #defaultDatabase}; if that fails it is handed on still marked, and the reset is
-     * retried before the next borrower gets it. A connection released after {@link #close()} is closed.
+     * retried before the next borrower gets it. A connection released after {@link #close()} is closed,
+     * and so is one released inside a transaction or marked {@link LettuceConnection#markBroken() broken}.
      */
     public Uni<Void> release(LettuceConnection connection) {
-        if (broken.remove(connection) || connection.isMulti()) {
-            return discard(connection);
+        if (connection.isBroken() || connection.isMulti()) {
+            LOGGER.warn("Closing a pooled Redis connection released with a transaction left open, or after a "
+                    + "transaction that was cancelled or whose cleanup failed, instead of reusing it");
+            return Uni.createFrom().completionStage(evict(connection));
         }
         if (!dirty.contains(connection)) {
             return handOver(connection);
@@ -206,18 +203,17 @@ public final class LettuceConnectionPool {
     }
 
     /**
-     * Closes a released connection that cannot be reused: one still in a transaction (its borrower did not end it,
-     * or could not) or one marked {@link #markBroken broken}. The next waiter, if any, gets a fresh connection.
+     * Closes a checked-out connection that cannot be reused: one still in a transaction (its borrower did not end it,
+     * or could not), one marked {@link LettuceConnection#markBroken() broken}, or the one of a cancelled scope. The
+     * next waiter, if any, gets a fresh connection.
      */
-    private Uni<Void> discard(LettuceConnection connection) {
-        LOGGER.warn("Closing a pooled Redis connection released with a transaction left open or after a failed "
-                + "transaction cleanup, instead of reusing it");
+    private CompletableFuture<Void> evict(LettuceConnection connection) {
         synchronized (lock) {
             total--;
         }
         CompletableFuture<Void> closing = destroy(connection);
         redrive();
-        return Uni.createFrom().completionStage(closing);
+        return closing;
     }
 
     private Uni<Void> handOver(LettuceConnection connection) {
@@ -266,7 +262,7 @@ public final class LettuceConnectionPool {
     }
 
     private Uni<Void> releaseQuietly(LettuceConnection connection) {
-        return release(connection)
+        return Uni.createFrom().deferred(() -> release(connection))
                 .onFailure().invoke(failure -> LOGGER.warnf(failure,
                         "Failed to release pooled Redis connection back to the pool"))
                 .onFailure().recoverWithNull();
@@ -293,7 +289,6 @@ public final class LettuceConnectionPool {
      */
     private CompletableFuture<Void> destroy(LettuceConnection connection) {
         dirty.remove(connection);
-        broken.remove(connection);
         return connection.closeAsync().exceptionally(failure -> {
             LOGGER.debugf(failure, "Failed to close a pooled Redis connection");
             return null;
@@ -336,10 +331,12 @@ public final class LettuceConnectionPool {
     }
 
     /**
-     * Runs {@code body} on a pooled connection that is scoped to the caller's subscription: the
-     * caller's cancellation is propagated to {@code body}, and the connection is released on any
-     * termination of {@code body} — item, failure or cancellation. This is the shape used by
-     * {@code withConnection} and {@code withTransaction}.
+     * Runs {@code body} on a pooled connection that is scoped to the caller's subscription: the connection is
+     * released once {@code body} ends, with an item or a failure, and the caller's cancellation is propagated to
+     * {@code body}. The connection of a cancelled body is closed instead of being released: a cancelled command may
+     * or may not have reached the server, so the connection may be watching keys, be in a transaction Lettuce no
+     * longer knows about, or have a blocking command pending. This is the shape used by {@code withConnection} and
+     * {@code withTransaction}.
      */
     public <T> Uni<T> withScoped(Function<LettuceConnection, Uni<T>> body) {
         return run(body, true);
@@ -352,35 +349,132 @@ public final class LettuceConnectionPool {
             // LettuceResult.toUni).
             Context context = Vertx.currentContext();
             Request request = new Request();
-            AtomicReference<Cancellable> running = new AtomicReference<>();
-            request.whenComplete((conn, failure) -> {
-                Runnable proceed = () -> {
-                    if (failure != null) {
-                        emitter.fail(failure);
-                        return;
-                    }
-                    Cancellable subscription = Uni.createFrom().deferred(() -> body.apply(conn))
-                            .onTermination().call(() -> releaseQuietly(conn))
-                            .subscribe().with(emitter::complete, emitter::fail);
-                    if (scoped) {
-                        running.set(subscription);
-                    }
-                };
-                if (context == null || !context.isEventLoopContext() || Vertx.currentContext() == context) {
-                    proceed.run();
+            Borrow<T> borrow = new Borrow<>(emitter, context, body, scoped);
+            request.whenComplete((conn, failure) -> onContext(context, () -> {
+                if (failure != null) {
+                    emitter.fail(failure);
                 } else {
-                    context.runOnContext(ignored -> proceed.run());
+                    borrow.start(conn);
                 }
-            });
+            }));
+            // Also called once the outcome is emitted, when neither call has anything left to do. The borrow first:
+            // a connection handed over at this very moment is then returned by start() instead of being used.
             emitter.onTermination(() -> {
+                borrow.callerGone();
                 request.abandon();
-                Cancellable subscription = running.get();
-                if (subscription != null) {
-                    subscription.cancel();
-                }
             });
             request.start();
         });
+    }
+
+    /**
+     * Runs {@code task} on {@code context} when it is an event loop context, at once if the calling thread is on it
+     * already; at once too when there is no such context.
+     */
+    private static void onContext(Context context, Runnable task) {
+        if (context == null || !context.isEventLoopContext() || Vertx.currentContext() == context) {
+            task.run();
+        } else {
+            context.runOnContext(ignored -> task.run());
+        }
+    }
+
+    /** What a {@link Borrow} is doing when its body is not running; while it runs, the state is its {@link Cancellable}. */
+    private enum BorrowState {
+        /** The request has no connection yet. */
+        WAITING,
+        /** The body is being subscribed. */
+        STARTING,
+        /** The body ended and the connection is released, or being released. */
+        SETTLED,
+        /** The caller left: a body not started yet does not start, a scoped body is cancelled. */
+        GONE
+    }
+
+    /**
+     * The connection of one {@link #run}, from the request to its return. The body ending and the caller leaving can
+     * happen in any order and on different threads: this decides, once, how the connection goes back.
+     */
+    private final class Borrow<T> {
+
+        private final UniEmitter<? super T> emitter;
+        private final Context context;
+        private final Function<LettuceConnection, Uni<T>> body;
+        private final boolean scoped;
+        /** A {@link BorrowState}, or the {@link Cancellable} of the running body. */
+        private final AtomicReference<Object> state = new AtomicReference<>(BorrowState.WAITING);
+        private volatile LettuceConnection connection;
+
+        Borrow(UniEmitter<? super T> emitter, Context context, Function<LettuceConnection, Uni<T>> body, boolean scoped) {
+            this.emitter = emitter;
+            this.context = context;
+            this.body = body;
+            this.scoped = scoped;
+        }
+
+        /**
+         * The connection arrived: runs the body on it, unless the caller left in the meantime.
+         */
+        void start(LettuceConnection conn) {
+            connection = conn;
+            if (!state.compareAndSet(BorrowState.WAITING, BorrowState.STARTING)) {
+                // the caller left before the body started: the connection was not used
+                returnToPool(conn);
+                return;
+            }
+            Cancellable running = Uni.createFrom().deferred(() -> body.apply(conn))
+                    .subscribe().with(item -> settle(item, null), failure -> settle(null, failure));
+            if (!state.compareAndSet(BorrowState.STARTING, running) && state.get() == BorrowState.GONE) {
+                // the caller of a scoped body left while the body was being subscribed
+                abandon(running);
+            }
+        }
+
+        /**
+         * The body ended: releases the connection, then emits the outcome on the caller's context.
+         */
+        private void settle(T item, Throwable failure) {
+            if (state.getAndUpdate(s -> s == BorrowState.GONE ? s : BorrowState.SETTLED) == BorrowState.GONE) {
+                // cancelled first: the cancellation closes the connection
+                return;
+            }
+            // Subscribed on its own, so that the caller leaving now does not interrupt the release, which may still
+            // have to reset the database; the outcome is emitted where the caller is, not where the release completed.
+            releaseQuietly(connection).subscribe().with(released -> onContext(context, () -> {
+                if (failure != null) {
+                    emitter.fail(failure);
+                } else {
+                    emitter.complete(item);
+                }
+            }));
+        }
+
+        /**
+         * The caller cancelled, or was given the outcome.
+         */
+        void callerGone() {
+            if (!scoped) {
+                // a body that started runs to its end, and releases the connection then
+                state.compareAndSet(BorrowState.WAITING, BorrowState.GONE);
+                return;
+            }
+            Object previous = state.getAndUpdate(s -> s == BorrowState.SETTLED ? s : BorrowState.GONE);
+            if (previous instanceof Cancellable running) {
+                abandon(running);
+            }
+            // WAITING or STARTING: start() deals with the connection; SETTLED: the body has released it
+        }
+
+        /**
+         * Cancels the body of a scoped borrow, then closes its connection: the body first, so that the connection
+         * leaves the pool only once nothing uses it any more.
+         */
+        private void abandon(Cancellable running) {
+            running.cancel();
+            LOGGER.debug("Closing a pooled Redis connection whose scope was cancelled, instead of reusing it");
+            evict(connection);
+        }
+
     }
 
     /**
