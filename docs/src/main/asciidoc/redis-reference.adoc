@@ -1340,7 +1340,9 @@ Lettuce runs on the Vert.x event loops and owns nothing of them: the shared `Cli
 The timer, the computation executor and the DNS resolver stay Lettuce-owned.
 Blocking calls are rejected on an event loop thread: the blocking data source and the connection pool throw an `IllegalStateException` there, on top of the blocking checker Quarkus installs for Mutiny's `await()`.
 A command completes on the Vert.x context of its caller when the caller runs on an event loop context, the duplicated context of a request included, as with the Vert.x client; without one it completes on the event loop of its connection.
-The Pub/Sub callbacks are re-dispatched to the Vert.x context of the subscriber.
+The Pub/Sub callbacks of a subscriber run on the Vert.x context it subscribed on, in the order the messages arrive, as with the Vert.x client: on that context itself when it is a duplicated context, the one of a request included, and on a new duplicated context of it for each callback otherwise.
+A subscriber without a context, one created at startup for instance, gets an event loop context for its callbacks when it subscribes.
+A subscriber on a worker context gets its callbacks on the worker threads of that context, one at a time, where the Vert.x client runs them on an event loop.
 Lettuce uses the Netty transport Vert.x selected (`quarkus.vertx.native-transport` and `quarkus.vertx.native-transport-type`), io_uring included, so a native transport jar on the class path does not make the two diverge.
 
 == Configure Redis observability
