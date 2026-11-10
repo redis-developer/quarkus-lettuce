@@ -258,7 +258,12 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
         throw groupNotImplemented("timeseries");
     }
 
+    /**
+     * @throws UnsupportedOperationException for a command that takes its connection over, see
+     *         {@link LettuceReactiveRedisDataSourceImpl#rejectIfItTakesTheConnectionOver}
+     */
     private Uni<Void> enqueueRaw(ProtocolKeyword type, CommandArgs<byte[], byte[]> commandArgs) {
+        LettuceReactiveRedisDataSourceImpl.rejectIfItTakesTheConnectionOver(type);
         LettuceVertxResponseOutput<byte[], byte[]> output = new LettuceVertxResponseOutput<>(ByteArrayCodec.INSTANCE);
         return tx.enqueue(LettuceCommand.of(() -> connection.async().dispatch(type, output, commandArgs),
                 ignored -> output.toVertxResponse()));

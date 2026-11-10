@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletionStage;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -45,6 +46,8 @@ import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResu
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
+import io.quarkus.redis.lettuce.runtime.internal.BlockingCommands;
+import io.quarkus.redis.lettuce.runtime.internal.BlockingReads;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
@@ -95,13 +98,18 @@ import tools.jackson.core.type.TypeReference;
  * the next borrower gets it. Blocking commands issued directly on
  * this (non-pinned) data source likewise borrow a pooled connection instead of running on the shared
  * one, so they cannot head-of-line-block ordinary traffic; see {@link LettuceReactiveListCommandsImpl}
- * and {@link io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSortedSetCommandsImpl}.
+ * and {@link io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSortedSetCommandsImpl},
+ * and {@link BlockingCommands} for the ones sent through {@code execute(...)}.
  * Pub/Sub subscriptions open their own connection through {@code pubSubConnector}: a connection in
  * subscribed mode cannot run ordinary commands, so it is neither the shared connection nor pooled.
  * {@code getRedis()} throws {@link UnsupportedOperationException}: it returns a Vert.x-specific type
  * that has no Lettuce equivalent.
  */
 public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSource {
+
+    /** The commands {@code execute(...)} rejects, see {@link #rejectIfItTakesTheConnectionOver}. */
+    private static final Set<String> TAKING_THE_CONNECTION_OVER = Set.of("SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE",
+            "MONITOR");
 
     private final Vertx vertx;
     private final LettuceConnection connection;
@@ -164,22 +172,64 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     @Override
     public Uni<Response> execute(String command, String... args) {
         nonNull(command, "command");
-        return dispatch(resolve(command), rawArgs(CommandMap.getKnownCommand(command), args));
+        ProtocolKeyword type = resolve(command);
+        return dispatch(type, rawArgs(CommandMap.getKnownCommand(command), args), BlockingCommands.blocks(type, args));
     }
 
     @Override
     public Uni<Response> execute(Command command, String... args) {
         nonNull(command, "command");
-        return dispatch(resolve(command.toString()), rawArgs(command, args));
+        ProtocolKeyword type = resolve(command.toString());
+        return dispatch(type, rawArgs(command, args), BlockingCommands.blocks(type, args));
     }
 
-    private Uni<Response> dispatch(ProtocolKeyword type, CommandArgs<byte[], byte[]> commandArgs) {
+    /**
+     * Sends a raw command: on the connection of this data source, or, for a blocking command (see
+     * {@link BlockingCommands}) on a data source that is not pinned, on a connection borrowed from the pool for its
+     * duration, as the typed blocking commands do. On the shared connection it would keep every other command
+     * waiting until it returns.
+     *
+     * @throws UnsupportedOperationException for a command that takes its connection over, see
+     *         {@link #rejectIfItTakesTheConnectionOver}
+     */
+    private Uni<Response> dispatch(ProtocolKeyword type, CommandArgs<byte[], byte[]> commandArgs, boolean blocking) {
+        rejectIfItTakesTheConnectionOver(type);
         if (type == CommandType.SELECT) {
             markDatabaseDirty();
         }
+        if (blocking) {
+            // bounded by its own timeout, not by the command timeout: what the stream arguments do for the typed
+            // XREAD and XREADGROUP (see LettuceConnectionFactory.NonBlockingCommandTimeoutSource)
+            BlockingReads.mark(commandArgs);
+            LettuceConnectionPool blockingPool = blockingPool();
+            if (blockingPool != null) {
+                return blockingPool.withPooled(pooled -> dispatch(pooled, type, commandArgs));
+            }
+        }
+        return dispatch(connection, type, commandArgs);
+    }
+
+    private static Uni<Response> dispatch(LettuceConnection on, ProtocolKeyword type,
+            CommandArgs<byte[], byte[]> commandArgs) {
         LettuceVertxResponseOutput<byte[], byte[]> output = new LettuceVertxResponseOutput<>(ByteArrayCodec.INSTANCE);
-        return LettuceResult.toUni(() -> connection.async().dispatch(type, output, commandArgs))
+        return LettuceResult.toUni(() -> on.async().dispatch(type, output, commandArgs))
                 .map(ignored -> output.toVertxResponse());
+    }
+
+    /**
+     * {@code SUBSCRIBE}, {@code PSUBSCRIBE}, {@code SSUBSCRIBE} and {@code MONITOR} turn their connection into a
+     * stream of messages that no longer answers commands: sent through {@code execute(...)}, they would do that to
+     * the connection every command of the data source shares, or to a pooled one. That holds inside a transaction
+     * too, where the command is queued and takes the pooled connection over when {@code EXEC} runs it.
+     */
+    static void rejectIfItTakesTheConnectionOver(ProtocolKeyword type) {
+        String name = type.toString();
+        if (!TAKING_THE_CONNECTION_OVER.contains(name)) {
+            return;
+        }
+        throw new UnsupportedOperationException("The " + name + " command cannot be sent through execute(...) on the "
+                + "Lettuce backend: it turns its connection into a stream of messages that no longer answers commands."
+                + ("MONITOR".equals(name) ? "" : " Use the pubsub(...) command group to subscribe."));
     }
 
     /**

@@ -5,7 +5,6 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -31,7 +30,7 @@ import io.lettuce.core.cluster.api.StatefulRedisClusterConnection;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.codec.RedisCodec;
 import io.lettuce.core.masterreplica.StatefulRedisMasterReplicaConnection;
-import io.lettuce.core.protocol.CommandType;
+import io.lettuce.core.protocol.ProtocolKeyword;
 import io.lettuce.core.protocol.RedisCommand;
 import io.lettuce.core.protocol.TransactionalCommand;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
@@ -580,13 +579,11 @@ public class LettuceConnectionFactory {
 
     }
 
+    /**
+     * Applies the command timeout to every command but the ones bounded otherwise: the commands of a transaction, and
+     * the blocking commands (see {@link BlockingCommands}), whether typed or sent through {@code execute(...)}.
+     */
     static final class NonBlockingCommandTimeoutSource extends TimeoutOptions.TimeoutSource {
-
-        private static final Set<CommandType> BLOCKING_COMMANDS = Set.of(
-                CommandType.BLPOP, CommandType.BRPOP, CommandType.BLMOVE, CommandType.BLMPOP, CommandType.BRPOPLPUSH,
-                CommandType.BZPOPMIN, CommandType.BZPOPMAX, CommandType.BZMPOP);
-
-        private static final Set<CommandType> OPTIONAL_BLOCKING_COMMANDS = Set.of(CommandType.XREAD, CommandType.XREADGROUP);
 
         private final long timeoutMillis;
 
@@ -599,13 +596,12 @@ public class LettuceConnectionFactory {
             if (command instanceof TransactionalCommand<?, ?, ?>) {
                 return -1; // completes on EXEC, bounded by the EXEC timeout
             }
-            if (command.getType() instanceof CommandType type) {
-                if (BLOCKING_COMMANDS.contains(type)) {
-                    return -1;
-                }
-                if (OPTIONAL_BLOCKING_COMMANDS.contains(type) && BlockingReads.isMarked(command.getArgs())) {
-                    return -1; // bounded by its own BLOCK duration
-                }
+            ProtocolKeyword type = command.getType();
+            if (BlockingCommands.alwaysBlocks(type)) {
+                return -1; // bounded by its own timeout
+            }
+            if (BlockingCommands.blocksWithBlockOption(type) && BlockingReads.isMarked(command.getArgs())) {
+                return -1; // bounded by its own BLOCK duration
             }
             return timeoutMillis;
         }
