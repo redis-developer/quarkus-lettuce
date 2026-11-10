@@ -50,6 +50,17 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void connectionPing() {
+        // the Lettuce connection bean, through Lettuce's own synchronous API
+        RestAssured.given()
+                .when()
+                .get("/lettuce/connection/ping")
+                .then()
+                .statusCode(200)
+                .body(CoreMatchers.is("PONG"));
+    }
+
+    @Test
     public void securePing() {
         RestAssured.given()
                 .when()
