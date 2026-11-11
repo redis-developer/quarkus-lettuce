@@ -65,7 +65,6 @@ import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveTransactio
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveValueCommandsImpl;
 import io.smallrye.mutiny.Uni;
 import io.vertx.redis.client.Command;
-import io.vertx.redis.client.impl.CommandMap;
 
 /**
  * Lettuce-backed implementation of {@link ReactiveTransactionalRedisDataSource}.
@@ -131,7 +130,7 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     public Uni<Void> execute(String command, String... args) {
         nonNull(command, "command");
         return enqueueRaw(LettuceReactiveRedisDataSourceImpl.resolve(command),
-                LettuceReactiveRedisDataSourceImpl.rawArgs(CommandMap.getKnownCommand(command), args));
+                LettuceReactiveRedisDataSourceImpl.rawArgs(LettuceReactiveRedisDataSourceImpl.vertxCommand(command), args));
     }
 
     @Override
