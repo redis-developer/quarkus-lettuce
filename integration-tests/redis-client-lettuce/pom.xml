@@ -74,6 +74,28 @@
             </resource>
         </resources>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>ban-reactor</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>io.projectreactor</exclude>
+                                    </excludes>
+                                    <message>This module tests the Lettuce backend without Project Reactor</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Self-signed server certificate (CN localhost) for the TLS-only Redis server of the docker-redis profile,
                  written to target/certificates in the generate-resources phase, i.e. before the containers are started
                  in the compile phase -->
