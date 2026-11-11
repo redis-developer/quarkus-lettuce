@@ -77,7 +77,6 @@ import io.vertx.mutiny.redis.client.Redis;
 import io.vertx.redis.client.Command;
 import io.vertx.redis.client.Request;
 import io.vertx.redis.client.Response;
-import io.vertx.redis.client.impl.CommandMap;
 import io.vertx.redis.client.impl.RequestImpl;
 import tools.jackson.core.type.TypeReference;
 
@@ -173,7 +172,20 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     public Uni<Response> execute(String command, String... args) {
         nonNull(command, "command");
         ProtocolKeyword type = resolve(command);
-        return dispatch(type, rawArgs(CommandMap.getKnownCommand(command), args), BlockingCommands.blocks(type, args));
+        return dispatch(type, rawArgs(vertxCommand(command), args), BlockingCommands.blocks(type, args));
+    }
+
+    /**
+     * The Vert.x command of that name: the one of its command table, or one without keys for a name it does not know.
+     * <p>
+     * Looked up through {@link Command}, never through the Vert.x {@code CommandMap} behind it. The two classes
+     * initialize each other ({@code Command} looks its constants up in the map, the map is filled from the constants
+     * of {@code Command}), and every user of the Vert.x client enters through {@code Command}. A thread entering
+     * through the map while another one enters through {@code Command} deadlocks both in their class initializers:
+     * on the first raw commands of an application, or in the build of a native image, which then never ends.
+     */
+    static Command vertxCommand(String name) {
+        return Command.create(name);
     }
 
     @Override
