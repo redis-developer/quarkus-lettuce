@@ -7,8 +7,6 @@ import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -237,21 +235,4 @@ class LettuceTransactionInternalErrorHandlingTest extends CommandsTestBase {
                 .replaceWithVoid()).await().atMost(TIMEOUT);
     }
 
-    /** As upstream's test: no client of the server is in a transaction ({@code multi=-1}) or watching ({@code x}). */
-    private static void assertNoClientInTransaction() {
-        connection.sync().clientList().lines().forEach(line -> {
-            Map<String, String> info = parseClientLine(line);
-            assertThat(info.getOrDefault("multi", "")).as(line).isEqualTo("-1");
-            assertThat(info.getOrDefault("flags", "")).as(line).doesNotContain("x");
-        });
-    }
-
-    private static Map<String, String> parseClientLine(String line) {
-        Map<String, String> result = new HashMap<>();
-        for (String element : line.split("\\s+")) {
-            String[] parts = element.split("=", 2);
-            result.put(parts[0], parts.length > 1 ? parts[1] : "");
-        }
-        return result;
-    }
 }

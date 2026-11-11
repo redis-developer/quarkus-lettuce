@@ -49,6 +49,8 @@ public final class LettuceConnection implements AutoCloseable {
     private final RedisClusterAsyncCommands<byte[], byte[]> async;
     /** The standalone command surface, carrying the transaction and database commands; {@code null} on a cluster. */
     private final RedisAsyncCommands<byte[], byte[]> standalone;
+    /** Whether the state of the connection on the server is unknown, see {@link #markBroken()}. */
+    private volatile boolean broken;
 
     private LettuceConnection(StatefulConnection<byte[], byte[]> connection, RedisClusterAsyncCommands<byte[], byte[]> async,
             RedisAsyncCommands<byte[], byte[]> standalone) {
@@ -95,6 +97,24 @@ public final class LettuceConnection implements AutoCloseable {
      */
     public boolean isMulti() {
         return standalone != null && standalone.getStatefulConnection().isMulti();
+    }
+
+    /**
+     * Records that the state of this connection on the server is unknown, so that the pool closes it when it is
+     * released instead of handing it to the next borrower. Called by a transaction whose {@code DISCARD} or
+     * {@code UNWATCH} failed, and by one that was cancelled on a connection it does not own: the server may still hold
+     * the transaction or the watch, and a connection in that state would hand a borrower {@code QUEUED} replies or a
+     * spurious abort. The mark stays for the life of the connection.
+     */
+    public void markBroken() {
+        broken = true;
+    }
+
+    /**
+     * Whether {@link #markBroken()} was called on this connection.
+     */
+    public boolean isBroken() {
+        return broken;
     }
 
     /**

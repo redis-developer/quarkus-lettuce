@@ -61,6 +61,14 @@ class LettuceVertxContextTest extends CommandsTestBase {
     }
 
     @Test
+    void scopedConnectionCompletesOnTheCallersDuplicatedContextAfterItsDatabaseIsReset() throws Exception {
+        // The release puts the connection back on its default database before the outcome is emitted: a round trip
+        // that completes on the event loop of the connection, not on the caller's context.
+        Emission emission = subscribeOnDuplicatedContext(context -> ds.withConnection(scoped -> scoped.select(1)));
+        assertThat(emission.emittedOn()).isSameAs(emission.subscribedOn());
+    }
+
+    @Test
     void transactionCompletesOnTheCallersDuplicatedContext() throws Exception {
         Emission emission = subscribeOnDuplicatedContext(
                 context -> ds.withTransaction(tx -> tx.value(String.class, String.class).set(key, "hello")));

@@ -59,7 +59,6 @@ import io.quarkus.redis.datasource.transactions.TransactionalRedisDataSource;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.quarkus.redis.runtime.datasource.BlockingAutoSuggestCommandsImpl;
 import io.quarkus.redis.runtime.datasource.BlockingBitmapCommandsImpl;
@@ -339,10 +338,7 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
             LettuceResult.toBlocking(command.get(), timeout);
         } catch (RuntimeException | Error e) {
             failure.addSuppressed(e);
-            LettuceConnectionPool pool = reactive.getPool();
-            if (pool != null) {
-                pool.markBroken(conn);
-            }
+            conn.markBroken();
         }
     }
 

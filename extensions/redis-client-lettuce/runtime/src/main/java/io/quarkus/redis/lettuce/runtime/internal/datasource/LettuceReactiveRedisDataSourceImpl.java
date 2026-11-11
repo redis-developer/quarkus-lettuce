@@ -361,9 +361,13 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * Runs {@code body} on a transaction-scoped connection. When this data source is already
      * pinned (nested inside {@code withConnection}), the pinned connection is reused and left
      * open for the outer scope to release. Otherwise, a connection is borrowed from the pool and
-     * released on every termination path. On a cluster there is no transaction to run: the
-     * returned {@code Uni} fails at once, before any connection is borrowed, with the message
-     * of {@link LettuceConnection#TRANSACTIONS_NOT_SUPPORTED_ON_CLUSTER}.
+     * released when the transaction ends, or closed when it is cancelled (see
+     * {@link LettuceConnectionPool#withScoped}): the steps of a transaction undo themselves when they
+     * fail, but nothing runs after a cancellation, which may leave the connection watching keys or in
+     * a transaction. A transaction cancelled on a pinned connection marks it broken for the same
+     * reason, so that the outer scope closes it instead of releasing it. On a cluster there is no
+     * transaction to run: the returned {@code Uni} fails at once, before any connection is borrowed,
+     * with the message of {@link LettuceConnection#TRANSACTIONS_NOT_SUPPORTED_ON_CLUSTER}.
      */
     private <T> Uni<T> withTxConnection(Function<LettuceConnection, Uni<T>> body) {
         if (connection.isCluster()) {
@@ -371,7 +375,8 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                     .failure(new UnsupportedOperationException(LettuceConnection.TRANSACTIONS_NOT_SUPPORTED_ON_CLUSTER));
         }
         if (pinned) {
-            return Uni.createFrom().deferred(() -> body.apply(connection));
+            return Uni.createFrom().deferred(() -> body.apply(connection))
+                    .onCancellation().invoke(connection::markBroken);
         }
         return pool.withScoped(body);
     }
@@ -460,9 +465,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
                 .onItemOrFailure().transformToUni((r, f) -> {
                     if (f != null) {
                         failure.addSuppressed(f);
-                        if (pool != null) {
-                            pool.markBroken(conn);
-                        }
+                        conn.markBroken();
                     }
                     return Uni.createFrom().failure(failure);
                 });
