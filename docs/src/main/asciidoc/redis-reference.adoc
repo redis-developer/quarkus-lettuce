@@ -1307,6 +1307,8 @@ This is transitional; a Lettuce-based health check, metrics and tracing are plan
 Ordinary commands share one multiplexed, pipelined connection per client, Lettuce's intended design.
 Blocking commands (`BLPOP`, `BZPOPMIN` and the other blocking list and sorted set commands, and `XREAD` and `XREADGROUP` when `BLOCK` is set) instead borrow a connection, for their duration, from a bounded pool sized by `quarkus.redis.max-pool-size` (default `6`), with up to `quarkus.redis.max-pool-waiting` (default `24`) additional callers allowed to queue before a further caller fails immediately.
 This keeps a blocked consumer from starving every other command on the same data source.
+The same holds when one of these commands is sent through `execute(...)`.
+`SUBSCRIBE`, `PSUBSCRIBE`, `SSUBSCRIBE` and `MONITOR` are rejected by `execute(...)` with an `UnsupportedOperationException`: they turn their connection into a stream of messages that no longer answers commands; use the `pubsub` group to subscribe.
 `withConnection(...)` and `withTransaction(...)` borrow from the same pool for the duration of the block or transaction, instead of opening a fresh TCP connection per call.
 
 Idle pooled connections are recycled as with the Vert.x client: every `quarkus.redis.pool-cleaner-interval` (default `30s`), the connections idle for longer than `quarkus.redis.pool-recycle-timeout` (default `3m`) are closed; a connection in use is never recycled.

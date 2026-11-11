@@ -100,6 +100,17 @@ class LettuceCommandTimeoutIntegrationTest extends CommandsTestBase {
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(block.minusMillis(50));
     }
 
+    @Test
+    void rawBlockingStreamReadOutlivingTheCommandTimeoutStillCompletes() {
+        // Sent through execute(...), XREAD with BLOCK is the same blocking command: bounded by its BLOCK duration,
+        // not by the command timeout.
+        Duration block = COMMAND_TIMEOUT.multipliedBy(2);
+
+        long start = System.nanoTime();
+        assertThat(ds.execute("XREAD", "BLOCK", String.valueOf(block.toMillis()), "STREAMS", key, "$")).isNull();
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(block.minusMillis(50));
+    }
+
     private static void sleep(Duration duration) {
         try {
             Thread.sleep(duration.toMillis());
