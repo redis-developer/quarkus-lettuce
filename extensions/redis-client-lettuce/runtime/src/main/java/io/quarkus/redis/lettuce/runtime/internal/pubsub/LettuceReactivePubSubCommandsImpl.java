@@ -13,6 +13,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -132,7 +133,8 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
         nonNull(onMessage, "onMessage");
 
         List<String> subscribed = List.copyOf(patterns);
-        return open(conn -> new ReactiveLettucePatternSubscriber(conn, subscribed, onMessage, onEnd, onException));
+        return open((conn, context) -> new ReactiveLettucePatternSubscriber(conn, context, subscribed, onMessage, onEnd,
+                onException));
     }
 
     @Override
@@ -149,7 +151,8 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
         nonNull(onMessage, "onMessage");
 
         List<String> subscribed = List.copyOf(channels);
-        return open(conn -> new ReactiveLettuceChannelSubscriber(conn, subscribed, onMessage, onEnd, onException));
+        return open((conn, context) -> new ReactiveLettuceChannelSubscriber(conn, context, subscribed, onMessage, onEnd,
+                onException));
     }
 
     private static void validateCollection(Collection<String> col, String name) {
@@ -166,12 +169,17 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
     }
 
     private Uni<ReactiveRedisSubscriber> open(
-            Function<StatefulRedisPubSubConnection<byte[], byte[]>, AbstractReactiveLettuceSubscriber> factory) {
+            BiFunction<StatefulRedisPubSubConnection<byte[], byte[]>, Context, AbstractReactiveLettuceSubscriber> factory) {
         return Uni.createFrom().deferred(() -> establish(factory));
     }
 
     private Uni<ReactiveRedisSubscriber> establish(
-            Function<StatefulRedisPubSubConnection<byte[], byte[]>, AbstractReactiveLettuceSubscriber> factory) {
+            BiFunction<StatefulRedisPubSubConnection<byte[], byte[]>, Context, AbstractReactiveLettuceSubscriber> factory) {
+        // Called when the subscription is made, on the thread making it: the callbacks of the subscriber run on the
+        // Vert.x context current here, or on one created now for a subscriber that has none (the main thread at
+        // startup, for instance), as the Vert.x client runs them on the context of the connection the subscriber opens.
+        // The Lettuce connection completes on an event loop thread, where the subscriber's context is not to be found.
+        Context subscriberContext = vertx.getDelegate().getOrCreateContext();
         AtomicBoolean cancelled = new AtomicBoolean();
         AtomicReference<AbstractReactiveLettuceSubscriber> opened = new AtomicReference<>();
         Uni<ReactiveRedisSubscriber> establishing = LettuceResult.toUni(() -> {
@@ -185,7 +193,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
                 // connection closed, by hand.
                 AbstractReactiveLettuceSubscriber subscriber;
                 try {
-                    subscriber = factory.apply(conn);
+                    subscriber = factory.apply(conn, subscriberContext);
                 } catch (RuntimeException e) {
                     conn.closeAsync();
                     result.completeExceptionally(e);
@@ -271,6 +279,11 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
     private abstract class AbstractReactiveLettuceSubscriber implements ReactiveRedisSubscriber {
 
         final StatefulRedisPubSubConnection<byte[], byte[]> connection;
+        /**
+         * The Vert.x context the callbacks run on: the one that was current when the subscription was made, or the
+         * event loop context created then for a subscriber that had none.
+         */
+        private final Context context;
         final List<String> names;
         final BiConsumer<String, V> onMessage;
         final Runnable onEnd;
@@ -299,14 +312,19 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
             @Override
             public void onRedisExceptionCaught(RedisChannelHandler<?, ?> handler, Throwable cause) {
                 if (onException != null) {
-                    runOnDuplicatedContext(() -> onException.accept(cause));
+                    runOnSubscriberContext(() -> onException.accept(cause));
                 }
             }
         };
 
-        AbstractReactiveLettuceSubscriber(StatefulRedisPubSubConnection<byte[], byte[]> connection, List<String> names,
-                BiConsumer<String, V> onMessage, Runnable onEnd, Consumer<Throwable> onException) {
+        /**
+         * @param subscriberContext the Vert.x context of the subscriber, see {@link #context}
+         */
+        AbstractReactiveLettuceSubscriber(StatefulRedisPubSubConnection<byte[], byte[]> connection,
+                Context subscriberContext, List<String> names, BiConsumer<String, V> onMessage, Runnable onEnd,
+                Consumer<Throwable> onException) {
             this.connection = connection;
+            this.context = subscriberContext;
             this.names = new CopyOnWriteArrayList<>(names);
             this.onMessage = onMessage;
             this.onEnd = onEnd;
@@ -317,10 +335,18 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
             return names.stream().map(marshaller::encode).toArray(byte[][]::new);
         }
 
-        private void runOnDuplicatedContext(Runnable runnable) {
-            Context context = VertxContext.getOrCreateDuplicatedContext(vertx.getDelegate());
-            VertxContextSafetyToggle.setContextSafe(context, true);
-            context.runOnContext(ignored -> runnable.run());
+        /**
+         * Runs a callback of this subscriber on its Vert.x context, as the Vert.x client runs it on the context of the
+         * connection the subscriber opened: on the subscriber's context itself when it is a duplicated context (the
+         * one of the request that subscribed, with its locals), else on a new duplicated context of it, so that two
+         * callbacks do not share their locals. Lettuce calls from the event loop of the connection, where no context
+         * is current; the subscriber's context runs every callback, one at a time, on its event loop or, for a worker
+         * context, on its worker threads, so they keep the order of the messages.
+         */
+        private void runOnSubscriberContext(Runnable runnable) {
+            Context duplicated = VertxContext.getOrCreateDuplicatedContext(context);
+            VertxContextSafetyToggle.setContextSafe(duplicated, true);
+            duplicated.runOnContext(ignored -> runnable.run());
         }
 
         abstract String kind();
@@ -348,7 +374,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
                 names.clear();
                 connection.closeAsync();
                 if (onEnd != null) {
-                    runOnDuplicatedContext(onEnd);
+                    runOnSubscriberContext(onEnd);
                 }
             }
         }
@@ -359,7 +385,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
         }
 
         void deliver(byte[] channel, byte[] payload) {
-            runOnDuplicatedContext(() -> {
+            runOnSubscriberContext(() -> {
                 V value;
                 try {
                     value = decodeValue(payload);
@@ -409,7 +435,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
             removeListeners();
             return LettuceResult.toUni(connection::closeAsync).replaceWithVoid().invoke(() -> {
                 if (onEnd != null) {
-                    runOnDuplicatedContext(onEnd);
+                    runOnSubscriberContext(onEnd);
                 }
             });
         }
@@ -418,9 +444,10 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
 
     private class ReactiveLettuceChannelSubscriber extends AbstractReactiveLettuceSubscriber {
 
-        ReactiveLettuceChannelSubscriber(StatefulRedisPubSubConnection<byte[], byte[]> connection, List<String> channels,
-                BiConsumer<String, V> onMessage, Runnable onEnd, Consumer<Throwable> onException) {
-            super(connection, channels, onMessage, onEnd, onException);
+        ReactiveLettuceChannelSubscriber(StatefulRedisPubSubConnection<byte[], byte[]> connection,
+                Context subscriberContext, List<String> channels, BiConsumer<String, V> onMessage, Runnable onEnd,
+                Consumer<Throwable> onException) {
+            super(connection, subscriberContext, channels, onMessage, onEnd, onException);
         }
 
         @Override
@@ -442,9 +469,10 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
 
     private class ReactiveLettucePatternSubscriber extends AbstractReactiveLettuceSubscriber {
 
-        ReactiveLettucePatternSubscriber(StatefulRedisPubSubConnection<byte[], byte[]> connection, List<String> patterns,
-                BiConsumer<String, V> onMessage, Runnable onEnd, Consumer<Throwable> onException) {
-            super(connection, patterns, onMessage, onEnd, onException);
+        ReactiveLettucePatternSubscriber(StatefulRedisPubSubConnection<byte[], byte[]> connection,
+                Context subscriberContext, List<String> patterns, BiConsumer<String, V> onMessage, Runnable onEnd,
+                Consumer<Throwable> onException) {
+            super(connection, subscriberContext, patterns, onMessage, onEnd, onException);
         }
 
         @Override
