@@ -7,9 +7,9 @@ import java.util.function.Function;
 
 import io.lettuce.core.ScanArgs;
 import io.lettuce.core.ScanCursor;
-import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.quarkus.redis.datasource.set.ReactiveSScanCursor;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractReactiveScanCursor;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
@@ -19,14 +19,14 @@ public class LettuceReactiveSScanCursorImpl<V> extends AbstractReactiveScanCurso
     private final byte[] key;
     private final Function<List<byte[]>, List<V>> decoder;
 
-    public LettuceReactiveSScanCursorImpl(RedisClusterAsyncCommands<byte[], byte[]> set, byte[] key,
+    public LettuceReactiveSScanCursorImpl(LettuceConnectionSource source, byte[] key,
             Function<List<byte[]>, List<V>> decoder) {
-        this(set, key, new ScanArgs(), decoder);
+        this(source, key, new ScanArgs(), decoder);
     }
 
-    public LettuceReactiveSScanCursorImpl(RedisClusterAsyncCommands<byte[], byte[]> async, byte[] key, ScanArgs scanArgs,
+    public LettuceReactiveSScanCursorImpl(LettuceConnectionSource source, byte[] key, ScanArgs scanArgs,
             Function<List<byte[]>, List<V>> decoder) {
-        super(async, scanArgs);
+        super(source, scanArgs);
         nonNull(key, "key");
         nonNull(decoder, "decoder");
         this.key = key;
@@ -37,7 +37,7 @@ public class LettuceReactiveSScanCursorImpl<V> extends AbstractReactiveScanCurso
     public Uni<List<V>> next() {
         // Reset cursor when finished to copy Vert.x behavior.
         final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
-        return LettuceResult.toUni(() -> async.sscan(key, current, scanArgs))
+        return LettuceResult.toUni(source, connection -> connection.async().sscan(key, current, scanArgs))
                 .invoke(vc -> this.cursor = vc)
                 .map(vc -> decoder.apply(vc.getValues()));
     }

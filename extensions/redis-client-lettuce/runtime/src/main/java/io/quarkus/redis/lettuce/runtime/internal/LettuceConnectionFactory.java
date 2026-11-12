@@ -229,7 +229,8 @@ public class LettuceConnectionFactory {
     /**
      * Opens a new connection using the {@link ByteArrayCodec} codec: to the server, to the master and its replicas,
      * or to the cluster. {@link #connectAsync()} awaited, as Lettuce's own blocking {@code connect} methods await
-     * their asynchronous counterparts; a connection is opened this way at startup, on the main thread. An event loop
+     * their asynchronous counterparts; the connection of the Lettuce connection beans is opened this way at startup, on
+     * the main thread (see {@link #connect(RedisCodec)}), the one of the data sources by their first command. An event loop
      * thread must use {@link #connectAsync()}: the await fails fast there instead of blocking the loop.
      *
      * @return a new {@link LettuceConnection}
@@ -318,6 +319,13 @@ public class LettuceConnectionFactory {
      */
     public int getDatabase() {
         return topology.database();
+    }
+
+    /**
+     * Whether the connections of this factory are to a cluster.
+     */
+    public boolean isCluster() {
+        return topology instanceof Cluster;
     }
 
     /**

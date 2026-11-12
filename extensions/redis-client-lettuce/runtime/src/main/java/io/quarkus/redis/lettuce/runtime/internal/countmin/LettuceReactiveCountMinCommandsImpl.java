@@ -16,7 +16,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.countmin.ReactiveCountMinCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -24,8 +24,8 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
         implements ReactiveCountMinCommands<K, V> {
 
     public LettuceReactiveCountMinCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType, Type valueType) {
-        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, valueType));
+            LettuceConnectionSource source, Type keyType, Type valueType) {
+        super(dataSource, source, keyType, valueType, new Marshaller(keyType, valueType));
     }
 
     @Override
@@ -37,7 +37,7 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
         nonNull(key, "key");
         nonNull(value, "value");
         IncrementPair<byte[]> pair = new IncrementPair<>(marshaller.encode(value), increment);
-        return LettuceCommand.of(() -> async.cmsIncrBy(marshaller.encode(key), pair), List::getFirst);
+        return command(async -> async.cmsIncrBy(marshaller.encode(key), pair), List::getFirst);
     }
 
     @Override
@@ -49,13 +49,13 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
         nonNull(key, "key");
         nonNull(couples, "couples");
         if (couples.isEmpty()) {
-            return LettuceCommand.failing(new IllegalArgumentException("`couples` must not be empty"));
+            return failing(new IllegalArgumentException("`couples` must not be empty"));
         }
         // CMS.INCRBY replies with one count per pair, in the order the pairs were sent. Snapshot the keys in that
         // same iteration order so the reply can be zipped back into a map even if the caller's map changes later.
         List<V> values = new ArrayList<>(couples.keySet());
         IncrementPair<byte[]>[] pairs = encodeCouples(couples);
-        return LettuceCommand.of(() -> async.cmsIncrBy(marshaller.encode(key), pairs),
+        return command(async -> async.cmsIncrBy(marshaller.encode(key), pairs),
                 counts -> zip(values, counts, Function.identity()));
     }
 
@@ -66,7 +66,7 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
 
     LettuceCommand<String, Void> _cmsInitByDim(K key, long width, long depth) {
         nonNull(key, "key");
-        return LettuceCommand.discarding(() -> async.cmsInitByDim(marshaller.encode(key), width, depth));
+        return discarding(async -> async.cmsInitByDim(marshaller.encode(key), width, depth));
     }
 
     @Override
@@ -76,7 +76,7 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
 
     LettuceCommand<String, Void> _cmsInitByProb(K key, double error, double probability) {
         nonNull(key, "key");
-        return LettuceCommand.discarding(() -> async.cmsInitByProb(marshaller.encode(key), error, probability));
+        return discarding(async -> async.cmsInitByProb(marshaller.encode(key), error, probability));
     }
 
     @Override
@@ -87,7 +87,7 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
     LettuceCommand<List<Long>, Long> _cmsQuery(K key, V item) {
         nonNull(key, "key");
         nonNull(item, "item");
-        return LettuceCommand.of(() -> async.cmsQuery(marshaller.encode(key), marshaller.encode(item)),
+        return command(async -> async.cmsQuery(marshaller.encode(key), marshaller.encode(item)),
                 List::getFirst);
     }
 
@@ -102,9 +102,9 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
         nonNull(key, "key");
         doesNotContainNull(items, "items");
         if (items.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`items` must not be empty"));
+            return failing(new IllegalArgumentException("`items` must not be empty"));
         }
-        return LettuceCommand.of(() -> async.cmsQuery(marshaller.encode(key), marshaller.encodeAsArray(items)),
+        return command(async -> async.cmsQuery(marshaller.encode(key), marshaller.encodeAsArray(items)),
                 AbstractLettuceCommands::decodeList);
     }
 
@@ -119,16 +119,16 @@ public class LettuceReactiveCountMinCommandsImpl<K, V> extends AbstractLettuceCo
         isNotEmpty(src, "src");
         if (weight == null || weight.isEmpty()) {
             byte[][] sources = src.stream().map(marshaller::encode).toArray(byte[][]::new);
-            return LettuceCommand.discarding(() -> async.cmsMerge(marshaller.encode(dest), sources));
+            return discarding(async -> async.cmsMerge(marshaller.encode(dest), sources));
         }
         doesNotContainNull(weight, "weight");
         if (weight.size() != src.size()) {
-            return LettuceCommand.failing(new IllegalArgumentException(
+            return failing(new IllegalArgumentException(
                     "`weight` must contain exactly one weight per source sketch (" + src.size() + " expected, "
                             + weight.size() + " given)"));
         }
         MergePair<byte[]>[] pairs = encodeMergePairs(src, weight);
-        return LettuceCommand.discarding(() -> async.cmsMerge(marshaller.encode(dest), pairs));
+        return discarding(async -> async.cmsMerge(marshaller.encode(dest), pairs));
     }
 
     @SuppressWarnings("unchecked")

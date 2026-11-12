@@ -4,19 +4,18 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 
 import io.lettuce.core.ScanArgs;
 import io.lettuce.core.ScanCursor;
-import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.quarkus.redis.datasource.ReactiveCursor;
 
 public abstract class AbstractReactiveScanCursor<T> implements ReactiveCursor<T> {
 
-    protected final RedisClusterAsyncCommands<byte[], byte[]> async;
+    protected final LettuceConnectionSource source;
     protected final ScanArgs scanArgs;
     protected ScanCursor cursor = ScanCursor.INITIAL;
 
-    protected AbstractReactiveScanCursor(RedisClusterAsyncCommands<byte[], byte[]> async, ScanArgs scanArgs) {
-        nonNull(async, "async");
+    protected AbstractReactiveScanCursor(LettuceConnectionSource source, ScanArgs scanArgs) {
+        nonNull(source, "source");
         nonNull(scanArgs, "scanArgs");
-        this.async = async;
+        this.source = source;
         this.scanArgs = scanArgs;
     }
 

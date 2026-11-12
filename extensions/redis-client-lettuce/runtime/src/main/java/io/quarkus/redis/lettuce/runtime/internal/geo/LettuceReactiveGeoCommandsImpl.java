@@ -36,7 +36,7 @@ import io.quarkus.redis.datasource.geo.GeoValue;
 import io.quarkus.redis.datasource.geo.ReactiveGeoCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -49,8 +49,8 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
     private final Codec valueCodec;
 
     public LettuceReactiveGeoCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType, Type valueType) {
-        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, valueType));
+            LettuceConnectionSource source, Type keyType, Type valueType) {
+        super(dataSource, source, keyType, valueType, new Marshaller(keyType, valueType));
         this.keyCodec = Codecs.getDefaultCodecFor(keyType);
         this.valueCodec = Codecs.getDefaultCodecFor(valueType);
     }
@@ -83,8 +83,8 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(key, "key");
         notNullOrEmpty(items, "items");
         doesNotContainNull(items, "items");
-        return LettuceCommand.of(
-                () -> async.geoadd(marshaller.encode(key), LettuceGeoCommandsConverters.toGeoValues(items, marshaller)),
+        return command(
+                async -> async.geoadd(marshaller.encode(key), LettuceGeoCommandsConverters.toGeoValues(items, marshaller)),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -100,7 +100,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         validateLongitude(longitude);
         validateLatitude(latitude);
         io.lettuce.core.GeoAddArgs lettuceArgs = LettuceGeoCommandsConverters.toGeoAddArgs(args);
-        return LettuceCommand.of(() -> async.geoadd(marshaller.encode(key), longitude, latitude, marshaller.encode(member),
+        return command(async -> async.geoadd(marshaller.encode(key), longitude, latitude, marshaller.encode(member),
                 lettuceArgs), AbstractLettuceCommands::toBoolean);
     }
 
@@ -123,8 +123,8 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         doesNotContainNull(items, "items");
         nonNull(args, "args");
         io.lettuce.core.GeoAddArgs lettuceArgs = LettuceGeoCommandsConverters.toGeoAddArgs(args);
-        return LettuceCommand.of(
-                () -> async.geoadd(marshaller.encode(key), lettuceArgs,
+        return command(
+                async -> async.geoadd(marshaller.encode(key), lettuceArgs,
                         LettuceGeoCommandsConverters.toGeoValues(items, marshaller)),
                 AbstractLettuceCommands::toInteger);
     }
@@ -139,7 +139,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(from, "from");
         nonNull(to, "to");
         nonNull(unit, "unit");
-        return LettuceCommand.of(() -> async.geodist(marshaller.encode(key), marshaller.encode(from), marshaller.encode(to),
+        return command(async -> async.geodist(marshaller.encode(key), marshaller.encode(from), marshaller.encode(to),
                 LettuceGeoCommandsConverters.toUnit(unit)));
     }
 
@@ -154,7 +154,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(key, "key");
         notNullOrEmpty(members, "members");
         doesNotContainNull(members, "members");
-        return LettuceCommand.of(() -> async.geohash(marshaller.encode(key), marshaller.encodeAsArray(members)),
+        return command(async -> async.geohash(marshaller.encode(key), marshaller.encodeAsArray(members)),
                 it -> decodeList(it, hash -> hash.hasValue() ? hash.getValue() : null));
     }
 
@@ -169,7 +169,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(key, "key");
         notNullOrEmpty(members, "members");
         doesNotContainNull(members, "members");
-        return LettuceCommand.of(() -> async.geopos(marshaller.encode(key), marshaller.encodeAsArray(members)),
+        return command(async -> async.geopos(marshaller.encode(key), marshaller.encodeAsArray(members)),
                 it -> decodeList(it, LettuceGeoCommandsConverters::toGeoPosition));
     }
 
@@ -184,7 +184,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         validateLongitude(longitude);
         validateLatitude(latitude);
         nonNull(unit, "unit");
-        return LettuceCommand.of(() -> async.georadius(marshaller.encode(key), longitude, latitude, radius,
+        return command(async -> async.georadius(marshaller.encode(key), longitude, latitude, radius,
                 LettuceGeoCommandsConverters.toUnit(unit)), this::decodeSetOfValues);
     }
 
@@ -209,7 +209,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(unit, "unit");
         nonNull(geoArgs, "geoArgs");
         GeoArgs lettuceArgs = LettuceGeoCommandsConverters.toGeoArgs(geoArgs);
-        return LettuceCommand.of(() -> async.georadius(marshaller.encode(key), longitude, latitude, radius,
+        return command(async -> async.georadius(marshaller.encode(key), longitude, latitude, radius,
                 LettuceGeoCommandsConverters.toUnit(unit), lettuceArgs), this::decodeGeoValues);
     }
 
@@ -235,7 +235,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(geoArgs, "geoArgs");
         CommandArgs<byte[], byte[]> args = LettuceGeoCommandsConverters.toGeoRadiusStoreCommandArgs(marshaller.encode(key),
                 longitude, latitude, radius, unit, geoArgs, keyCodec);
-        return LettuceCommand.of(() -> async.dispatch(CommandType.GEORADIUS, new IntegerOutput<>(ByteArrayCodec.INSTANCE),
+        return command(async -> async.dispatch(CommandType.GEORADIUS, new IntegerOutput<>(ByteArrayCodec.INSTANCE),
                 args));
     }
 
@@ -255,7 +255,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(member, "member");
         positive(distance, "distance");
         nonNull(unit, "unit");
-        return LettuceCommand.of(() -> async.georadiusbymember(marshaller.encode(key), marshaller.encode(member), distance,
+        return command(async -> async.georadiusbymember(marshaller.encode(key), marshaller.encode(member), distance,
                 LettuceGeoCommandsConverters.toUnit(unit)), this::decodeSetOfValues);
     }
 
@@ -272,7 +272,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(unit, "unit");
         nonNull(geoArgs, "geoArgs");
         GeoArgs lettuceArgs = LettuceGeoCommandsConverters.toGeoArgs(geoArgs);
-        return LettuceCommand.of(() -> async.georadiusbymember(marshaller.encode(key), marshaller.encode(member), distance,
+        return command(async -> async.georadiusbymember(marshaller.encode(key), marshaller.encode(member), distance,
                 LettuceGeoCommandsConverters.toUnit(unit), lettuceArgs), this::decodeGeoValues);
     }
 
@@ -290,7 +290,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(geoArgs, "geoArgs");
         CommandArgs<byte[], byte[]> args = LettuceGeoCommandsConverters.toGeoRadiusByMemberStoreCommandArgs(
                 marshaller.encode(key), marshaller.encode(member), distance, unit, geoArgs, keyCodec);
-        return LettuceCommand.of(() -> async.dispatch(CommandType.GEORADIUSBYMEMBER,
+        return command(async -> async.dispatch(CommandType.GEORADIUSBYMEMBER,
                 new IntegerOutput<>(ByteArrayCodec.INSTANCE), args));
     }
 
@@ -304,8 +304,8 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(geoArgs, "geoArgs");
         CommandArgs<byte[], byte[]> args = LettuceGeoCommandsConverters.toGeoSearchCommandArgs(marshaller.encode(key),
                 geoArgs, valueCodec);
-        return LettuceCommand.of(
-                () -> async.dispatch(CommandType.GEOSEARCH, LettuceGeoCommandsConverters.toGeoWithinOutput(geoArgs), args),
+        return command(
+                async -> async.dispatch(CommandType.GEOSEARCH, LettuceGeoCommandsConverters.toGeoWithinOutput(geoArgs), args),
                 this::decodeGeoValues);
     }
 
@@ -320,7 +320,7 @@ public class LettuceReactiveGeoCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(geoArgs, "geoArgs");
         CommandArgs<byte[], byte[]> args = LettuceGeoCommandsConverters.toGeoSearchStoreCommandArgs(
                 marshaller.encode(destination), marshaller.encode(key), geoArgs, valueCodec, storeDist);
-        return LettuceCommand.of(() -> async.dispatch(CommandType.GEOSEARCHSTORE,
+        return command(async -> async.dispatch(CommandType.GEOSEARCHSTORE,
                 new IntegerOutput<>(ByteArrayCodec.INSTANCE), args));
     }
 

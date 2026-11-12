@@ -1146,7 +1146,7 @@ A cluster client names the connections to the nodes it discovers after the first
 The Vert.x client applies its default of 2048 to each pooled connection, whereas the ordinary commands share one connection here, so the default is not applied: the queue is unbounded unless the property is set.
 * A lost connection is reconnected until it succeeds.
 `reconnect-interval` (overridden by `tcp.reconnect-interval`, as with the Vert.x client) sets the fixed delay between the attempts; when neither property is set, Lettuce backs off exponentially, from 100 milliseconds up to 30 seconds.
-The initial connection is not retried, so `reconnect-attempts` does not apply.
+A connection that cannot be opened fails the commands waiting for it, and the next command tries again, so `reconnect-attempts` does not apply.
 * The `tcp.*` socket options of <<lettuce-properties>> are set on the connections, and the TLS handshake uses `tcp.secure-transport-protocols`.
 Only the set properties are applied: the Lettuce defaults (a ten seconds connect timeout, keep-alive and no-delay on) hold otherwise, not the Vert.x ones.
 
@@ -1182,7 +1182,7 @@ The Vert.x client returns mutable collections for non-empty replies.
 |The delay between the attempts to reconnect a lost connection (see above).
 
 |`reconnect-attempts`, `tcp.reconnect-attempts`
-|Not applied: Lettuce reconnects a lost connection until it succeeds and does not retry the initial connection.
+|Not applied: Lettuce reconnects a lost connection until it succeeds; a connection that cannot be opened fails the commands waiting for it, and the next command tries again.
 
 |`max-nested-arrays`
 |Not applied: Lettuce does not limit the nesting of replies.
@@ -1305,6 +1305,8 @@ This is transitional; a Lettuce-based health check, metrics and tracing are plan
 === Connection pooling and blocking commands
 
 Ordinary commands share one multiplexed, pipelined connection per client, Lettuce's intended design.
+As with the Vert.x client, nothing connects at startup: the first command opens that connection, and the commands sent while it is being opened follow in the order they were sent.
+An application therefore starts while its Redis server is still away; a command sent meanwhile fails with a `RedisConnectionException`, and a later one connects.
 Blocking commands (`BLPOP`, `BZPOPMIN` and the other blocking list and sorted set commands, and `XREAD` and `XREADGROUP` when `BLOCK` is set) instead borrow a connection, for their duration, from a bounded pool sized by `quarkus.redis.max-pool-size` (default `6`), with up to `quarkus.redis.max-pool-waiting` (default `24`) additional callers allowed to queue before a further caller fails immediately.
 This keeps a blocked consumer from starving every other command on the same data source.
 The same holds when one of these commands is sent through `execute(...)`.
@@ -1335,6 +1337,7 @@ As on the Vert.x backend, a borrowed connection goes back to the pool only when 
 Keep that duration (the `BLPOP` timeout, the `BLOCK` of `XREAD`) below `quarkus.redis.timeout` when using the blocking API, and only block indefinitely (a zero duration) from the reactive API, where the subscriber keeps waiting for the value: a blocked command nobody waits for holds its connection until a value arrives, and `max-pool-size` of them exhaust the pool.
 
 The extension also exposes the Lettuce client itself as CDI beans for every client that is injected through a Lettuce type (using `@RedisClientName` for named clients): `io.lettuce.core.RedisClient` and `io.lettuce.core.api.StatefulRedisConnection<String, String>` for a standalone, Sentinel or replication client (for the last two also as `io.lettuce.core.masterreplica.StatefulRedisMasterReplicaConnection<String, String>`), `io.lettuce.core.cluster.RedisClusterClient` and `io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>` for a cluster client, and the shared `io.lettuce.core.resource.ClientResources` (backed by the Vert.x event loops).
+Unlike the data sources, an injected connection is opened at startup, so the application does not start when the server cannot be reached; injecting only the client or the `ClientResources` opens no connection.
 
 [[lettuce-threading]]
 === Threading

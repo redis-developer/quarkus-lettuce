@@ -18,7 +18,7 @@ import io.quarkus.redis.datasource.json.JsonSetArgs;
 import io.quarkus.redis.datasource.json.ReactiveJsonCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.json.Json;
@@ -31,8 +31,8 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     private static final JsonSetArgs JSON_SET_DEFAULT = new JsonSetArgs();
 
     public LettuceReactiveJsonCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType) {
-        super(dataSource, connection, keyType, keyType, new Marshaller(keyType));
+            LettuceConnectionSource source, Type keyType) {
+        super(dataSource, source, keyType, keyType, new Marshaller(keyType));
     }
 
     @Override
@@ -98,7 +98,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         notNullOrBlank(path, "path");
         nonNull(args, "args");
         io.lettuce.core.json.arguments.JsonSetArgs lettuceArgs = LettuceJsonCommandsConverter.toLettuceJsonSetArgs(args);
-        return LettuceCommand.discarding(() -> async.jsonSet(marshaller.encode(key), JsonPath.of(path), json, lettuceArgs));
+        return discarding(async -> async.jsonSet(marshaller.encode(key), JsonPath.of(path), json, lettuceArgs));
     }
 
     @Override
@@ -109,7 +109,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     <T> LettuceCommand<List<String>, T> _jsonGet(K key, Class<T> clazz) {
         nonNull(key, "key");
         nonNull(clazz, "clazz");
-        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key), JsonPath.ROOT_PATH), raw -> {
+        return command(async -> async.jsonGetRaw(marshaller.encode(key), JsonPath.ROOT_PATH), raw -> {
             JsonObject object = decodeRootObject(first(raw));
             return object == null ? null : object.mapTo(clazz);
         });
@@ -122,7 +122,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
 
     LettuceCommand<List<String>, JsonObject> _jsonGetObject(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key), JsonPath.ROOT_PATH),
+        return command(async -> async.jsonGetRaw(marshaller.encode(key), JsonPath.ROOT_PATH),
                 raw -> decodeRootObject(first(raw)));
     }
 
@@ -133,7 +133,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
 
     LettuceCommand<List<String>, JsonArray> _jsonGetArray(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key), JsonPath.ROOT_PATH),
+        return command(async -> async.jsonGetRaw(marshaller.encode(key), JsonPath.ROOT_PATH),
                 raw -> decodeRootArray(first(raw)));
     }
 
@@ -145,7 +145,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<List<String>, JsonArray> _jsonGet(K key, String path) {
         nonNull(key, "key");
         nonNull(path, "path");
-        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key), JsonPath.of(path)),
+        return command(async -> async.jsonGetRaw(marshaller.encode(key), JsonPath.of(path)),
                 raw -> decodeJsonArrayFromJsonGet(first(raw)));
     }
 
@@ -161,7 +161,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         for (int i = 0; i < paths.length; i++) {
             jsonPaths[i] = JsonPath.of(paths[i]);
         }
-        return LettuceCommand.of(() -> async.jsonGetRaw(marshaller.encode(key), jsonPaths),
+        return command(async -> async.jsonGetRaw(marshaller.encode(key), jsonPaths),
                 reply -> decodeJsonObject(first(reply)));
     }
 
@@ -177,10 +177,10 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         doesNotContainNull(values, "values");
         String[] encoded = encodeJson(values);
         if (path == null) {
-            return LettuceCommand.of(() -> async.jsonArrappend(marshaller.encode(key), encoded),
+            return command(async -> async.jsonArrappend(marshaller.encode(key), encoded),
                     AbstractLettuceCommands::toInteger);
         }
-        return LettuceCommand.of(() -> async.jsonArrappend(marshaller.encode(key), JsonPath.of(path), encoded),
+        return command(async -> async.jsonArrappend(marshaller.encode(key), JsonPath.of(path), encoded),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -195,7 +195,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         nonNull(value, "value");
         String encoded = Json.encode(value);
         JsonRangeArgs range = LettuceJsonCommandsConverter.toLettuceJsonRangeArgs(start, end);
-        return LettuceCommand.of(() -> async.jsonArrindex(marshaller.encode(key), JsonPath.of(path), encoded, range),
+        return command(async -> async.jsonArrindex(marshaller.encode(key), JsonPath.of(path), encoded, range),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -211,7 +211,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         nonNull(path, "path");
         doesNotContainNull(values, "values");
         String[] encoded = encodeJson(values);
-        return LettuceCommand.of(() -> async.jsonArrinsert(marshaller.encode(key), JsonPath.of(path), index, encoded),
+        return command(async -> async.jsonArrinsert(marshaller.encode(key), JsonPath.of(path), index, encoded),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -223,9 +223,9 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<List<Long>, List<Integer>> _jsonArrLen(K key, String path) {
         nonNull(key, "key");
         if (path == null) {
-            return LettuceCommand.of(() -> async.jsonArrlen(marshaller.encode(key)), AbstractLettuceCommands::toInteger);
+            return command(async -> async.jsonArrlen(marshaller.encode(key)), AbstractLettuceCommands::toInteger);
         }
-        return LettuceCommand.of(() -> async.jsonArrlen(marshaller.encode(key), JsonPath.of(path)),
+        return command(async -> async.jsonArrlen(marshaller.encode(key), JsonPath.of(path)),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -238,11 +238,11 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         nonNull(key, "key");
         nonNull(clazz, "clazz");
         if (path == null && index == -1) {
-            return LettuceCommand.of(() -> async.jsonArrpopRaw(marshaller.encode(key)),
+            return command(async -> async.jsonArrpopRaw(marshaller.encode(key)),
                     reply -> decodeJsonValues(reply, clazz));
         }
         JsonPath jsonPath = path == null ? JsonPath.ROOT_PATH : JsonPath.of(path);
-        return LettuceCommand.of(() -> async.jsonArrpopRaw(marshaller.encode(key), jsonPath, index),
+        return command(async -> async.jsonArrpopRaw(marshaller.encode(key), jsonPath, index),
                 reply -> decodeJsonValues(reply, clazz));
     }
 
@@ -255,7 +255,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         nonNull(key, "key");
         nonNull(path, "path");
         JsonRangeArgs range = LettuceJsonCommandsConverter.toLettuceJsonRangeArgs(start, stop);
-        return LettuceCommand.of(() -> async.jsonArrtrim(marshaller.encode(key), JsonPath.of(path), range),
+        return command(async -> async.jsonArrtrim(marshaller.encode(key), JsonPath.of(path), range),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -267,9 +267,9 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<Long, Integer> _jsonClear(K key, String path) {
         nonNull(key, "key");
         if (path == null) {
-            return LettuceCommand.of(() -> async.jsonClear(marshaller.encode(key)), AbstractLettuceCommands::toInteger);
+            return command(async -> async.jsonClear(marshaller.encode(key)), AbstractLettuceCommands::toInteger);
         }
-        return LettuceCommand.of(() -> async.jsonClear(marshaller.encode(key), JsonPath.of(path)),
+        return command(async -> async.jsonClear(marshaller.encode(key), JsonPath.of(path)),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -281,9 +281,9 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<Long, Integer> _jsonDel(K key, String path) {
         nonNull(key, "key");
         if (path == null) {
-            return LettuceCommand.of(() -> async.jsonDel(marshaller.encode(key)), AbstractLettuceCommands::toInteger);
+            return command(async -> async.jsonDel(marshaller.encode(key)), AbstractLettuceCommands::toInteger);
         }
-        return LettuceCommand.of(() -> async.jsonDel(marshaller.encode(key), JsonPath.of(path)),
+        return command(async -> async.jsonDel(marshaller.encode(key), JsonPath.of(path)),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -298,7 +298,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         notNullOrBlank(path, "path");
         doesNotContainNull(keys, "keys");
         byte[][] encodedKeys = marshaller.encodeAsArray(keys);
-        return LettuceCommand.of(() -> async.jsonMGetRaw(JsonPath.of(path), encodedKeys),
+        return command(async -> async.jsonMGetRaw(JsonPath.of(path), encodedKeys),
                 reply -> decodeList(reply, item -> item == null ? null : new JsonArray(item)));
     }
 
@@ -310,7 +310,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<List<Number>, Void> _jsonNumincrby(K key, String path, double value) {
         nonNull(key, "key");
         notNullOrBlank(path, "path");
-        return LettuceCommand.discarding(() -> async.jsonNumincrby(marshaller.encode(key), JsonPath.of(path), value));
+        return discarding(async -> async.jsonNumincrby(marshaller.encode(key), JsonPath.of(path), value));
     }
 
     @Override
@@ -321,10 +321,10 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<List<byte[]>, List<List<String>>> _jsonObjKeys(K key, String path) {
         nonNull(key, "key");
         if (path == null) {
-            return LettuceCommand.of(() -> async.jsonObjkeys(marshaller.encode(key)),
+            return command(async -> async.jsonObjkeys(marshaller.encode(key)),
                     LettuceReactiveJsonCommandsImpl::decodeObjKeys);
         }
-        return LettuceCommand.of(() -> async.jsonObjkeys(marshaller.encode(key), JsonPath.of(path)),
+        return command(async -> async.jsonObjkeys(marshaller.encode(key), JsonPath.of(path)),
                 LettuceReactiveJsonCommandsImpl::decodeObjKeys);
     }
 
@@ -336,9 +336,9 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<List<Long>, List<Integer>> _jsonObjLen(K key, String path) {
         nonNull(key, "key");
         if (path == null) {
-            return LettuceCommand.of(() -> async.jsonObjlen(marshaller.encode(key)), AbstractLettuceCommands::toInteger);
+            return command(async -> async.jsonObjlen(marshaller.encode(key)), AbstractLettuceCommands::toInteger);
         }
-        return LettuceCommand.of(() -> async.jsonObjlen(marshaller.encode(key), JsonPath.of(path)),
+        return command(async -> async.jsonObjlen(marshaller.encode(key), JsonPath.of(path)),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -352,10 +352,10 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
         nonNull(value, "value");
         String encoded = Json.encode(value);
         if (path == null) {
-            return LettuceCommand.of(() -> async.jsonStrappend(marshaller.encode(key), encoded),
+            return command(async -> async.jsonStrappend(marshaller.encode(key), encoded),
                     AbstractLettuceCommands::toInteger);
         }
-        return LettuceCommand.of(() -> async.jsonStrappend(marshaller.encode(key), JsonPath.of(path), encoded),
+        return command(async -> async.jsonStrappend(marshaller.encode(key), JsonPath.of(path), encoded),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -367,9 +367,9 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<List<Long>, List<Integer>> _jsonStrLen(K key, String path) {
         nonNull(key, "key");
         if (path == null) {
-            return LettuceCommand.of(() -> async.jsonStrlen(marshaller.encode(key)), AbstractLettuceCommands::toInteger);
+            return command(async -> async.jsonStrlen(marshaller.encode(key)), AbstractLettuceCommands::toInteger);
         }
-        return LettuceCommand.of(() -> async.jsonStrlen(marshaller.encode(key), JsonPath.of(path)),
+        return command(async -> async.jsonStrlen(marshaller.encode(key), JsonPath.of(path)),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -381,7 +381,7 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<List<Long>, List<Boolean>> _jsonToggle(K key, String path) {
         nonNull(key, "key");
         nonNull(path, "path");
-        return LettuceCommand.of(() -> async.jsonToggle(marshaller.encode(key), JsonPath.of(path)),
+        return command(async -> async.jsonToggle(marshaller.encode(key), JsonPath.of(path)),
                 reply -> decodeList(reply, item -> item == null ? null : item == 1L));
     }
 
@@ -393,10 +393,10 @@ public class LettuceReactiveJsonCommandsImpl<K> extends AbstractLettuceCommands<
     LettuceCommand<List<JsonType>, List<String>> _jsonType(K key, String path) {
         nonNull(key, "key");
         if (path == null) {
-            return LettuceCommand.of(() -> async.jsonType(marshaller.encode(key)),
+            return command(async -> async.jsonType(marshaller.encode(key)),
                     it -> decodeList(it, LettuceReactiveJsonCommandsImpl::decodeJsonType));
         }
-        return LettuceCommand.of(() -> async.jsonType(marshaller.encode(key), JsonPath.of(path)),
+        return command(async -> async.jsonType(marshaller.encode(key), JsonPath.of(path)),
                 it -> decodeList(it, LettuceReactiveJsonCommandsImpl::decodeJsonType));
     }
 

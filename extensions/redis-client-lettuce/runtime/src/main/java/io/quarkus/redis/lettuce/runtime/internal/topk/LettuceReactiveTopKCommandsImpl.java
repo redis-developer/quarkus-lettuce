@@ -16,7 +16,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.topk.ReactiveTopKCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -24,8 +24,8 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         implements ReactiveTopKCommands<K, V> {
 
     public LettuceReactiveTopKCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType, Type valueType) {
-        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, valueType));
+            LettuceConnectionSource source, Type keyType, Type valueType) {
+        super(dataSource, source, keyType, valueType, new Marshaller(keyType, valueType));
     }
 
     @Override
@@ -36,7 +36,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
     LettuceCommand<List<String>, V> _topkAdd(K key, V item) {
         nonNull(key, "key");
         nonNull(item, "item");
-        return LettuceCommand.of(() -> async.topKAdd(marshaller.encode(key), marshaller.encode(item)),
+        return command(async -> async.topKAdd(marshaller.encode(key), marshaller.encode(item)),
                 list -> decodeStringValue(list.getFirst()));
     }
 
@@ -51,9 +51,9 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(key, "key");
         doesNotContainNull(items, "items");
         if (items.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`items` must not be empty"));
+            return failing(new IllegalArgumentException("`items` must not be empty"));
         }
-        return LettuceCommand.of(() -> async.topKAdd(marshaller.encode(key), marshaller.encodeAsArray(items)),
+        return command(async -> async.topKAdd(marshaller.encode(key), marshaller.encodeAsArray(items)),
                 reply -> decodeList(reply, this::decodeStringValue));
     }
 
@@ -66,7 +66,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(key, "key");
         nonNull(item, "item");
         positive(increment, "increment");
-        return LettuceCommand.of(() -> async.topKIncrBy(marshaller.encode(key), marshaller.encode(item), increment),
+        return command(async -> async.topKIncrBy(marshaller.encode(key), marshaller.encode(item), increment),
                 list -> decodeStringValue(list.getFirst()));
     }
 
@@ -79,11 +79,11 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(key, "key");
         nonNull(couples, "couples");
         if (couples.isEmpty()) {
-            return LettuceCommand.failing(new IllegalArgumentException("`couples` must not be empty"));
+            return failing(new IllegalArgumentException("`couples` must not be empty"));
         }
         IncrementPair<byte[]>[] pairs = encodeCouples(couples);
         List<V> items = List.copyOf(couples.keySet());
-        return LettuceCommand.of(() -> async.topKIncrBy(marshaller.encode(key), pairs),
+        return command(async -> async.topKIncrBy(marshaller.encode(key), pairs),
                 dropped -> zip(items, dropped, this::decodeStringValue));
     }
 
@@ -94,7 +94,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
 
     LettuceCommand<List<String>, List<V>> _topkList(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.topKList(marshaller.encode(key)),
+        return command(async -> async.topKList(marshaller.encode(key)),
                 reply -> decodeList(reply, this::decodeStringValue));
     }
 
@@ -105,7 +105,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
 
     LettuceCommand<List<TopKListValue>, Map<V, Integer>> _topkListWithCount(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.topKList(marshaller.encode(key), true), this::decodeTopKListValueList);
+        return command(async -> async.topKList(marshaller.encode(key), true), this::decodeTopKListValueList);
     }
 
     @Override
@@ -116,7 +116,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
     LettuceCommand<List<Boolean>, Boolean> _topkQuery(K key, V item) {
         nonNull(key, "key");
         nonNull(item, "item");
-        return LettuceCommand.of(() -> async.topKQuery(marshaller.encode(key), marshaller.encode(item)),
+        return command(async -> async.topKQuery(marshaller.encode(key), marshaller.encode(item)),
                 List::getFirst);
     }
 
@@ -131,9 +131,9 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(key, "key");
         doesNotContainNull(items, "items");
         if (items.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`items` must not be empty"));
+            return failing(new IllegalArgumentException("`items` must not be empty"));
         }
-        return LettuceCommand.of(() -> async.topKQuery(marshaller.encode(key), marshaller.encodeAsArray(items)),
+        return command(async -> async.topKQuery(marshaller.encode(key), marshaller.encodeAsArray(items)),
                 AbstractLettuceCommands::decodeList);
     }
 
@@ -145,7 +145,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
     LettuceCommand<String, Void> _topkReserve(K key, int topk) {
         nonNull(key, "key");
         positive(topk, "topk");
-        return LettuceCommand.discarding(() -> async.topKReserve(marshaller.encode(key), topk));
+        return discarding(async -> async.topKReserve(marshaller.encode(key), topk));
     }
 
     @Override
@@ -157,7 +157,7 @@ public class LettuceReactiveTopKCommandsImpl<K, V> extends AbstractLettuceComman
         nonNull(key, "key");
         positive(topk, "topk");
         TopKReserveArgs args = TopKReserveArgs.Builder.width(width).depth(depth).decay(decay);
-        return LettuceCommand.discarding(() -> async.topKReserve(marshaller.encode(key), topk, args));
+        return discarding(async -> async.topKReserve(marshaller.encode(key), topk, args));
     }
 
     private V decodeStringValue(String item) {

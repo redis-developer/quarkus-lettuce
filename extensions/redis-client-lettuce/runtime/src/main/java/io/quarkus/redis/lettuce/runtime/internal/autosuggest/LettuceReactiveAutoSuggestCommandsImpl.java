@@ -14,7 +14,7 @@ import io.quarkus.redis.datasource.autosuggest.ReactiveAutoSuggestCommands;
 import io.quarkus.redis.datasource.autosuggest.Suggestion;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -22,8 +22,8 @@ public class LettuceReactiveAutoSuggestCommandsImpl<K> extends AbstractLettuceCo
         implements ReactiveAutoSuggestCommands<K> {
 
     public LettuceReactiveAutoSuggestCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType) {
-        super(dataSource, connection, keyType, keyType, new Marshaller(keyType));
+            LettuceConnectionSource source, Type keyType) {
+        super(dataSource, source, keyType, keyType, new Marshaller(keyType));
     }
 
     @Override
@@ -38,7 +38,7 @@ public class LettuceReactiveAutoSuggestCommandsImpl<K> extends AbstractLettuceCo
         if (increment) {
             args.incr();
         }
-        return LettuceCommand.of(() -> async.ftSugadd(marshaller.encode(key), string, score, args));
+        return command(async -> async.ftSugadd(marshaller.encode(key), string, score, args));
     }
 
     @Override
@@ -49,7 +49,7 @@ public class LettuceReactiveAutoSuggestCommandsImpl<K> extends AbstractLettuceCo
     LettuceCommand<Boolean, Boolean> _ftSugDel(K key, String string) {
         nonNull(key, "key");
         notNullOrBlank(string, "string");
-        return LettuceCommand.of(() -> async.ftSugdel(marshaller.encode(key), string));
+        return command(async -> async.ftSugdel(marshaller.encode(key), string));
     }
 
     @Override
@@ -60,7 +60,7 @@ public class LettuceReactiveAutoSuggestCommandsImpl<K> extends AbstractLettuceCo
     LettuceCommand<List<io.lettuce.core.search.Suggestion>, List<Suggestion>> _ftSugGet(K key, String prefix) {
         nonNull(key, "key");
         notNullOrBlank(prefix, "prefix");
-        return LettuceCommand.of(() -> async.ftSugget(marshaller.encode(key), prefix), this::decodeSuggestionList);
+        return command(async -> async.ftSugget(marshaller.encode(key), prefix), this::decodeSuggestionList);
     }
 
     @Override
@@ -73,7 +73,7 @@ public class LettuceReactiveAutoSuggestCommandsImpl<K> extends AbstractLettuceCo
         notNullOrBlank(prefix, "prefix");
         nonNull(args, "args");
         SugGetArgs lettuceArgs = LettuceAutoSuggestCommandsConverters.toLettuceSugGetArgs(args);
-        return LettuceCommand.of(() -> async.ftSugget(marshaller.encode(key), prefix, lettuceArgs), this::decodeSuggestionList);
+        return command(async -> async.ftSugget(marshaller.encode(key), prefix, lettuceArgs), this::decodeSuggestionList);
     }
 
     @Override
@@ -83,7 +83,7 @@ public class LettuceReactiveAutoSuggestCommandsImpl<K> extends AbstractLettuceCo
 
     LettuceCommand<Long, Long> _ftSugLen(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.ftSuglen(marshaller.encode(key)));
+        return command(async -> async.ftSuglen(marshaller.encode(key)));
     }
 
     private Suggestion decodeSuggestion(io.lettuce.core.search.Suggestion lettuce) {

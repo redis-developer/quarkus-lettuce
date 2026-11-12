@@ -12,7 +12,7 @@ import io.quarkus.redis.datasource.bloom.BfReserveArgs;
 import io.quarkus.redis.datasource.bloom.ReactiveBloomCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -20,8 +20,8 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
         implements ReactiveBloomCommands<K, V> {
 
     public LettuceReactiveBloomCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType, Type valueType) {
-        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, valueType));
+            LettuceConnectionSource source, Type keyType, Type valueType) {
+        super(dataSource, source, keyType, valueType, new Marshaller(keyType, valueType));
     }
 
     @Override
@@ -32,7 +32,7 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
     LettuceCommand<Boolean, Boolean> _bfadd(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return LettuceCommand.of(() -> async.bfAdd(marshaller.encode(key), marshaller.encode(value)));
+        return command(async -> async.bfAdd(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @Override
@@ -43,7 +43,7 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
     LettuceCommand<Boolean, Boolean> _bfexists(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return LettuceCommand.of(() -> async.bfExists(marshaller.encode(key), marshaller.encode(value)));
+        return command(async -> async.bfExists(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @SafeVarargs
@@ -57,9 +57,9 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
         nonNull(key, "key");
         doesNotContainNull(values, "values");
         if (values.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
+            return failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
-        return LettuceCommand.of(() -> async.bfMAdd(marshaller.encode(key), marshaller.encodeAsArray(values)),
+        return command(async -> async.bfMAdd(marshaller.encode(key), marshaller.encodeAsArray(values)),
                 AbstractLettuceCommands::nullsToFalse);
     }
 
@@ -74,9 +74,9 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
         nonNull(key, "key");
         doesNotContainNull(values, "values");
         if (values.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
+            return failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
-        return LettuceCommand.of(() -> async.bfMExists(marshaller.encode(key), marshaller.encodeAsArray(values)),
+        return command(async -> async.bfMExists(marshaller.encode(key), marshaller.encodeAsArray(values)),
                 AbstractLettuceCommands::decodeList);
     }
 
@@ -95,7 +95,7 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
         nonNull(args, "args");
         io.lettuce.core.probabilistic.arguments.BfReserveArgs lettuceArgs = LettuceBloomCommandsConverters
                 .toLettuceBfReserveArgs(args);
-        return LettuceCommand.discarding(() -> async.bfReserve(marshaller.encode(key), errorRate, capacity, lettuceArgs));
+        return discarding(async -> async.bfReserve(marshaller.encode(key), errorRate, capacity, lettuceArgs));
     }
 
     @SafeVarargs
@@ -110,11 +110,11 @@ public class LettuceReactiveBloomCommandsImpl<K, V> extends AbstractLettuceComma
         nonNull(args, "args");
         doesNotContainNull(values, "values");
         if (values.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
+            return failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
         io.lettuce.core.probabilistic.arguments.BfInsertArgs lettuceArgs = LettuceBloomCommandsConverters
                 .toLettuceBfInsertArgs(args);
-        return LettuceCommand.of(() -> async.bfInsert(marshaller.encode(key), lettuceArgs, marshaller.encodeAsArray(values)),
+        return command(async -> async.bfInsert(marshaller.encode(key), lettuceArgs, marshaller.encodeAsArray(values)),
                 AbstractLettuceCommands::nullsToFalse);
     }
 

@@ -89,7 +89,7 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     public LettuceReactiveTransactionalRedisDataSourceImpl(LettuceReactiveRedisDataSourceImpl reactive,
             LettuceTransactionHolder tx) {
         this.reactive = nonNull(reactive, "reactive");
-        this.connection = reactive.getConnection();
+        this.connection = reactive.pinnedConnection();
         this.tx = nonNull(tx, "tx");
     }
 
@@ -264,7 +264,7 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
     private Uni<Void> enqueueRaw(ProtocolKeyword type, CommandArgs<byte[], byte[]> commandArgs) {
         LettuceReactiveRedisDataSourceImpl.rejectIfItTakesTheConnectionOver(type);
         LettuceVertxResponseOutput<byte[], byte[]> output = new LettuceVertxResponseOutput<>(ByteArrayCodec.INSTANCE);
-        return tx.enqueue(LettuceCommand.of(() -> connection.async().dispatch(type, output, commandArgs),
+        return tx.enqueue(LettuceCommand.of(connection, async -> async.dispatch(type, output, commandArgs),
                 ignored -> output.toVertxResponse()));
     }
 

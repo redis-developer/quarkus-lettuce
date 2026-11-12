@@ -38,8 +38,9 @@ import io.vertx.redis.client.RedisTopology;
  * honours (see {@link LettuceClientSettings}): the shared {@link LettuceClientResources} built on the Vert.x event
  * loops, a {@link LettuceConnectionFactory} per client (a {@link io.lettuce.core.RedisClient} for a {@code standalone}
  * client and for the master/replica connections of a {@code sentinel} or {@code replication} one, a
- * {@link io.lettuce.core.cluster.RedisClusterClient} for a {@code cluster} one), the shared {@link LettuceConnection}
- * of the data sources and the bounded {@link LettuceConnectionPool} used for blocking commands and scoped connections
+ * {@link io.lettuce.core.cluster.RedisClusterClient} for a {@code cluster} one), the {@link LettuceSharedConnection}
+ * of the data sources, which their first command opens, and the bounded {@link LettuceConnectionPool} used for blocking
+ * commands and scoped connections
  * ({@code withConnection}/{@code withTransaction}) so they never occupy the shared connection, its idle connections
  * recycled as configured by {@code pool-recycle-timeout} and {@code pool-cleaner-interval}.
  * <p>
@@ -58,8 +59,8 @@ public final class LettuceClientSetup {
     /** The default of the Vert.x client's pool cleaner interval, applied when {@code pool-cleaner-interval} is unset. */
     private static final Duration DEFAULT_POOL_CLEANER_INTERVAL = Duration.ofSeconds(30);
     /** Why {@code reconnect-attempts} and {@code tcp.reconnect-attempts} are not applied. */
-    private static final String RECONNECT_ATTEMPTS_REASON = " (Lettuce reconnects a lost connection until it succeeds"
-            + " and does not retry the initial connection)";
+    private static final String RECONNECT_ATTEMPTS_REASON = " (Lettuce reconnects a lost connection until it succeeds;"
+            + " a connection that cannot be opened fails the commands waiting for it, and the next command tries again)";
 
     private LettuceClientSetup() {
     }
@@ -161,11 +162,14 @@ public final class LettuceClientSetup {
     }
 
     /**
-     * The shared connection of the data sources of a client.
+     * The shared connection of the data sources of a client. Nothing connects here: the first command opens it, as
+     * with the Vert.x data sources, and a command finding the server away fails while the next one tries again.
      */
-    public static LettuceConnection connect(String name, LettuceConnectionFactory factory) {
-        LOGGER.infof("Opening data source connection for client '%s'", name);
-        return factory.connect();
+    public static LettuceSharedConnection sharedConnection(String name, LettuceConnectionFactory factory) {
+        return new LettuceSharedConnection(() -> {
+            LOGGER.infof("Opening data source connection for client '%s'", name);
+            return factory.connectAsync();
+        }, factory.isCluster());
     }
 
     /**

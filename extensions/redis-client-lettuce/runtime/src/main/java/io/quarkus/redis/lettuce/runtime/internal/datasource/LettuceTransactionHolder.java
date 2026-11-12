@@ -1,5 +1,7 @@
 package io.quarkus.redis.lettuce.runtime.internal.datasource;
 
+import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
@@ -8,6 +10,7 @@ import io.lettuce.core.RedisException;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.runtime.datasource.OptimisticLockingTransactionResultImpl;
 import io.quarkus.redis.runtime.datasource.TransactionResultImpl;
 import io.smallrye.mutiny.Uni;
@@ -29,23 +32,31 @@ import io.smallrye.mutiny.Uni;
  */
 public class LettuceTransactionHolder {
 
+    private final LettuceConnection connection;
     private final List<Function<Object, Object>> mappers = new ArrayList<>();
     private volatile boolean discarded = false;
 
     /**
+     * @param connection the connection the transaction runs on, which its commands are issued on
+     */
+    public LettuceTransactionHolder(LettuceConnection connection) {
+        this.connection = nonNull(connection, "connection");
+    }
+
+    /**
      * Issues a command into the open {@code MULTI} block and records its mapper for later assembly.
      * <p>
-     * The command's {@link LettuceCommand#call() call} supplier is invoked eagerly so the command is enqueued on
-     * the pinned connection in call order, which matches the order of the {@code EXEC} reply. A supplier that
-     * throws instead of issuing a command — the command implementations defer some argument validations that way —
+     * The command is {@link LettuceCommand#issueOn(LettuceConnection) issued} eagerly so it is enqueued on
+     * the pinned connection in call order, which matches the order of the {@code EXEC} reply. A command that
+     * throws instead of being issued — the command implementations defer some argument validations that way —
      * fails the returned {@link Uni} rather than the call, as the Vert.x backend and the non-transactional path do,
      * and records no entry. The command's {@link LettuceCommand#mapper() mapper} is applied to the matching element
      * of the {@code EXEC} reply when the {@link TransactionResult} is assembled.
      * <p>
      * Once {@link #discard()} has been called, {@code DISCARD} has already been sent on the pinned connection, and
      * it is no longer inside {@code MULTI}; issuing the command's call at that point would run it for real instead
-     * of queuing it. So a call arriving after {@link #discard()} is rejected outright, without invoking
-     * {@code call()}, matching the {@code IllegalStateException} the Vert.x backend raises when a queued command
+     * of queuing it. So a call arriving after {@link #discard()} is rejected outright, without issuing
+     * the command, matching the {@code IllegalStateException} the Vert.x backend raises when a queued command
      * doesn't come back {@code QUEUED}.
      *
      * @param command the command to issue, carrying its call and result mapper
@@ -59,7 +70,7 @@ public class LettuceTransactionHolder {
             return Uni.createFrom().failure(new IllegalStateException("Unable to add command to the current transaction"));
         }
         try {
-            command.call().get();
+            command.issueOn(connection);
         } catch (RuntimeException e) {
             return Uni.createFrom().failure(e);
         }

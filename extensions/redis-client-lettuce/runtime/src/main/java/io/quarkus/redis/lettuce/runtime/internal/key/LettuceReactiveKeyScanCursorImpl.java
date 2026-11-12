@@ -8,9 +8,9 @@ import java.util.function.Function;
 
 import io.lettuce.core.KeyScanArgs;
 import io.lettuce.core.ScanCursor;
-import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.quarkus.redis.datasource.keys.ReactiveKeyScanCursor;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractReactiveScanCursor;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceResult;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
@@ -20,14 +20,14 @@ public class LettuceReactiveKeyScanCursorImpl<K> extends AbstractReactiveScanCur
 
     private final Function<List<byte[]>, Set<K>> decoder;
 
-    public LettuceReactiveKeyScanCursorImpl(RedisClusterAsyncCommands<byte[], byte[]> async,
+    public LettuceReactiveKeyScanCursorImpl(LettuceConnectionSource source,
             Function<List<byte[]>, Set<K>> decoder) {
-        this(async, new KeyScanArgs(), decoder);
+        this(source, new KeyScanArgs(), decoder);
     }
 
-    public LettuceReactiveKeyScanCursorImpl(RedisClusterAsyncCommands<byte[], byte[]> async, KeyScanArgs scanArgs,
+    public LettuceReactiveKeyScanCursorImpl(LettuceConnectionSource source, KeyScanArgs scanArgs,
             Function<List<byte[]>, Set<K>> decoder) {
-        super(async, scanArgs);
+        super(source, scanArgs);
         nonNull(decoder, "decoder");
         this.decoder = decoder;
     }
@@ -36,7 +36,7 @@ public class LettuceReactiveKeyScanCursorImpl<K> extends AbstractReactiveScanCur
     public Uni<Set<K>> next() {
         // Reset cursor when finished to copy Vert.x behavior.
         final ScanCursor current = cursor.isFinished() ? ScanCursor.INITIAL : cursor;
-        return LettuceResult.toUni(() -> async.scan(current, scanArgs))
+        return LettuceResult.toUni(source, connection -> connection.async().scan(current, scanArgs))
                 .invoke(kc -> this.cursor = kc)
                 .map(kc -> decoder.apply(kc.getKeys()));
     }

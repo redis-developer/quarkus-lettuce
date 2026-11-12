@@ -17,6 +17,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import io.lettuce.core.KeyValue;
+import io.lettuce.core.RedisFuture;
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands;
 import io.quarkus.redis.datasource.ReactiveRedisCommands;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -26,11 +27,13 @@ import io.smallrye.mutiny.Uni;
 /**
  * Base class for Lettuce-backed reactive command group implementations.
  * <p>
- * Holds the owning data source, the async command handle and helper methods. The handle is the
- * {@link RedisClusterAsyncCommands}
+ * Holds the owning data source, the source of the connection and helper methods. A command is a function of the
+ * async command handle of the connection it is issued on (see {@link #command(Function, Function)}): the connection
+ * of the source, which a shared connection only opens for its first command, or the one a transaction or a blocking
+ * command runs on. The handle is the {@link RedisClusterAsyncCommands}
  * surface shared by the standalone and the cluster connections (see {@link LettuceConnection}), so a
  * command group works on both topologies. Subclasses whose command group has blocking
- * commands pass a {@code pool}, used by {@link #blocking(Function)} to route
+ * commands pass a {@code pool}, used by {@link #blocking(LettuceCommand)} to route
  * those commands off the shared connection; other groups pass {@code null}.
  *
  * @param <K> the key type
@@ -39,26 +42,26 @@ import io.smallrye.mutiny.Uni;
 public abstract class AbstractLettuceCommands<K, V> implements ReactiveRedisCommands {
 
     protected final ReactiveRedisDataSource dataSource;
-    protected final RedisClusterAsyncCommands<byte[], byte[]> async;
+    protected final LettuceConnectionSource source;
     protected final Type keyType;
     protected final Type valueType;
     protected final Marshaller marshaller;
     protected final LettuceConnectionPool pool;
 
-    protected AbstractLettuceCommands(ReactiveRedisDataSource dataSource, LettuceConnection connection, Type keyType,
+    protected AbstractLettuceCommands(ReactiveRedisDataSource dataSource, LettuceConnectionSource source, Type keyType,
             Type valueType, Marshaller marshaller) {
-        this(dataSource, connection, keyType, valueType, marshaller, null);
+        this(dataSource, source, keyType, valueType, marshaller, null);
     }
 
-    protected AbstractLettuceCommands(ReactiveRedisDataSource dataSource, LettuceConnection connection, Type keyType,
+    protected AbstractLettuceCommands(ReactiveRedisDataSource dataSource, LettuceConnectionSource source, Type keyType,
             Type valueType, Marshaller marshaller, LettuceConnectionPool pool) {
         nonNull(dataSource, "dataSource");
-        nonNull(connection, "connection");
+        nonNull(source, "source");
         nonNull(keyType, "keyType");
         nonNull(valueType, "valueType");
         nonNull(marshaller, "marshaller");
         this.dataSource = dataSource;
-        this.async = connection.async();
+        this.source = source;
         this.keyType = keyType;
         this.valueType = valueType;
         this.marshaller = marshaller;
@@ -74,12 +77,37 @@ public abstract class AbstractLettuceCommands<K, V> implements ReactiveRedisComm
     // Command execution
     // ---------------------------------------------------------------------------------------------
 
-    protected <T, R> Uni<R> blocking(Function<RedisClusterAsyncCommands<byte[], byte[]>, LettuceCommand<T, R>> builder) {
-        LettuceCommand<T, R> validated = builder.apply(async);
+    /**
+     * A command of this group: {@code call} on the async command handle of the connection it is issued on, its
+     * result converted by {@code mapper}.
+     */
+    protected <T, R> LettuceCommand<T, R> command(Function<RedisClusterAsyncCommands<byte[], byte[]>, RedisFuture<T>> call,
+            Function<? super T, ? extends R> mapper) {
+        return LettuceCommand.of(source, call, mapper);
+    }
+
+    protected <T> LettuceCommand<T, T> command(Function<RedisClusterAsyncCommands<byte[], byte[]>, RedisFuture<T>> call) {
+        return LettuceCommand.of(source, call);
+    }
+
+    protected <T> LettuceCommand<T, Void> discarding(
+            Function<RedisClusterAsyncCommands<byte[], byte[]>, RedisFuture<T>> call) {
+        return LettuceCommand.discarding(source, call);
+    }
+
+    protected static <T, R> LettuceCommand<T, R> failing(RuntimeException failure) {
+        return LettuceCommand.failing(failure);
+    }
+
+    /**
+     * Runs a blocking command on a connection borrowed from the pool for its duration, or on the connection of
+     * this group when it has no pool: the pinned connection of a scope.
+     */
+    protected <T, R> Uni<R> blocking(LettuceCommand<T, R> command) {
         if (pool == null) {
-            return validated.toUni();
+            return command.toUni();
         }
-        return pool.withPooled(conn -> builder.apply(conn.async()).toUni());
+        return pool.withPooled(pooled -> command.on(pooled).toUni());
     }
 
     // ---------------------------------------------------------------------------------------------

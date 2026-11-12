@@ -17,7 +17,7 @@ import io.quarkus.redis.datasource.set.ReactiveSetCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
@@ -27,8 +27,8 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     private static final SortArgs DEFAULT_SORT_ARGS = new SortArgs();
 
     public LettuceReactiveSetCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType, Type valueType) {
-        super(dataSource, connection, keyType, valueType, new Marshaller(keyType, valueType));
+            LettuceConnectionSource source, Type keyType, Type valueType) {
+        super(dataSource, source, keyType, valueType, new Marshaller(keyType, valueType));
     }
 
     @SafeVarargs
@@ -42,7 +42,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(key, "key");
         notNullOrEmpty(values, "members");
         doesNotContainNull(values, "members");
-        return LettuceCommand.of(() -> async.sadd(marshaller.encode(key), marshaller.encodeAsArray(values)),
+        return command(async -> async.sadd(marshaller.encode(key), marshaller.encodeAsArray(values)),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -53,7 +53,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     LettuceCommand<Long, Long> _scard(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.scard(marshaller.encode(key)));
+        return command(async -> async.scard(marshaller.encode(key)));
     }
 
     @SafeVarargs
@@ -67,9 +67,9 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
+            return failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sdiff(marshaller.encodeAsArray(keys)), this::decodeSetOfValues);
+        return command(async -> async.sdiff(marshaller.encodeAsArray(keys)), this::decodeSetOfValues);
     }
 
     @SafeVarargs
@@ -84,9 +84,9 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
+            return failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sdiffstore(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
+        return command(async -> async.sdiffstore(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
     }
 
     @SafeVarargs
@@ -100,9 +100,9 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
+            return failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sinter(marshaller.encodeAsArray(keys)), this::decodeSetOfValues);
+        return command(async -> async.sinter(marshaller.encodeAsArray(keys)), this::decodeSetOfValues);
     }
 
     @SafeVarargs
@@ -116,9 +116,9 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
+            return failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sintercard(marshaller.encodeAsArray(keys)));
+        return command(async -> async.sintercard(marshaller.encodeAsArray(keys)));
     }
 
     @SafeVarargs
@@ -133,9 +133,9 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         doesNotContainNull(keys, "keys");
         positive(limit, "limit");
         if (keys.length < 2) {
-            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
+            return failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sintercard(limit, marshaller.encodeAsArray(keys)));
+        return command(async -> async.sintercard(limit, marshaller.encodeAsArray(keys)));
     }
 
     @SafeVarargs
@@ -150,9 +150,9 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
+            return failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sinterstore(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
+        return command(async -> async.sinterstore(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
     }
 
     @Override
@@ -163,7 +163,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     LettuceCommand<Boolean, Boolean> _sismember(K key, V member) {
         nonNull(key, "key");
         nonNull(member, "member");
-        return LettuceCommand.of(() -> async.sismember(marshaller.encode(key), marshaller.encode(member)));
+        return command(async -> async.sismember(marshaller.encode(key), marshaller.encode(member)));
     }
 
     @Override
@@ -173,7 +173,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     LettuceCommand<Set<byte[]>, Set<V>> _smembers(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.smembers(marshaller.encode(key)), this::decodeSetOfValues);
+        return command(async -> async.smembers(marshaller.encode(key)), this::decodeSetOfValues);
     }
 
     @SafeVarargs
@@ -187,7 +187,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(key, "key");
         notNullOrEmpty(members, "members");
         doesNotContainNull(members, "members");
-        return LettuceCommand.of(() -> async.smismember(marshaller.encode(key), marshaller.encodeAsArray(members)),
+        return command(async -> async.smismember(marshaller.encode(key), marshaller.encodeAsArray(members)),
                 AbstractLettuceCommands::decodeList);
     }
 
@@ -200,8 +200,8 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(source, "source");
         nonNull(destination, "destination");
         nonNull(member, "member");
-        return LettuceCommand.of(
-                () -> async.smove(marshaller.encode(source), marshaller.encode(destination), marshaller.encode(member)));
+        return command(
+                async -> async.smove(marshaller.encode(source), marshaller.encode(destination), marshaller.encode(member)));
     }
 
     @Override
@@ -211,7 +211,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     LettuceCommand<byte[], V> _spop(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.spop(marshaller.encode(key)), this::decodeValue);
+        return command(async -> async.spop(marshaller.encode(key)), this::decodeValue);
     }
 
     @Override
@@ -222,7 +222,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
     LettuceCommand<Set<byte[]>, Set<V>> _spop(K key, int count) {
         nonNull(key, "key");
         positive(count, "count");
-        return LettuceCommand.of(() -> async.spop(marshaller.encode(key), count), this::decodeSetOfValues);
+        return command(async -> async.spop(marshaller.encode(key), count), this::decodeSetOfValues);
     }
 
     @Override
@@ -232,7 +232,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     LettuceCommand<byte[], V> _srandmember(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.srandmember(marshaller.encode(key)), this::decodeValue);
+        return command(async -> async.srandmember(marshaller.encode(key)), this::decodeValue);
     }
 
     @Override
@@ -242,7 +242,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
 
     LettuceCommand<List<byte[]>, List<V>> _srandmember(K key, int count) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.srandmember(marshaller.encode(key), count), this::decodeListOfValues);
+        return command(async -> async.srandmember(marshaller.encode(key), count), this::decodeListOfValues);
     }
 
     @SafeVarargs
@@ -256,7 +256,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(key, "key");
         notNullOrEmpty(members, "members");
         doesNotContainNull(members, "members");
-        return LettuceCommand.of(() -> async.srem(marshaller.encode(key), marshaller.encodeAsArray(members)),
+        return command(async -> async.srem(marshaller.encode(key), marshaller.encodeAsArray(members)),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -271,9 +271,9 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
+            return failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sunion(marshaller.encodeAsArray(keys)), this::decodeSetOfValues);
+        return command(async -> async.sunion(marshaller.encodeAsArray(keys)), this::decodeSetOfValues);
     }
 
     @SafeVarargs
@@ -288,22 +288,22 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
         if (keys.length < 2) {
-            return LettuceCommand.failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
+            return failing(new IllegalArgumentException("`keys` must contain at least 2 keys"));
         }
-        return LettuceCommand.of(() -> async.sunionstore(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
+        return command(async -> async.sunionstore(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
     }
 
     @Override
     public ReactiveSScanCursor<V> sscan(K key) {
         nonNull(key, "key");
-        return new LettuceReactiveSScanCursorImpl<>(async, marshaller.encode(key), this::decodeListOfValues);
+        return new LettuceReactiveSScanCursorImpl<>(source, marshaller.encode(key), this::decodeListOfValues);
     }
 
     @Override
     public ReactiveSScanCursor<V> sscan(K key, ScanArgs scanArgs) {
         nonNull(key, "key");
         nonNull(scanArgs, "scanArgs");
-        return new LettuceReactiveSScanCursorImpl<>(async, marshaller.encode(key),
+        return new LettuceReactiveSScanCursorImpl<>(source, marshaller.encode(key),
                 LettuceCommonConverters.toLettuceScanArgs(scanArgs), this::decodeListOfValues);
     }
 
@@ -321,7 +321,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(key, "key");
         nonNull(sortArguments, "sortArguments");
         io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(sortArguments);
-        return LettuceCommand.of(() -> async.sort(marshaller.encode(key), lettuceArgs), this::decodeListOfValues);
+        return command(async -> async.sort(marshaller.encode(key), lettuceArgs), this::decodeListOfValues);
     }
 
     @Override
@@ -334,7 +334,7 @@ public class LettuceReactiveSetCommandsImpl<K, V> extends AbstractLettuceCommand
         nonNull(destination, "destination");
         nonNull(args, "args");
         io.lettuce.core.SortArgs lettuceArgs = LettuceCommonConverters.toLettuceSortArgs(args);
-        return LettuceCommand.of(() -> async.sortStore(marshaller.encode(key), lettuceArgs, marshaller.encode(destination)));
+        return command(async -> async.sortStore(marshaller.encode(key), lettuceArgs, marshaller.encode(destination)));
     }
 
     @Override
