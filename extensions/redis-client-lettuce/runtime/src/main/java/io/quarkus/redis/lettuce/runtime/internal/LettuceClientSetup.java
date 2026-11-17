@@ -87,6 +87,18 @@ public final class LettuceClientSetup {
     }
 
     /**
+     * Shuts the shared client resources down and puts Lettuce's transport switches back to what they held before
+     * {@link #createResources(Vertx)} aligned them.
+     */
+    public static void shutdownResources(LettuceClientResources resources) {
+        try {
+            resources.shutdown();
+        } finally {
+            LettuceTransport.restore();
+        }
+    }
+
+    /**
      * The client of the configured {@code client-type}: a cluster client discovering the topology from all the
      * configured hosts; a Sentinel client following the master the configured hosts (the sentinels) monitor under
      * {@code master-name}; a replication client discovering the master and its replicas from the first host that

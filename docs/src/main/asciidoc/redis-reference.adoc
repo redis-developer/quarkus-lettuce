@@ -1350,6 +1350,7 @@ The Pub/Sub callbacks of a subscriber run on the Vert.x context it subscribed on
 A subscriber without a context, one created at startup for instance, gets an event loop context for its callbacks when it subscribes.
 A subscriber on a worker context gets its callbacks on the worker threads of that context, one at a time, where the Vert.x client runs them on an event loop.
 Lettuce uses the Netty transport Vert.x selected (`quarkus.vertx.native-transport` and `quarkus.vertx.native-transport-type`), io_uring included, so a native transport jar on the class path does not make the two diverge.
+It does so by setting Lettuce's `io.lettuce.core.epoll`, `io.lettuce.core.kqueue` and `io.lettuce.core.iouring` system properties at startup: one that is already set to the opposite of what the Vert.x transport needs is overridden, with a warning, and the properties are put back when the application stops.
 
 == Configure Redis observability
 
