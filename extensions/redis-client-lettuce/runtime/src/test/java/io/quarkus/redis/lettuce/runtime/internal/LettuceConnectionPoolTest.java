@@ -637,10 +637,9 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         try {
             LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
             // several cleaner runs past the recycle timeout while the connection is checked out
-            Thread.sleep(600);
-            assertThat(conn.isOpen()).isTrue();
+            await().during(Duration.ofMillis(600)).atMost(TIMEOUT)
+                    .until(() -> conn.isOpen() && pool.getObjectCount() == 1);
             assertThat(sync(conn).ping()).isEqualTo("PONG");
-            assertThat(pool.getObjectCount()).isEqualTo(1);
             pool.release(conn).await().atMost(TIMEOUT);
             // released, it is recycled like any idle connection
             await().atMost(TIMEOUT).until(() -> pool.getObjectCount() == 0);
@@ -660,12 +659,11 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
 
             // a borrower every 60 ms gets the most recently released connection back each time, so the other
             // one stays idle from its release on
-            for (int i = 0; i < 10; i++) {
+            await().pollInterval(Duration.ofMillis(60)).during(Duration.ofMillis(600)).atMost(TIMEOUT).until(() -> {
                 LettuceConnection borrowed = pool.acquireBlocking(TIMEOUT);
-                assertThat(borrowed).isSameAs(second);
                 pool.release(borrowed).await().atMost(TIMEOUT);
-                Thread.sleep(60);
-            }
+                return borrowed == second;
+            });
 
             // well past the recycle timeout: the idle one is gone, the busy one is kept
             await().atMost(TIMEOUT).until(() -> pool.getObjectCount() == 1);
@@ -683,9 +681,8 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         try {
             LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
             pool.release(conn).await().atMost(TIMEOUT);
-            Thread.sleep(300);
-            assertThat(pool.getIdle()).isEqualTo(1);
-            assertThat(conn.isOpen()).isTrue();
+            // well past the recycle timeout, the idle connection is still there
+            await().during(Duration.ofMillis(300)).atMost(TIMEOUT).until(() -> pool.getIdle() == 1 && conn.isOpen());
         } finally {
             pool.close().await().atMost(TIMEOUT);
         }

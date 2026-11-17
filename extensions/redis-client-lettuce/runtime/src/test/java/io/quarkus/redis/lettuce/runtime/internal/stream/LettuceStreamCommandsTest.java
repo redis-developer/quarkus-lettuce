@@ -3,6 +3,7 @@ package io.quarkus.redis.lettuce.runtime.internal.stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.time.Duration;
@@ -298,7 +299,7 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void xClaim() throws InterruptedException {
+    void xClaim() {
         String g1 = "my-group";
         List<String> pending = readWithoutAck(g1, "c1", 2);
 
@@ -308,7 +309,7 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
         assertThat(blockingStream.xack(key, g1, read.toArray(new String[0]))).isEqualTo(2);
 
         // Make sure that the message are pending for a bit of time before claiming the ownership
-        Thread.sleep(5);
+        awaitPendingIdle(g1, Duration.ofMillis(1), 2);
         assertThat(blockingStream.xclaim(key, g1, "c2", Duration.ofMillis(1), pending.toArray(new String[0]))).hasSize(2)
                 .allSatisfy(m -> {
                     assertThat(m.key()).isEqualTo(key);
@@ -320,7 +321,7 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void xClaimWithArgs() throws InterruptedException {
+    void xClaimWithArgs() {
         String g1 = "my-group";
         List<String> pending = readWithoutAck(g1, "c1", 2);
 
@@ -329,7 +330,7 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
                 .allSatisfy(m -> read.add(m.id()));
         assertThat(blockingStream.xack(key, g1, read.toArray(new String[0]))).isEqualTo(2);
 
-        Thread.sleep(5);
+        awaitPendingIdle(g1, Duration.ofMillis(1), 2);
         XClaimArgs args = new XClaimArgs().force().retryCount(5).idle(Duration.ofMillis(1)).justId();
         assertThat(blockingStream.xclaim(key, g1, "c2", Duration.ofMillis(1), args, pending.toArray(new String[0]))).hasSize(2)
                 .allSatisfy(m -> {
@@ -342,10 +343,10 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void xClaimReactive() throws InterruptedException {
+    void xClaimReactive() {
         String g1 = "my-group";
         List<String> pending = readWithoutAck(g1, "c1", 2);
-        Thread.sleep(5);
+        awaitPendingIdle(g1, Duration.ofMillis(1), 2);
 
         List<StreamMessage<String, String, Integer>> claimed = reactiveStream
                 .xclaim(key, g1, "c2", Duration.ofMillis(1), pending.toArray(new String[0])).await().atMost(TIMEOUT);
@@ -358,7 +359,7 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void xReadGroupWithClaim() throws InterruptedException {
+    void xReadGroupWithClaim() {
         assumeTrue(redisVersionAtLeast(8, 4), "XREADGROUP CLAIM requires Redis 8.4");
         String g1 = "my-group";
         blockingStream.xgroupCreate(key, g1, "$", new XGroupCreateArgs().mkstream());
@@ -367,7 +368,7 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
         }
         // c1 reads 3 messages but does not ack them
         assertThat(blockingStream.xreadgroup(g1, "c1", key, ">", new XReadGroupArgs().count(3))).hasSize(3);
-        Thread.sleep(50);
+        awaitPendingIdle(g1, Duration.ofMillis(10), 3);
 
         // c2 reads remaining messages and claims c1's idle messages in one call
         List<StreamMessage<String, String, Integer>> messages = blockingStream.xreadgroup(g1, "c2", key, ">",
@@ -383,7 +384,7 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void xAutoClaim() throws InterruptedException {
+    void xAutoClaim() {
         String g1 = "my-group";
         blockingStream.xgroupCreate(key, g1, "$", new XGroupCreateArgs().mkstream());
         for (int i = 0; i < 10; i++) {
@@ -395,7 +396,7 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
                 .allSatisfy(m -> read.add(m.id()));
         assertThat(blockingStream.xack(key, g1, read.toArray(new String[0]))).isEqualTo(2);
 
-        Thread.sleep(5);
+        awaitPendingIdle(g1, Duration.ofMillis(1), 4);
         var claimed = blockingStream.xautoclaim(key, g1, "c2", Duration.ofMillis(1), "0", 1);
         assertThat(claimed.getMessages()).hasSize(1).allSatisfy(m -> {
             assertThat(m.key()).isEqualTo(key);
@@ -557,7 +558,7 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
     }
 
     @Test
-    void xPendingExtendedTestWithConsumerAndIdle() throws InterruptedException {
+    void xPendingExtendedTestWithConsumerAndIdle() {
         for (int i = 0; i < 100; i++) {
             blockingStream.xadd(key, PAYLOAD);
         }
@@ -566,7 +567,9 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
 
         assertThat(blockingStream.xpending(key, "my-group", StreamRange.of("-", "+"), 10,
                 new XPendingArgs().idle(Duration.ofHours(1)).consumer("consumer-123"))).isEmpty();
-        Thread.sleep(20);
+        await().atMost(Duration.ofSeconds(5)).until(() -> blockingStream.xpending(key, "my-group",
+                StreamRange.of("-", "+"), 10, new XPendingArgs().idle(Duration.ofMillis(10)).consumer("consumer-123"))
+                .size() == 10);
         List<PendingMessage> pending = blockingStream.xpending(key, "my-group", StreamRange.of("-", "+"), 10,
                 new XPendingArgs().idle(Duration.ofMillis(10)).consumer("consumer-123"));
         assertThat(pending).hasSize(10).allSatisfy(msg -> {
@@ -606,6 +609,12 @@ class LettuceStreamCommandsTest extends CommandsTestBase {
     }
 
     /** Creates {@code group}, adds 5 entries and delivers {@code count} of them to {@code consumer} without ack. */
+    /** Waits until {@code count} pending messages of the group have been idle for at least {@code idle}. */
+    private void awaitPendingIdle(String group, Duration idle, int count) {
+        await().atMost(Duration.ofSeconds(5)).until(() -> blockingStream.xpending(key, group, StreamRange.of("-", "+"),
+                100, new XPendingArgs().idle(idle)).size() >= count);
+    }
+
     private List<String> readWithoutAck(String group, String consumer, int count) {
         blockingStream.xgroupCreate(key, group, "$", new XGroupCreateArgs().mkstream());
         for (int i = 0; i < 5; i++) {

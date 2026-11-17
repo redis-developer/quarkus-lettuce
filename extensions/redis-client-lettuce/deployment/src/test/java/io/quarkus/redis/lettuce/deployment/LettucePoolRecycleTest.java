@@ -55,14 +55,9 @@ public class LettucePoolRecycleTest {
     @Test
     void connectionInUseIsNotRecycled() {
         ds.withConnection(pinned -> {
-            try {
-                // several cleaner runs past the recycle timeout while the connection is checked out
-                Thread.sleep(RECYCLE_TIMEOUT.plusMillis(500).toMillis());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException(e);
-            }
-            assertThat(pinned.execute(Command.PING).toString()).isEqualTo("PONG");
+            // several cleaner runs past the recycle timeout while the connection is checked out
+            await().during(RECYCLE_TIMEOUT.plusMillis(500)).atMost(RECYCLE_TIMEOUT.plusSeconds(5))
+                    .until(() -> pinned.execute(Command.PING).toString().equals("PONG"));
         });
     }
 
