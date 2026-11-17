@@ -40,6 +40,34 @@ class LettuceBackendTest {
     }
 
     @Test
+    public void healthCheckPingsEveryDataSourceThroughLettuce() {
+        RestAssured.given()
+                .when()
+                .get("/q/health/ready")
+                .then()
+                .statusCode(200)
+                .body("status", CoreMatchers.is("UP"),
+                        "checks.name", Matchers.contains("Redis connection health check"),
+                        "checks[0].data", Matchers.aMapWithSize(6),
+                        "checks[0].data", Matchers.hasEntry("default", "PONG"),
+                        "checks[0].data", Matchers.hasEntry("secure", "PONG"),
+                        "checks[0].data", Matchers.hasEntry("cluster", "PONG"),
+                        "checks[0].data", Matchers.hasEntry("sentinel", "PONG"),
+                        "checks[0].data", Matchers.hasEntry("replication", "PONG"),
+                        "checks[0].data", Matchers.hasEntry("provided", "PONG"));
+    }
+
+    @Test
+    public void noVertxClientIsCreated() {
+        RestAssured.given()
+                .when()
+                .get("/lettuce/vertx-clients")
+                .then()
+                .statusCode(200)
+                .body(CoreMatchers.is("0"));
+    }
+
+    @Test
     public void pingCommand() {
         RestAssured.given()
                 .when()

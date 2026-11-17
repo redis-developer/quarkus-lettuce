@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -78,6 +79,9 @@ public class RedisClientProcessor {
 
     private static final String FEATURE = "redis-client";
 
+    private static final DotName HEALTH_CHECK = DotName
+            .createSimple("io.quarkus.redis.runtime.client.health.RedisHealthCheck");
+
     private static final List<DotName> SUPPORTED_INJECTION_TYPE = List.of(
             // Legacy types
             DotName.createSimple(RedisClient.class.getName()),
@@ -135,6 +139,7 @@ public class RedisClientProcessor {
             RedisBuildTimeConfig buildTimeConfig,
             BeanArchiveIndexBuildItem indexBuildItem,
             BeanDiscoveryFinishedBuildItem beans,
+            Optional<RedisDataSourceProviderBuildItem> dataSourceProvider,
             BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
             ApplicationArchivesBuildItem applicationArchivesBuildItem, LaunchModeBuildItem launchMode,
             BuildProducer<NativeImageResourceBuildItem> nativeImageResources,
@@ -143,28 +148,33 @@ public class RedisClientProcessor {
         // Collect the used redis clients, the unused clients will not be instantiated.
         Set<String> names = new HashSet<>();
 
-        // Add the names from the requested clients.
-        for (RequestedRedisClientBuildItem client : clients) {
-            names.add(client.name);
+        if (dataSourceProvider.isPresent()) {
+            // Another backend provides the data sources: the Vert.x client is only created for the clients using it.
+            collectVertxClientNames(names, clients, beans, buildTimeConfig);
+        } else {
+            // Add the names from the requested clients.
+            for (RequestedRedisClientBuildItem client : clients) {
+                names.add(client.name);
+            }
+
+            IndexView indexView = indexBuildItem.getIndex();
+            Collection<AnnotationInstance> clientAnnotations = indexView.getAnnotations(REDIS_CLIENT_ANNOTATION);
+            for (AnnotationInstance annotation : clientAnnotations) {
+                names.add(annotation.value().asString());
+            }
+
+            // Check if the application use the default Redis client.
+            beans.getInjectionPoints().stream().filter(InjectionPointInfo::hasDefaultedQualifier)
+                    .filter(i -> SUPPORTED_INJECTION_TYPE.contains(i.getRequiredType().name()))
+                    .findAny()
+                    .ifPresent(x -> names.add(DEFAULT_CLIENT_NAME));
+
+            beans.getInjectionPoints().stream()
+                    .filter(i -> SUPPORTED_INJECTION_TYPE.contains(i.getRequiredType().name()))
+                    .filter(InjectionPointInfo::isProgrammaticLookup)
+                    .findAny()
+                    .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, Config.get())));
         }
-
-        IndexView indexView = indexBuildItem.getIndex();
-        Collection<AnnotationInstance> clientAnnotations = indexView.getAnnotations(REDIS_CLIENT_ANNOTATION);
-        for (AnnotationInstance annotation : clientAnnotations) {
-            names.add(annotation.value().asString());
-        }
-
-        // Check if the application use the default Redis client.
-        beans.getInjectionPoints().stream().filter(InjectionPointInfo::hasDefaultedQualifier)
-                .filter(i -> SUPPORTED_INJECTION_TYPE.contains(i.getRequiredType().name()))
-                .findAny()
-                .ifPresent(x -> names.add(DEFAULT_CLIENT_NAME));
-
-        beans.getInjectionPoints().stream()
-                .filter(i -> SUPPORTED_INJECTION_TYPE.contains(i.getRequiredType().name()))
-                .filter(InjectionPointInfo::isProgrammaticLookup)
-                .findAny()
-                .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, Config.get())));
 
         // Register services and synthetic beans for each client name
         for (String name : names) {
@@ -177,10 +187,50 @@ public class RedisClientProcessor {
         // Handle data import (chained sequentially since clients may share a server)
         String previousPreload = null;
         for (String name : buildTimeConfig.clientsNames()) {
-            previousPreload = preloadRedisData(name, buildTimeConfig.clients().get(name), applicationArchivesBuildItem,
+            String preload = preloadRedisData(name, buildTimeConfig.clients().get(name), applicationArchivesBuildItem,
                     launchMode.getLaunchMode(),
                     nativeImageResources, hotDeploymentWatchedFiles, reg, previousPreload);
+            if (dataSourceProvider.isPresent() && !Objects.equals(preload, previousPreload) && !names.contains(name)) {
+                // The data is imported through the Vert.x client: create it for the client, without its beans.
+                registerConnectionService(reg, name);
+            }
+            previousPreload = preload;
         }
+    }
+
+    /**
+     * Collects the names of the clients that need the Vert.x client when another backend provides the data sources:
+     * the ones requested by an extension for more than their data sources, and the ones injected through a Vert.x
+     * client type. The health check looks up every Vert.x client, which is not a use of any of them.
+     */
+    private static void collectVertxClientNames(Set<String> names, List<RequestedRedisClientBuildItem> clients,
+            BeanDiscoveryFinishedBuildItem beans, RedisBuildTimeConfig buildTimeConfig) {
+        for (RequestedRedisClientBuildItem client : clients) {
+            if (!client.dataSourceOnly) {
+                names.add(client.name);
+            }
+        }
+        for (InjectionPointInfo injectionPoint : beans.getInjectionPoints()) {
+            if (!SUPPORTED_INJECTION_TYPE.contains(injectionPoint.getRequiredType().name())
+                    || isHealthCheck(injectionPoint)) {
+                continue;
+            }
+            AnnotationInstance clientName = injectionPoint.getRequiredQualifier(REDIS_CLIENT_ANNOTATION);
+            if (clientName != null) {
+                names.add(clientName.value().asString());
+            } else if (injectionPoint.hasDefaultedQualifier()) {
+                names.add(DEFAULT_CLIENT_NAME);
+            }
+            if (injectionPoint.isProgrammaticLookup()) {
+                names.addAll(configuredClientNames(buildTimeConfig, Config.get()));
+            }
+        }
+    }
+
+    private static boolean isHealthCheck(InjectionPointInfo injectionPoint) {
+        return injectionPoint.getTargetBean()
+                .filter(bean -> HEALTH_CHECK.equals(bean.getBeanClass()))
+                .isPresent();
     }
 
     /**
@@ -188,34 +238,7 @@ public class RedisClientProcessor {
      * for a single named Redis client.
      */
     private void registerClientServices(ServiceRegistrar reg, String name) {
-        // Core connection service: creates the Vert.x Redis client
-        reg.forService(RedisClientConnection.class, name)
-                .atPhase(Phase.DATA)
-                .require(RedisConfig.class)
-                .require(Vertx.class)
-                .require(TlsConfigurationRegistry.class)
-                .require(BeanContainer.class)
-                .request(ProxyConfigurationRegistry.class)
-                .optional()
-                .onStart((ctx, config, vertx, tlsReg, bc, proxyRegOpt) -> {
-                    RedisClientConfig clientConfig = config.clients().get(name);
-                    if (!clientConfig.active()
-                            || (clientConfig.hosts().isEmpty() && clientConfig.hostsProviderName().isEmpty())) {
-                        return Optional.empty();
-                    }
-                    ObservableRedisMetrics metrics = null;
-                    Instance<ObservableRedisMetrics> inst = jakarta.enterprise.inject.spi.CDI.current()
-                            .select(ObservableRedisMetrics.class);
-                    if (inst.isResolvable()) {
-                        metrics = inst.get();
-                    }
-                    RedisClientConnection conn = RedisClientConnection.create(name,
-                            VertxRedisClientFactory.create(name, vertx, clientConfig, tlsReg,
-                                    proxyRegOpt.orElse(null)),
-                            metrics);
-                    ctx.onStop(() -> conn.redis().close());
-                    return Optional.of(conn);
-                });
+        registerConnectionService(reg, name);
 
         // Mutiny Redis client bean service
         reg.forService(io.vertx.mutiny.redis.client.Redis.class, name)
@@ -264,6 +287,40 @@ public class RedisClientProcessor {
                 .optional()
                 .onStart((ctx, connOpt) -> connOpt.map(conn -> new io.quarkus.redis.runtime.client.ReactiveRedisClientImpl(
                         conn.redis(), conn.api())));
+    }
+
+    /**
+     * Register the core client connection service for a single named Redis client.
+     */
+    private void registerConnectionService(ServiceRegistrar reg, String name) {
+        // Core connection service: creates the Vert.x Redis client
+        reg.forService(RedisClientConnection.class, name)
+                .atPhase(Phase.DATA)
+                .require(RedisConfig.class)
+                .require(Vertx.class)
+                .require(TlsConfigurationRegistry.class)
+                .require(BeanContainer.class)
+                .request(ProxyConfigurationRegistry.class)
+                .optional()
+                .onStart((ctx, config, vertx, tlsReg, bc, proxyRegOpt) -> {
+                    RedisClientConfig clientConfig = config.clients().get(name);
+                    if (!clientConfig.active()
+                            || (clientConfig.hosts().isEmpty() && clientConfig.hostsProviderName().isEmpty())) {
+                        return Optional.empty();
+                    }
+                    ObservableRedisMetrics metrics = null;
+                    Instance<ObservableRedisMetrics> inst = jakarta.enterprise.inject.spi.CDI.current()
+                            .select(ObservableRedisMetrics.class);
+                    if (inst.isResolvable()) {
+                        metrics = inst.get();
+                    }
+                    RedisClientConnection conn = RedisClientConnection.create(name,
+                            VertxRedisClientFactory.create(name, vertx, clientConfig, tlsReg,
+                                    proxyRegOpt.orElse(null)),
+                            metrics);
+                    ctx.onStop(() -> conn.redis().close());
+                    return Optional.of(conn);
+                });
     }
 
     /**

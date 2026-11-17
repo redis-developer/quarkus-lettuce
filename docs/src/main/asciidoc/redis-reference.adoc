@@ -1297,9 +1297,10 @@ The other groups (graph and time series) are not implemented yet and throw an `U
 The data source methods exposing Vert.x types, such as `ReactiveRedisDataSource.getRedis()`, are not supported by the Lettuce backend and throw an `UnsupportedOperationException`; use `execute(...)` instead.
 
 Adding the extension routes every `RedisDataSource` and `ReactiveRedisDataSource` of the application through Lettuce, including the ones injected by other extensions.
-In this initial version the Vert.x Redis client is still created for the same clients: the health check pings it, and `quarkus-redis-cache` and the Micrometer Redis metrics keep using it.
-The OpenTelemetry spans of the Redis commands are recorded by the Vert.x client too, so the commands sent through the Lettuce backend are not traced yet.
-This is transitional; a Lettuce-based health check, metrics and tracing are planned.
+The Vert.x Redis client is not created for a client that is only used through its data sources.
+It is created for a client that needs it: one injected through a Vert.x client type (see <<Use the Vert.x redis client>>), the one `quarkus-redis-cache` uses, and one that has a load script (see <<Preload data into Redis>>), which is imported through the Vert.x client.
+The <<redis-health-check,health check>> pings a client through its Lettuce data source when it has no Vert.x client, and reports it under the same name; a client that is only injected through the Lettuce types is not checked.
+The Micrometer Redis metrics and the OpenTelemetry spans of the Redis commands are recorded by the Vert.x client, so the commands sent through the Lettuce backend are not measured or traced yet; Lettuce-based metrics and tracing are planned.
 
 [#connection-pooling-and-blocking-commands]
 === Connection pooling and blocking commands

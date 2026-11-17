@@ -66,7 +66,8 @@ import io.vertx.core.Vertx;
  * For every Redis client requested through a {@link RedisDataSource} or {@link ReactiveRedisDataSource}
  * injection point (see {@link RequestedRedisClientBuildItem}), the data source beans are backed by Lettuce
  * instead of the Vert.x Redis client; the {@link RedisDataSourceProviderBuildItem} tells the
- * {@code quarkus-redis-client} extension to skip its own data source beans.
+ * {@code quarkus-redis-client} extension to skip its own data source beans, and the Vert.x Redis client of the
+ * clients that are only used through their data sources.
  * <p>
  * The data sources open their connection with their first command, not at startup.
  * <p>

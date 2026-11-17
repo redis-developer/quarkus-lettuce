@@ -11,9 +11,12 @@ import io.quarkus.builder.item.SimpleBuildItem;
  * consumed by {@link RedisDatasourceProcessor}. As a {@link SimpleBuildItem} it can only be produced once per
  * build, so two alternative backends on the classpath fail the build instead of registering ambiguous beans.
  * <p>
- * The codecs service and the Vert.x Redis client services and beans ({@code io.vertx.mutiny.redis.client.Redis},
- * {@code RedisAPI}, ...) are still registered for the requested clients, so the features relying on them (health
- * check, {@code quarkus-redis-cache}) keep working with the Vert.x backend.
+ * The codecs service is still registered. The Vert.x Redis client services and beans
+ * ({@code io.vertx.mutiny.redis.client.Redis}, {@code RedisAPI}, ...) are only registered for the clients that need
+ * them: the ones injected through a Vert.x Redis client type, and the ones requested by another extension with a
+ * {@link RequestedRedisClientBuildItem} that is not limited to the data sources (such as {@code quarkus-redis-cache}).
+ * A client used only through its data sources gets no Vert.x Redis client, and the health check pings it through its
+ * data source.
  */
 public final class RedisDataSourceProviderBuildItem extends SimpleBuildItem {
 
