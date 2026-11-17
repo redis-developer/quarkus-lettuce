@@ -270,7 +270,7 @@ public class LettuceProcessor {
                 .require(Vertx.class)
                 .onStart((ctx, vertx) -> {
                     LettuceClientResources resources = LettuceClientSetup.createResources(vertx);
-                    ctx.onStop(resources::shutdown);
+                    ctx.onStop(() -> LettuceClientSetup.shutdownResources(resources));
                     return resources;
                 });
         reg.forService(ClientResources.class)

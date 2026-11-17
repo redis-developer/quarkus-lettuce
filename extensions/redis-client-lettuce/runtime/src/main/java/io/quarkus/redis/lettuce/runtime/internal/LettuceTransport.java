@@ -1,5 +1,9 @@
 package io.quarkus.redis.lettuce.runtime.internal;
 
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import org.jboss.logging.Logger;
 
 import io.lettuce.core.resource.Transports;
@@ -16,10 +20,20 @@ import io.vertx.core.internal.VertxInternal;
  * "incompatible event loop type". So, before Lettuce's transport providers initialize, their switches are set from
  * the transport Vert.x runs on, and the channel class Lettuce then selects is verified against it. Lettuce 8 and
  * Vert.x 5 both use the io_uring transport of Netty 4.2, so io_uring is shared like the others.
+ * <p>
+ * The switches are system properties. One that is already set to what the Vert.x transport needs is left alone; one
+ * set to the opposite cannot work, so it is overridden, with a warning. {@link #restore()} puts back what the
+ * switches held, when the client resources are shut down.
  */
 public final class LettuceTransport {
 
     private static final Logger LOGGER = Logger.getLogger(LettuceTransport.class);
+
+    /**
+     * What the switches held before {@link #setSwitches(String)} changed them, {@code null} for one that was not set;
+     * {@code null} when nothing is to be restored.
+     */
+    private static Map<String, String> previous;
 
     private LettuceTransport() {
     }
@@ -38,9 +52,7 @@ public final class LettuceTransport {
                     ((VertxInternal) vertx).transport().getClass().getName());
             return;
         }
-        System.setProperty("io.lettuce.core.epoll", Boolean.toString("epoll".equals(name)));
-        System.setProperty("io.lettuce.core.kqueue", Boolean.toString("kqueue".equals(name)));
-        System.setProperty("io.lettuce.core.iouring", Boolean.toString("io_uring".equals(name)));
+        setSwitches(name);
         String expected = channelClass(name);
         Class<?> channel = Transports.socketChannelClass();
         if (!channel.getName().equals(expected)) {
@@ -52,6 +64,53 @@ public final class LettuceTransport {
                     + "transport", channel.getName(), name));
         }
         LOGGER.infof("Lettuce runs on the %s transport Vert.x selected (%s)", name, channel.getSimpleName());
+    }
+
+    /**
+     * Sets Lettuce's transport switches for the Vert.x transport of the given name, remembering what they held for
+     * {@link #restore()}. A switch already set to the needed value is not written; one set to the opposite is
+     * overridden, with a warning.
+     */
+    static synchronized void setSwitches(String name) {
+        Map<String, Boolean> switches = new LinkedHashMap<>();
+        switches.put("io.lettuce.core.epoll", "epoll".equals(name));
+        switches.put("io.lettuce.core.kqueue", "kqueue".equals(name));
+        switches.put("io.lettuce.core.iouring", "io_uring".equals(name));
+        Map<String, String> before = new HashMap<>();
+        for (Map.Entry<String, Boolean> entry : switches.entrySet()) {
+            String property = entry.getKey();
+            String needed = entry.getValue().toString();
+            String current = System.getProperty(property);
+            before.put(property, current);
+            if (current == null) {
+                System.setProperty(property, needed);
+            } else if (Boolean.parseBoolean(current) != entry.getValue()) {
+                LOGGER.warnf("The system property %s=%s is overridden with %s: Lettuce runs on the event loops of "
+                        + "Vert.x, which uses its %s transport", property, current, needed, name);
+                System.setProperty(property, needed);
+            }
+        }
+        if (previous == null) {
+            previous = before;
+        }
+    }
+
+    /**
+     * Puts back what Lettuce's transport switches held before they were set. Lettuce's transport providers read them
+     * once, when they initialize, so this does not change the transport of a running client.
+     */
+    public static synchronized void restore() {
+        if (previous == null) {
+            return;
+        }
+        for (Map.Entry<String, String> entry : previous.entrySet()) {
+            if (entry.getValue() == null) {
+                System.clearProperty(entry.getKey());
+            } else {
+                System.setProperty(entry.getKey(), entry.getValue());
+            }
+        }
+        previous = null;
     }
 
     /**
