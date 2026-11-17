@@ -747,7 +747,7 @@ class LettuceBackendTest {
                 .queryParam("longitude", 15).queryParam("latitude", 37).queryParam("radius", 200)
                 .when().get("/lettuce/geo/search/" + key).then()
                 .statusCode(200).extract().jsonPath().getList("$", String.class);
-        assertThat(found.size()).as("expected both members within 200 km, got " + found).isEqualTo(2);
+        assertThat(found).as("members within 200 km").hasSize(2);
         // ascending: Catania (~56 km) comes before Palermo (~190 km)
         String[] first = found.get(0).split(",");
         String[] second = found.get(1).split(",");
@@ -1180,8 +1180,8 @@ class LettuceBackendTest {
         // objkeys of $ -> [[name, age]]
         String prefix = "false,9,true,[2],[2],true,[14],[number],";
         String suffix = ",1,[[name, age]]";
-        assertThat(body).as(body).startsWith(prefix);
-        assertThat(body).as(body).endsWith(suffix);
+        assertThat(body).startsWith(prefix);
+        assertThat(body).endsWith(suffix);
         JsonObject document = new JsonObject(body.substring(prefix.length(), body.length() - suffix.length()));
         assertThat(document)
                 .isEqualTo(new JsonObject("{\"name\":\"luke skywalker\",\"tags\":[\"jedi\",\"pilot\"],\"age\":22.0}"));
@@ -1948,7 +1948,7 @@ class LettuceBackendTest {
         // auto-generated id: <millis>-<sequence>
         String generated = RestAssured.given().body("a=4").when().post("/lettuce/stream/add/" + key).then()
                 .statusCode(200).extract().asString();
-        assertThat(generated).as(generated).matches("\\d+-\\d+");
+        assertThat(generated).matches("\\d+-\\d+");
 
         RestAssured.given().when().get("/lettuce/stream/len/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("3"));
@@ -2280,7 +2280,7 @@ class LettuceBackendTest {
                 .then().statusCode(200).body(CoreMatchers.is("1-0"));
         String generated = RestAssured.given().body("a=2").when().post("/lettuce/stream/reactive/add/" + key).then()
                 .statusCode(200).extract().asString();
-        assertThat(generated).as(generated).matches("\\d+-\\d+");
+        assertThat(generated).matches("\\d+-\\d+");
         RestAssured.given().when().get("/lettuce/stream/reactive/len/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("2"));
         RestAssured.given().when().get("/lettuce/stream/reactive/range/" + key).then()
