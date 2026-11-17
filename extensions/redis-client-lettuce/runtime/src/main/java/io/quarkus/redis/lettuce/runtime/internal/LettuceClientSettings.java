@@ -153,13 +153,11 @@ public final class LettuceClientSettings {
         configureTls(name, config, tlsRegistry, net, hosts);
 
         ClientOptions.Builder options = ClientOptions.builder();
-        // max-waiting-handlers bounds the commands queued on a connection. The Vert.x client sends every command
-        // through a pooled connection, each with its own queue, whereas the ordinary commands share one connection
-        // here, so its default (2048) would bound the whole client: the property is applied only when set, and
-        // Lettuce does not bound the queue otherwise.
-        if (isSet(getPropertyName(name, "max-waiting-handlers"))) {
-            options.requestQueueSize(config.maxWaitingHandlers());
-        }
+        // max-waiting-handlers bounds the commands queued on a connection, those awaiting their reply and those
+        // buffered while a lost connection is re-established. Lettuce does not bound that queue by default, so
+        // commands sent to a server that is slow or away would pile up in memory: the property is always applied,
+        // with its default (2048) when it is not set.
+        options.requestQueueSize(config.maxWaitingHandlers());
         Optional<ProtocolVersion> protocolVersion = protocolVersion(config);
         if (protocolVersion.isPresent()) {
             options.protocolVersion(protocolVersion.get());
