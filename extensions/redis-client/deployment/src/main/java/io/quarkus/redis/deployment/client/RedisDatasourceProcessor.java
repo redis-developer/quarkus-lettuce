@@ -72,7 +72,7 @@ public class RedisDatasourceProcessor {
                 .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, Config.get())));
 
         for (String name : names) {
-            request.produce(new RequestedRedisClientBuildItem(name));
+            request.produce(RequestedRedisClientBuildItem.dataSource(name));
         }
     }
 
@@ -112,8 +112,8 @@ public class RedisDatasourceProcessor {
                 });
 
         if (dataSourceProvider.isPresent()) {
-            // Another backend provides the data source services and beans; the codecs service above and the Vert.x
-            // client services and beans (see RedisClientProcessor) are kept.
+            // Another backend provides the data source services and beans; the codecs service above is kept, and
+            // the Vert.x client is only created for the clients using it (see RedisClientProcessor).
             return;
         }
 
