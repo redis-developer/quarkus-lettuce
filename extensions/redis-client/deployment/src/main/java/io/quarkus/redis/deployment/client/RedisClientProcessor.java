@@ -148,32 +148,32 @@ public class RedisClientProcessor {
         // Collect the used redis clients, the unused clients will not be instantiated.
         Set<String> names = new HashSet<>();
 
+        // Add the names from the requested clients.
+        for (RequestedRedisClientBuildItem client : clients) {
+            names.add(client.name);
+        }
+
+        IndexView indexView = indexBuildItem.getIndex();
+        Collection<AnnotationInstance> clientAnnotations = indexView.getAnnotations(REDIS_CLIENT_ANNOTATION);
+        for (AnnotationInstance annotation : clientAnnotations) {
+            names.add(annotation.value().asString());
+        }
+
+        // Check if the application use the default Redis client.
+        beans.getInjectionPoints().stream().filter(InjectionPointInfo::hasDefaultedQualifier)
+                .filter(i -> SUPPORTED_INJECTION_TYPE.contains(i.getRequiredType().name()))
+                .findAny()
+                .ifPresent(x -> names.add(DEFAULT_CLIENT_NAME));
+
+        beans.getInjectionPoints().stream()
+                .filter(i -> SUPPORTED_INJECTION_TYPE.contains(i.getRequiredType().name()))
+                .filter(InjectionPointInfo::isProgrammaticLookup)
+                .findAny()
+                .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, Config.get())));
+
         if (dataSourceProvider.isPresent()) {
-            // Another backend provides the data sources: the Vert.x client is only created for the clients using it.
-            collectVertxClientNames(names, clients, beans, buildTimeConfig);
-        } else {
-            // Add the names from the requested clients.
-            for (RequestedRedisClientBuildItem client : clients) {
-                names.add(client.name);
-            }
-
-            IndexView indexView = indexBuildItem.getIndex();
-            Collection<AnnotationInstance> clientAnnotations = indexView.getAnnotations(REDIS_CLIENT_ANNOTATION);
-            for (AnnotationInstance annotation : clientAnnotations) {
-                names.add(annotation.value().asString());
-            }
-
-            // Check if the application use the default Redis client.
-            beans.getInjectionPoints().stream().filter(InjectionPointInfo::hasDefaultedQualifier)
-                    .filter(i -> SUPPORTED_INJECTION_TYPE.contains(i.getRequiredType().name()))
-                    .findAny()
-                    .ifPresent(x -> names.add(DEFAULT_CLIENT_NAME));
-
-            beans.getInjectionPoints().stream()
-                    .filter(i -> SUPPORTED_INJECTION_TYPE.contains(i.getRequiredType().name()))
-                    .filter(InjectionPointInfo::isProgrammaticLookup)
-                    .findAny()
-                    .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, Config.get())));
+            // Another backend provides the data sources: of these clients, only the ones using the Vert.x client keep it.
+            names.retainAll(vertxClientNames(clients, beans, buildTimeConfig));
         }
 
         // Register services and synthetic beans for each client name
@@ -199,12 +199,13 @@ public class RedisClientProcessor {
     }
 
     /**
-     * Collects the names of the clients that need the Vert.x client when another backend provides the data sources:
+     * The names of the clients that need the Vert.x client when another backend provides the data sources:
      * the ones requested by an extension for more than their data sources, and the ones injected through a Vert.x
      * client type. The health check looks up every Vert.x client, which is not a use of any of them.
      */
-    private static void collectVertxClientNames(Set<String> names, List<RequestedRedisClientBuildItem> clients,
+    private static Set<String> vertxClientNames(List<RequestedRedisClientBuildItem> clients,
             BeanDiscoveryFinishedBuildItem beans, RedisBuildTimeConfig buildTimeConfig) {
+        Set<String> names = new HashSet<>();
         for (RequestedRedisClientBuildItem client : clients) {
             if (!client.dataSourceOnly) {
                 names.add(client.name);
@@ -225,6 +226,7 @@ public class RedisClientProcessor {
                 names.addAll(configuredClientNames(buildTimeConfig, Config.get()));
             }
         }
+        return names;
     }
 
     private static boolean isHealthCheck(InjectionPointInfo injectionPoint) {
