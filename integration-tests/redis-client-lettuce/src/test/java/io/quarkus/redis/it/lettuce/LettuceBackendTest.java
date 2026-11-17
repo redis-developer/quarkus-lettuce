@@ -1,17 +1,14 @@
 package io.quarkus.redis.it.lettuce;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
+import static org.awaitility.Awaitility.await;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
-import java.util.function.Supplier;
 
 import org.hamcrest.CoreMatchers;
 import org.hamcrest.Matchers;
@@ -24,6 +21,9 @@ import io.vertx.core.json.JsonObject;
 
 @QuarkusTest
 class LettuceBackendTest {
+
+    /** How long an asynchronous outcome (Pub/Sub delivery, background indexing) is waited for. */
+    private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     String getKey(String k) {
         return k;
@@ -742,7 +742,7 @@ class LettuceBackendTest {
 
         double distance = Double.parseDouble(RestAssured.given().when()
                 .get("/lettuce/geo/dist/" + key + "/Palermo/Catania").then().statusCode(200).extract().asString());
-        assertEquals(166.2742, distance, 0.001);
+        assertThat(distance).isCloseTo(166.2742, within(0.001));
         RestAssured.given().when().get("/lettuce/geo/dist/" + key + "/Palermo/missing").then()
                 .statusCode(204);
 
@@ -756,8 +756,8 @@ class LettuceBackendTest {
         String[] position = RestAssured.given().when().get("/lettuce/geo/pos/" + key + "/Palermo").then()
                 .statusCode(200).extract().asString().split(",");
         // geohash encoding loses precision, so the stored position is only close to the submitted one
-        assertEquals(13.361389, Double.parseDouble(position[0]), 0.0001);
-        assertEquals(38.115556, Double.parseDouble(position[1]), 0.0001);
+        assertThat(Double.parseDouble(position[0])).isCloseTo(13.361389, within(0.0001));
+        assertThat(Double.parseDouble(position[1])).isCloseTo(38.115556, within(0.0001));
         RestAssured.given().when().get("/lettuce/geo/pos/" + key + "/missing").then()
                 .statusCode(204);
 
@@ -775,14 +775,14 @@ class LettuceBackendTest {
                 .queryParam("longitude", 15).queryParam("latitude", 37).queryParam("radius", 200)
                 .when().get("/lettuce/geo/search/" + key).then()
                 .statusCode(200).extract().jsonPath().getList("$", String.class);
-        assertEquals(2, found.size(), () -> "expected both members within 200 km, got " + found);
+        assertThat(found).as("members within 200 km").hasSize(2);
         // ascending: Catania (~56 km) comes before Palermo (~190 km)
         String[] first = found.get(0).split(",");
         String[] second = found.get(1).split(",");
-        assertEquals("Catania", first[0]);
-        assertEquals(56.4413, Double.parseDouble(first[1]), 0.001);
-        assertEquals("Palermo", second[0]);
-        assertEquals(190.4424, Double.parseDouble(second[1]), 0.001);
+        assertThat(first[0]).isEqualTo("Catania");
+        assertThat(Double.parseDouble(first[1])).isCloseTo(56.4413, within(0.001));
+        assertThat(second[0]).isEqualTo("Palermo");
+        assertThat(Double.parseDouble(second[1])).isCloseTo(190.4424, within(0.001));
 
         RestAssured.given()
                 .queryParam("longitude", 15).queryParam("latitude", 37).queryParam("radius", 100)
@@ -838,7 +838,7 @@ class LettuceBackendTest {
         double distance = Double.parseDouble(RestAssured.given().when()
                 .get("/lettuce/geo/reactive/dist/" + key + "/Palermo/Catania").then().statusCode(200).extract()
                 .asString());
-        assertEquals(166.2742, distance, 0.001);
+        assertThat(distance).isCloseTo(166.2742, within(0.001));
         // blocking and reactive views agree on the same key
         RestAssured.given().when().get("/lettuce/geo/hash/" + key + "/Palermo").then()
                 .statusCode(200).body(CoreMatchers.is("sqc8b49rny0"));
@@ -927,9 +927,9 @@ class LettuceBackendTest {
         long inside1 = Long.parseLong(parts[0]);
         long inside2 = Long.parseLong(parts[1]);
         long outside = Long.parseLong(parts[2]);
-        assertTrue(inside1 > 0 && inside2 > 0 && outside > 0, () -> "expected positive ids, got " + body);
-        assertEquals(inside1, inside2, () -> "expected stable id inside block, got " + body);
-        assertNotEquals(inside1, outside, () -> "expected fresh connection inside block, got " + body);
+        assertThat(List.of(inside1, inside2, outside)).as("expected positive ids, got " + body).allMatch(id -> id > 0);
+        assertThat(inside2).as("expected stable id inside block, got " + body).isEqualTo(inside1);
+        assertThat(outside).as("expected fresh connection inside block, got " + body).isNotEqualTo(inside1);
     }
 
     @Test
@@ -940,9 +940,9 @@ class LettuceBackendTest {
         long inside1 = Long.parseLong(parts[0]);
         long inside2 = Long.parseLong(parts[1]);
         long outside = Long.parseLong(parts[2]);
-        assertTrue(inside1 > 0 && inside2 > 0 && outside > 0, () -> "expected positive ids, got " + body);
-        assertEquals(inside1, inside2, () -> "expected stable id inside block, got " + body);
-        assertNotEquals(inside1, outside, () -> "expected fresh connection inside block, got " + body);
+        assertThat(List.of(inside1, inside2, outside)).as("expected positive ids, got " + body).allMatch(id -> id > 0);
+        assertThat(inside2).as("expected stable id inside block, got " + body).isEqualTo(inside1);
+        assertThat(outside).as("expected fresh connection inside block, got " + body).isNotEqualTo(inside1);
     }
 
     @Test
@@ -952,7 +952,7 @@ class LettuceBackendTest {
         String[] parts = body.split(",");
         long outer = Long.parseLong(parts[0]);
         long inner = Long.parseLong(parts[1]);
-        assertEquals(outer, inner, () -> "expected nested withConnection to reuse outer connection, got " + body);
+        assertThat(inner).as("expected nested withConnection to reuse outer connection, got " + body).isEqualTo(outer);
     }
 
     @Test
@@ -960,7 +960,7 @@ class LettuceBackendTest {
         String key = getKey("tx-blocking");
         String body = RestAssured.given().body("v1").when().post("/lettuce/with-transaction/blocking/" + key)
                 .then().statusCode(200).extract().asString();
-        assertEquals("false,2,v1", body);
+        assertThat(body).isEqualTo("false,2,v1");
         RestAssured.given().when().get("/lettuce/value/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("v1"));
     }
@@ -970,7 +970,7 @@ class LettuceBackendTest {
         String key = getKey("tx-reactive");
         String body = RestAssured.given().body("rv1").when().post("/lettuce/with-transaction/reactive/" + key)
                 .then().statusCode(200).extract().asString();
-        assertEquals("false,2,rv1", body);
+        assertThat(body).isEqualTo("false,2,rv1");
         RestAssured.given().when().get("/lettuce/value/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("rv1"));
     }
@@ -980,7 +980,7 @@ class LettuceBackendTest {
         String key = getKey("tx-discard");
         String body = RestAssured.given().body("v").when().post("/lettuce/with-transaction/discard/" + key)
                 .then().statusCode(200).extract().asString();
-        assertEquals("true,null", body);
+        assertThat(body).isEqualTo("true,null");
         RestAssured.given().when().get("/lettuce/value/" + key).then().statusCode(204);
     }
 
@@ -990,7 +990,7 @@ class LettuceBackendTest {
         RestAssured.given().body("10").when().post("/lettuce/value/" + key).then().statusCode(204);
         String body = RestAssured.given().body("0").when().post("/lettuce/with-transaction/optimistic/" + key)
                 .then().statusCode(200).extract().asString();
-        assertEquals("false,10,100", body);
+        assertThat(body).isEqualTo("false,10,100");
     }
 
     @Test
@@ -998,7 +998,7 @@ class LettuceBackendTest {
         String key = getKey("tx-key");
         String body = RestAssured.given().when().post("/lettuce/with-transaction/key/" + key)
                 .then().statusCode(200).extract().asString();
-        assertEquals("false,4,true,true,true,STRING", body);
+        assertThat(body).isEqualTo("false,4,true,true,true,STRING");
     }
 
     @Test
@@ -1007,7 +1007,7 @@ class LettuceBackendTest {
         String body = RestAssured.given().when().post("/lettuce/with-transaction/sortedset/" + key)
                 .then().statusCode(200).extract().asString();
         // after ZPOPMIN removed "a", ZRANGE 0 -1 REV WITHSCORES yields c then b, and ZRANGESTORE copies both
-        assertEquals("false,6,true,2,3,a,1.0,c:3.0,b:2.0,2", body);
+        assertThat(body).isEqualTo("false,6,true,2,3,a,1.0,c:3.0,b:2.0,2");
         RestAssured.given().when().get("/lettuce/sortedset/card/" + key + "-dst").then()
                 .statusCode(200).body(CoreMatchers.is("2"));
     }
@@ -1018,7 +1018,7 @@ class LettuceBackendTest {
         String body = RestAssured.given().when().post("/lettuce/with-transaction/hyperloglog/" + key)
                 .then().statusCode(200).extract().asString();
         // pfadd(a,b,c) -> true, pfadd(a) -> false, pfadd(other: c,d) -> true, pfmerge -> null (discarded), pfcount(merged) -> 4
-        assertEquals("false,5,true,false,true,true,4", body);
+        assertThat(body).isEqualTo("false,5,true,false,true,true,4");
         RestAssured.given().when().get("/lettuce/hyperloglog/pfcount/" + key + "-merged").then()
                 .statusCode(200).body(CoreMatchers.is("4"));
     }
@@ -1030,7 +1030,7 @@ class LettuceBackendTest {
                 .then().statusCode(200).extract().asString();
         // geoadd x2 -> true, geodist -> ~166 km, geopos(Palermo, missing) -> 2 entries with a null second,
         // geosearch from Palermo within 200 km ascending -> Palermo (0 km) then Catania
-        assertEquals("false,5,true,true,166,2,true,Palermo,Catania", body);
+        assertThat(body).isEqualTo("false,5,true,true,166,2,true,Palermo,Catania");
         RestAssured.given().when().get("/lettuce/sortedset/card/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("2"));
     }
@@ -1047,7 +1047,7 @@ class LettuceBackendTest {
 
         RestAssured.given().when().get("/lettuce/json/" + key).then().statusCode(204);
 
-        assertEquals("[" + document + "]", jsonSet(key, document));
+        assertThat(jsonSet(key, document)).isEqualTo("[" + document + "]");
         RestAssured.given().when().get("/lettuce/json/" + key).then()
                 .statusCode(200).body(CoreMatchers.is(document));
         RestAssured.given().queryParam("path", "$..b").when().get("/lettuce/json/path/" + key).then()
@@ -1055,7 +1055,7 @@ class LettuceBackendTest {
 
         String multi = RestAssured.given().queryParam("path", "$..a").queryParam("path", "$..b")
                 .when().get("/lettuce/json/paths/" + key).then().statusCode(200).extract().asString();
-        assertEquals(new JsonObject("{\"$..a\":[2,4],\"$..b\":[3,null]}"), new JsonObject(multi));
+        assertThat(new JsonObject(multi)).isEqualTo(new JsonObject("{\"$..a\":[2,4],\"$..b\":[3,null]}"));
     }
 
     @Test
@@ -1091,7 +1091,7 @@ class LettuceBackendTest {
         // documents rather than the text
         String stored = RestAssured.given().when().get("/lettuce/json/" + key).then()
                 .statusCode(200).extract().asString();
-        assertEquals(new JsonObject("{\"name\":\"luke\",\"age\":20}"), new JsonObject(stored));
+        assertThat(new JsonObject(stored)).isEqualTo(new JsonObject("{\"name\":\"luke\",\"age\":20}"));
     }
 
     @Test
@@ -1208,11 +1208,11 @@ class LettuceBackendTest {
         // objkeys of $ -> [[name, age]]
         String prefix = "false,9,true,[2],[2],true,[14],[number],";
         String suffix = ",1,[[name, age]]";
-        assertTrue(body.startsWith(prefix), body);
-        assertTrue(body.endsWith(suffix), body);
+        assertThat(body).startsWith(prefix);
+        assertThat(body).endsWith(suffix);
         JsonObject document = new JsonObject(body.substring(prefix.length(), body.length() - suffix.length()));
-        assertEquals(new JsonObject("{\"name\":\"luke skywalker\",\"tags\":[\"jedi\",\"pilot\"],\"age\":22.0}"),
-                document);
+        assertThat(document)
+                .isEqualTo(new JsonObject("{\"name\":\"luke skywalker\",\"tags\":[\"jedi\",\"pilot\"],\"age\":22.0}"));
     }
 
     @Test
@@ -1396,7 +1396,7 @@ class LettuceBackendTest {
                 .then().statusCode(200).extract().asString();
         // 3x init -> null (discarded), incrby(a,3) -> 3, incrby(other: a=2,b=4) -> [2, 4] as a raw list like Vert.x,
         // merge(2*key + 1*other) -> null (discarded), query(merged: a,b) -> [3*2+2, 4]
-        assertEquals("false,7,true,3,[2, 4],true,[8, 4]", body);
+        assertThat(body).isEqualTo("false,7,true,3,[2, 4],true,[8, 4]");
         RestAssured.given().when().get("/lettuce/countmin/query/" + key + "-merged/a").then()
                 .statusCode(200).body(CoreMatchers.is("8"));
     }
@@ -1408,30 +1408,30 @@ class LettuceBackendTest {
         String id = RestAssured.given().queryParam("channels", first + "," + second).when()
                 .post("/lettuce/pubsub/subscribe").then().statusCode(200).extract().asString();
         // The blocking subscribe returns once Redis confirmed, so both channels are active right away.
-        assertTrue(pubSubChannelNames().containsAll(List.of(first, second)));
+        assertThat(pubSubChannelNames()).contains(first, second);
 
         publish(first, "luke");
         publish(second, "leia");
         awaitMessages(id, 2);
-        assertEquals(List.of(first + ":luke", second + ":leia"), messages(id));
-        assertTrue(state(id).getBoolean("onDuplicatedContext"));
-        assertFalse(state(id).getBoolean("ended"));
+        assertThat(messages(id)).isEqualTo(List.of(first + ":luke", second + ":leia"));
+        assertThat(state(id).getBoolean("onDuplicatedContext")).as("onDuplicatedContext").isTrue();
+        assertThat(state(id).getBoolean("ended")).as("ended").isFalse();
 
         // Unsubscribing one channel keeps the subscription, and its connection, alive for the other.
         RestAssured.given().queryParam("names", first).when().delete("/lettuce/pubsub/subscription/" + id).then()
                 .statusCode(204);
         List<String> channels = pubSubChannelNames();
-        assertFalse(channels.contains(first));
-        assertTrue(channels.contains(second));
+        assertThat(channels).doesNotContain(first);
+        assertThat(channels).contains(second);
         publish(first, "ignored");
         publish(second, "han");
         awaitMessages(id, 3);
-        assertEquals(second + ":han", messages(id).get(2));
-        assertFalse(state(id).getBoolean("ended"));
+        assertThat(messages(id).get(2)).isEqualTo(second + ":han");
+        assertThat(state(id).getBoolean("ended")).as("ended").isFalse();
 
         RestAssured.given().when().delete("/lettuce/pubsub/subscription/" + id).then().statusCode(204);
-        await(() -> state(id).getBoolean("ended"), "onEnd after the last unsubscribe");
-        assertFalse(pubSubChannelNames().contains(second));
+        await("onEnd after the last unsubscribe").atMost(TIMEOUT).until(() -> state(id).getBoolean("ended"));
+        assertThat(pubSubChannelNames()).doesNotContain(second);
     }
 
     @Test
@@ -1439,16 +1439,16 @@ class LettuceBackendTest {
         String prefix = getKey("pubsub-pattern-");
         String id = RestAssured.given().queryParam("patterns", prefix + "*").when()
                 .post("/lettuce/pubsub/psubscribe").then().statusCode(200).extract().asString();
-        assertTrue(pubSubNumPat() >= 1);
+        assertThat(pubSubNumPat()).isGreaterThanOrEqualTo(1);
 
         publish(getKey("pubsub-unrelated"), "ignored");
         publish(prefix + "a", "luke");
         awaitMessages(id, 1);
         // The callback receives the channel the message was published to, not the pattern.
-        assertEquals(List.of(prefix + "a:luke"), messages(id));
+        assertThat(messages(id)).isEqualTo(List.of(prefix + "a:luke"));
 
         RestAssured.given().when().delete("/lettuce/pubsub/subscription/" + id).then().statusCode(204);
-        await(() -> state(id).getBoolean("ended"), "onEnd after unsubscribing the pattern");
+        await("onEnd after unsubscribing the pattern").atMost(TIMEOUT).until(() -> state(id).getBoolean("ended"));
     }
 
     @Test
@@ -1457,17 +1457,17 @@ class LettuceBackendTest {
         String id = RestAssured.given().queryParam("channels", channel).when()
                 .post("/lettuce/pubsub/reactive/subscribe").then().statusCode(200).extract().asString();
         // The Multi subscribes asynchronously: wait for the server to see the channel before publishing.
-        await(() -> pubSubChannelNames().contains(channel), "reactive subscription to be established");
+        await("reactive subscription to be established").atMost(TIMEOUT).until(() -> pubSubChannelNames().contains(channel));
 
         RestAssured.given().body("luke").when().post("/lettuce/pubsub/reactive/publish/" + channel).then()
                 .statusCode(204);
         awaitMessages(id, 1);
-        assertEquals(List.of(channel + ":luke"), messages(id));
-        assertTrue(state(id).getBoolean("onDuplicatedContext"));
+        assertThat(messages(id)).isEqualTo(List.of(channel + ":luke"));
+        assertThat(state(id).getBoolean("onDuplicatedContext")).as("onDuplicatedContext").isTrue();
 
         // Cancelling the stream unsubscribes and closes the connection.
         RestAssured.given().when().delete("/lettuce/pubsub/subscription/" + id).then().statusCode(204);
-        await(() -> !pubSubChannelNames().contains(channel), "channel to be released after cancellation");
+        await("channel to be released after cancellation").atMost(TIMEOUT).until(() -> !pubSubChannelNames().contains(channel));
     }
 
     private static void publish(String channel, String message) {
@@ -1494,23 +1494,7 @@ class LettuceBackendTest {
     }
 
     private static void awaitMessages(String id, int count) {
-        await(() -> messages(id).size() >= count, count + " message(s) on subscription " + id);
-    }
-
-    /** Pub/Sub delivery is asynchronous; poll for up to ten seconds instead of sleeping a fixed amount. */
-    private static void await(BooleanSupplier condition, String description) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (!condition.getAsBoolean()) {
-            if (System.nanoTime() > deadline) {
-                fail("Timed out waiting for " + description);
-            }
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException(e);
-            }
-        }
+        await(count + " message(s) on subscription " + id).atMost(TIMEOUT).until(() -> messages(id).size() >= count);
     }
 
     @Test
@@ -1585,8 +1569,8 @@ class LettuceBackendTest {
         // reserve(3) -> null, add(12 items) -> "c" evicted by the third "d", incrby(c,10) -> "c" re-enters and evicts "b",
         // incrby(d=2,e=20) -> "d" (5) stays, "e" evicts the least frequent "a" (4), query(a) -> false,
         // query(a,b,e) -> [false,false,true], list -> [e, c, d], listWithCount -> {e=20, c=12, d=5}
-        assertEquals("false,8,true,[null, null, null, null, null, null, null, null, null, null, c, null],b,"
-                + "{d=null, e=a},false,[false, false, true],[e, c, d],{e=20, c=12, d=5}", body);
+        assertThat(body).isEqualTo("false,8,true,[null, null, null, null, null, null, null, null, null, null, c, null],b,"
+                + "{d=null, e=a},false,[false, false, true],[e, c, d],{e=20, c=12, d=5}");
         RestAssured.given().when().get("/lettuce/topk/list/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("[\"e\",\"c\",\"d\"]"));
     }
@@ -1665,7 +1649,7 @@ class LettuceBackendTest {
         // cfinsertnx(a,b,c,d,a) -> 4 true + 1 false, cfadd(x) -> null, cfexists(a) -> true,
         // cfmexists(a,b,z) -> true,true,false, cfinsert(v,w,b) -> null, cfadd(a) -> null,
         // cfcount(a) -> 2, cfdel(a) -> true, cfcount(a) -> 1
-        assertEquals("false;9;[true, true, true, true, false];true;true;[true, true, false];true;2;true;1", body);
+        assertThat(body).isEqualTo("false;9;[true, true, true, true, false];true;true;[true, true, false];true;2;true;1");
         RestAssured.given().when().get("/lettuce/cuckoo/cfcount/" + key + "/b").then()
                 .statusCode(200).body(CoreMatchers.is("2"));
     }
@@ -1676,7 +1660,7 @@ class LettuceBackendTest {
         String body = RestAssured.given().when().post("/lettuce/with-transaction/reactive/cuckoo/" + key)
                 .then().statusCode(200).extract().asString();
         // cfinsertnx(a,b,c) -> 3 true, cfadd(a) -> null, cfcount(a) -> 2, cfexists(z) -> false
-        assertEquals("false;4;[true, true, true];true;2;false", body);
+        assertThat(body).isEqualTo("false;4;[true, true, true];true;2;false");
     }
 
     @Test
@@ -1686,7 +1670,7 @@ class LettuceBackendTest {
                 .then().statusCode(200).extract().asString();
         // 4x add -> 1..4, del(boo) -> true, len -> 3, sugget(abcd) -> [abcd, abcde],
         // sugget(ab, MAX 1 WITHSCORES) -> the single best match with its score
-        assertEquals("false,8,1,4,true,3,[abcd, abcde],[abcde:1.0]", body);
+        assertThat(body).isEqualTo("false,8,1,4,true,3,[abcd, abcde],[abcde:1.0]");
         RestAssured.given().when().get("/lettuce/autosuggest/len/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("3"));
     }
@@ -1727,24 +1711,8 @@ class LettuceBackendTest {
 
     /** Indexing runs in the background: polls until {@code query} matches {@code expected} documents. */
     private static void awaitIndexed(String index, String query, int expected) {
-        await(() -> searchCount(index, query) == expected,
-                () -> "expected " + expected + " documents matching '" + query + "' in " + index + ", got "
-                        + searchCount(index, query));
-    }
-
-    private static void await(BooleanSupplier condition, Supplier<String> failure) {
-        long deadline = System.currentTimeMillis() + 10_000;
-        while (!condition.getAsBoolean()) {
-            if (System.currentTimeMillis() > deadline) {
-                fail(failure.get());
-            }
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException(e);
-            }
-        }
+        await().atMost(TIMEOUT).untilAsserted(() -> assertThat(searchCount(index, query))
+                .as("documents matching '" + query + "' in " + index).isEqualTo(expected));
     }
 
     @Test
@@ -1803,9 +1771,9 @@ class LettuceBackendTest {
                 .statusCode(204);
         RestAssured.given().when().get("/lettuce/search/list").then()
                 .statusCode(200).body("$", CoreMatchers.not(CoreMatchers.hasItem(index)));
-        await(() -> RestAssured.given().when().get("/lettuce/key/exists/" + prefix + "11002")
-                .then().statusCode(200).extract().asString().equals("false"),
-                () -> "expected the documents of " + index + " to be deleted with it");
+        await("the documents of " + index + " to be deleted with it").atMost(TIMEOUT)
+                .untilAsserted(() -> RestAssured.given().when().get("/lettuce/key/exists/" + prefix + "11002")
+                        .then().statusCode(200).body(CoreMatchers.is("false")));
     }
 
     @Test
@@ -1832,19 +1800,19 @@ class LettuceBackendTest {
                 .statusCode(200)
                 .body("count", CoreMatchers.is(2))
                 .extract().jsonPath().getList("documents.properties.doubled", String.class);
-        assertEquals(16.6, Double.parseDouble(doubled.get(0)), 0.01);
-        assertEquals(17.4, Double.parseDouble(doubled.get(1)), 0.01);
+        assertThat(Double.parseDouble(doubled.get(0))).isCloseTo(16.6, within(0.01));
+        assertThat(Double.parseDouble(doubled.get(1))).isCloseTo(17.4, within(0.01));
 
         // WITHCURSOR COUNT 1: one page at a time
         String page = RestAssured.given().queryParam("q", "*").queryParam("load", "*").queryParam("cursor", 1)
                 .when().get("/lettuce/search/aggregate/" + index).then()
                 .statusCode(200).body("count", CoreMatchers.is(1)).extract().asString();
         long cursor = new JsonObject(page).getLong("cursor");
-        assertTrue(cursor > 0, page);
+        assertThat(cursor).as(page).isPositive();
 
         String next = RestAssured.given().when().get("/lettuce/search/cursor/" + index + "/" + cursor).then()
                 .statusCode(200).body("count", CoreMatchers.is(1)).extract().asString();
-        assertEquals(cursor, new JsonObject(next).getLong("cursor"));
+        assertThat(new JsonObject(next).getLong("cursor")).isEqualTo(cursor);
 
         RestAssured.given().when().delete("/lettuce/search/cursor/" + index + "/" + cursor).then().statusCode(204);
         // the deleted cursor is gone on the server
@@ -1858,7 +1826,7 @@ class LettuceBackendTest {
         createMovieIndex(index, getKey("alias") + ":");
 
         RestAssured.given().when().post("/lettuce/search/alias/" + alias + "/" + index).then().statusCode(204);
-        assertEquals(2, searchCount(alias, "war"));
+        assertThat(searchCount(alias, "war")).isEqualTo(2);
         // adding an existing alias fails, updating it does not
         RestAssured.given().when().post("/lettuce/search/alias/" + alias + "/" + index).then().statusCode(500);
         RestAssured.given().queryParam("update", true).when().post("/lettuce/search/alias/" + alias + "/" + index)
@@ -1872,7 +1840,7 @@ class LettuceBackendTest {
     public void searchAlterSchema() {
         String index = getKey("idx-alter");
         createMovieIndex(index, getKey("alter") + ":");
-        assertEquals(0, searchCount(index, "brutally"));
+        assertThat(searchCount(index, "brutally")).isEqualTo(0);
 
         // the plot was stored in the hashes all along, but is only indexed once the schema has the field
         RestAssured.given().body("plot:TEXT").when().post("/lettuce/search/alter/" + index).then().statusCode(204);
@@ -1956,7 +1924,7 @@ class LettuceBackendTest {
                 .extract().asString();
         String document = new JsonObject(body).getJsonArray("documents").getJsonObject(0)
                 .getJsonObject("properties").getString("$");
-        assertEquals(new JsonObject(earbuds), new JsonObject(document));
+        assertThat(new JsonObject(document)).isEqualTo(new JsonObject(earbuds));
 
         RestAssured.given().queryParam("q", "@price:[0 70]").queryParam("return", "name")
                 .when().get("/lettuce/search/query/" + index).then()
@@ -1988,12 +1956,12 @@ class LettuceBackendTest {
                 .then().statusCode(200).extract().asString();
         // ft_list contains the index, tagvals -> the normalised genres, aliasadd -> null, syndump -> the group added
         // just before, dictdump after the del -> [bonjour], dropindex -> null
-        assertEquals("false,11,true,[action, drama, thriller],true,[greetings],[hello, world],[bonjour],true", body);
+        assertThat(body).isEqualTo("false,11,true,[action, drama, thriller],true,[greetings],[hello, world],[bonjour],true");
         RestAssured.given().when().get("/lettuce/search/list").then()
                 .statusCode(200).body("$", CoreMatchers.not(CoreMatchers.hasItem(index)));
-        await(() -> RestAssured.given().when().get("/lettuce/key/exists/" + prefix + "11002")
-                .then().statusCode(200).extract().asString().equals("false"),
-                () -> "expected the documents of " + index + " to be deleted with it");
+        await("the documents of " + index + " to be deleted with it").atMost(TIMEOUT)
+                .untilAsserted(() -> RestAssured.given().when().get("/lettuce/key/exists/" + prefix + "11002")
+                        .then().statusCode(200).body(CoreMatchers.is("false")));
     }
 
     @Test
@@ -2008,7 +1976,7 @@ class LettuceBackendTest {
         // auto-generated id: <millis>-<sequence>
         String generated = RestAssured.given().body("a=4").when().post("/lettuce/stream/add/" + key).then()
                 .statusCode(200).extract().asString();
-        assertTrue(generated.matches("\\d+-\\d+"), generated);
+        assertThat(generated).matches("\\d+-\\d+");
 
         RestAssured.given().when().get("/lettuce/stream/len/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("3"));
@@ -2136,7 +2104,7 @@ class LettuceBackendTest {
         RestAssured.given().queryParam("id", "$").queryParam("block", 200).when()
                 .get("/lettuce/stream/read/" + empty).then()
                 .statusCode(200).body("size()", CoreMatchers.is(0));
-        assertTrue(System.nanoTime() - start >= TimeUnit.MILLISECONDS.toNanos(150));
+        assertThat(System.nanoTime() - start).isGreaterThanOrEqualTo(TimeUnit.MILLISECONDS.toNanos(150));
     }
 
     @Test
@@ -2340,7 +2308,7 @@ class LettuceBackendTest {
                 .then().statusCode(200).body(CoreMatchers.is("1-0"));
         String generated = RestAssured.given().body("a=2").when().post("/lettuce/stream/reactive/add/" + key).then()
                 .statusCode(200).extract().asString();
-        assertTrue(generated.matches("\\d+-\\d+"), generated);
+        assertThat(generated).matches("\\d+-\\d+");
         RestAssured.given().when().get("/lettuce/stream/reactive/len/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("2"));
         RestAssured.given().when().get("/lettuce/stream/reactive/range/" + key).then()
@@ -2380,8 +2348,8 @@ class LettuceBackendTest {
         // group create -> null, 2x add -> the ids, len -> 2, range / read (BLOCK is ignored inside MULTI) /
         // readgroup -> both entries, pending -> 2 for c1, ack(1-0) -> 1, del of a missing id -> 0, trim MAXLEN 1 -> 1
         String entries = "[" + key + ":1-0:a=1, " + key + ":2-0:a=1]";
-        assertEquals("false,11,true,1-0,2-0,2," + entries + "," + entries + "," + entries + ",2,1-0,2-0,{c1=2},1,0,1",
-                body);
+        assertThat(body)
+                .isEqualTo("false,11,true,1-0,2-0,2," + entries + "," + entries + "," + entries + ",2,1-0,2-0,{c1=2},1,0,1");
         RestAssured.given().when().get("/lettuce/stream/range/" + key).then()
                 .statusCode(200)
                 .body("size()", CoreMatchers.is(1))
@@ -2395,7 +2363,7 @@ class LettuceBackendTest {
                 .then().statusCode(200).extract().asString();
         // bfmadd(a,b,c,d,a) -> 4 true + 1 false, bfadd(x) -> true, bfexists(a) -> true,
         // bfmexists(a,b,z) -> true,true,false, bfinsert(v,w,b) -> true,true,false
-        assertEquals("false;5;[true, true, true, true, false];true;true;[true, true, false];[true, true, false]", body);
+        assertThat(body).isEqualTo("false;5;[true, true, true, true, false];true;true;[true, true, false];[true, true, false]");
         RestAssured.given().when().get("/lettuce/bloom/bfexists/" + key + "/v").then()
                 .statusCode(200).body(CoreMatchers.is("true"));
     }
@@ -2406,7 +2374,7 @@ class LettuceBackendTest {
         String body = RestAssured.given().when().post("/lettuce/with-transaction/reactive/bloom/" + key)
                 .then().statusCode(200).extract().asString();
         // bfmadd(a,b,c) -> 3 true, bfexists(a) -> true, bfexists(z) -> false
-        assertEquals("false;3;[true, true, true];true;false", body);
+        assertThat(body).isEqualTo("false;3;[true, true, true];true;false");
     }
 
 }
