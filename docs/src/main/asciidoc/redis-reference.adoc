@@ -1143,7 +1143,7 @@ A cluster client names the connections to the nodes it discovers after the first
 * RESP3 is negotiated by default, falling back to RESP2 when the server does not know `HELLO`, which is also what `preferred-protocol-version=resp3` does.
 `preferred-protocol-version=resp2`, or `protocol-negotiation=false`, selects RESP2 without `HELLO`: Lettuce then authenticates with `AUTH`.
 * `max-waiting-handlers` (default `2048`) bounds the commands queued on a connection, those awaiting their reply as well as those buffered while a lost connection is being re-established; a command beyond the bound fails at once.
-The Vert.x client applies the bound to each pooled connection, whereas the ordinary commands share one connection here, so the bound applies to the commands of the whole client that are in flight at once.
+The bound is per connection, as with the Vert.x client, but the ordinary commands share one connection here (one per node for a cluster), so it limits the commands a client has in flight at once on that connection.
 * A lost connection is reconnected until it succeeds.
 `reconnect-interval` (overridden by `tcp.reconnect-interval`, as with the Vert.x client) sets the fixed delay between the attempts; when neither property is set, Lettuce backs off exponentially, from 100 milliseconds up to 30 seconds.
 A connection that cannot be opened fails the commands waiting for it, and the next command tries again, so `reconnect-attempts` does not apply.
@@ -1319,7 +1319,7 @@ Setting either property to `0` keeps the idle connections open.
 The most recently released connection is handed out first, so that a pool sized for a peak shrinks back to the connections a lighter load needs.
 
 Because `max-pool-size` bounds only blocking commands and scoped connections on this backend — rather than every command, as on the Vert.x backend — the same configured value gives noticeably higher effective capacity here.
-The ordinary commands share one connection, whose command queue `quarkus.redis.max-waiting-handlers` bounds (see <<lettuce-properties>>): raise it for an application that keeps more than 2048 commands in flight at once.
+The ordinary commands share one connection (one per node for a cluster), whose command queue `quarkus.redis.max-waiting-handlers` bounds (see <<lettuce-properties>>): raise it for an application that keeps more than 2048 commands in flight at once.
 
 Pub/Sub subscribers do not use the pool either.
 Each subscriber (one `subscribe(...)` or `subscribeToPattern(...)` call) opens its own dedicated Pub/Sub connection, keeps it for as long as at least one of its channels or patterns is subscribed, and closes it when the last one is unsubscribed.
