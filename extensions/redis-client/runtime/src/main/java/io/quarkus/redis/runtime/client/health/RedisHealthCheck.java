@@ -79,7 +79,8 @@ class RedisHealthCheck implements HealthCheck {
         Duration timeout = config.clients().get(clientName).timeout();
         try {
             Response response = ping.await().atMost(timeout);
-            builder.up().withData(clientName, response.toString());
+            // the builder starts up: a client that answers must not put it back up after another one failed
+            builder.withData(clientName, response.toString());
         } catch (TimeoutException e) {
             builder.down().withData(clientName,
                     "Unable to execute the validation check for the Redis Client due to timeout");
