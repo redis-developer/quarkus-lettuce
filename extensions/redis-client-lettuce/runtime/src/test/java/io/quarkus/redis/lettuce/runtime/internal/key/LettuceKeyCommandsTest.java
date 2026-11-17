@@ -31,6 +31,7 @@ import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.lettuce.runtime.internal.CommandsTestBase;
 import io.quarkus.redis.lettuce.runtime.internal.Person;
+import io.smallrye.mutiny.Uni;
 import tools.jackson.core.type.TypeReference;
 
 class LettuceKeyCommandsTest extends CommandsTestBase {
@@ -185,6 +186,19 @@ class LettuceKeyCommandsTest extends CommandsTestBase {
         List<String> k = blockingKeys.keys("???");
         assertThat(k).hasSize(2);
         assertThat(k).contains("one", "two");
+    }
+
+    @Test
+    void keysWithBlankPattern() {
+        // as with the Vert.x client: the blocking API throws, the reactive one returns a failed Uni
+        assertThatThrownBy(() -> blockingKeys.keys(" ")).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("pattern");
+        Uni<List<String>> keys = reactiveKeys.keys(" ");
+        assertThatThrownBy(() -> keys.await().atMost(Duration.ofSeconds(5))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("pattern");
+        // a null pattern is rejected at once by both
+        assertThatThrownBy(() -> reactiveKeys.keys(null)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("pattern");
     }
 
     @Test

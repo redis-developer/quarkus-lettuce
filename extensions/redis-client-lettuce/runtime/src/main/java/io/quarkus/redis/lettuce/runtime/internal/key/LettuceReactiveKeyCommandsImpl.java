@@ -208,7 +208,7 @@ public class LettuceReactiveKeyCommandsImpl<K> extends AbstractLettuceCommands<K
     LettuceCommand<List<byte[]>, List<K>> _keys(String pattern) {
         nonNull(pattern, "pattern");
         if (pattern.isBlank()) {
-            throw new IllegalArgumentException("`pattern` must not be blank");
+            return failing(new IllegalArgumentException("`pattern` must not be blank"));
         }
         return command(async -> async.keys(pattern), this::decodeListOfKeys);
     }
