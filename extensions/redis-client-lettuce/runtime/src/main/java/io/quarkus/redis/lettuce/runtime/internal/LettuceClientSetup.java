@@ -120,7 +120,7 @@ public final class LettuceClientSetup {
         return switch (config.clientType()) {
             case CLUSTER -> new LettuceConnectionFactory(name, resources, settings.redisUris(), settings.clientOptions(),
                     LettuceClientSettings.topologyRefreshOptions(LettuceClientSettings.topologyCacheTtl(config)),
-                    LettuceClientSettings.readFrom(config.replicas()), config.timeout());
+                    LettuceClientSettings.readFrom(config.replicas()), config.timeout(), config.subscribeTimeout());
             case SENTINEL -> {
                 if (config.role().orElse(RedisRole.MASTER) == RedisRole.SENTINEL) {
                     throw new ConfigurationException(String.format(
@@ -132,17 +132,17 @@ public final class LettuceClientSetup {
                 RedisURI master = settings.sentinelUri(config.masterName().orElse(DEFAULT_MASTER_NAME));
                 yield new LettuceConnectionFactory(name, resources, MasterReplicaMode.SENTINEL, List.of(master),
                         settings.clientOptions(), LettuceClientSettings.readFrom(config.role(), config.replicas()),
-                        config.timeout());
+                        config.timeout(), config.subscribeTimeout());
             }
             case REPLICATION -> {
                 MasterReplicaMode mode = config.topology().orElse(RedisTopology.DISCOVER) == RedisTopology.STATIC
                         ? MasterReplicaMode.STATIC
                         : MasterReplicaMode.DISCOVER;
                 yield new LettuceConnectionFactory(name, resources, mode, settings.redisUris(), settings.clientOptions(),
-                        LettuceClientSettings.readFrom(config.replicas()), config.timeout());
+                        LettuceClientSettings.readFrom(config.replicas()), config.timeout(), config.subscribeTimeout());
             }
             case STANDALONE -> new LettuceConnectionFactory(name, resources, settings.redisUri(), settings.clientOptions(),
-                    config.timeout());
+                    config.timeout(), config.subscribeTimeout());
         };
     }
 
