@@ -135,10 +135,16 @@ public class ComposeDevServicesProcessor {
 
         RunningService service = new RunningService(
                 Feature.COMPOSE.getName(), "Compose project: " + result.projectName,
-                result.configs, Map.of(), null,
+                result.configs, null,
                 result.isOwner ? result.compose::stop : () -> {
                 }, false);
         devServicesRegistry.addRunningService(Feature.COMPOSE.getName(), null, configuration, service);
+        if (result.isOwner && configuration.stopServices && launchMode.getLaunchMode() == LaunchMode.TEST) {
+            // the running services are closed when the curated application is, which does not happen at the end of
+            // a test run: run compose down when the JVM exits, so that the services are stopped and the volumes
+            // handled according to the configuration, whether or not Ryuk is in use
+            Runtime.getRuntime().addShutdownHook(new Thread(result.compose::stop, "compose-devservices-down"));
+        }
 
         return toComposeBuildItem(result.compose);
     }

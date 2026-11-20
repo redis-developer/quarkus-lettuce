@@ -16,17 +16,17 @@
     <properties>
         <angus-activation.version>2.0.3</angus-activation.version>
         <angus-mail.version>2.0.5</angus-mail.version> <!-- keep in sync with angus-activation (mail depends on activation) -->
-        <bouncycastle.version>1.86.2</bouncycastle.version>
+        <bouncycastle.version>1.87</bouncycastle.version>
         <bouncycastle.fips.version>2.1.3</bouncycastle.fips.version>
         <bouncycastle.tls.fips.version>2.1.25</bouncycastle.tls.fips.version>
-        <cyclonedx.version>13.2.0</cyclonedx.version>
+        <cyclonedx.version>13.5.0</cyclonedx.version>
         <expressly.version>6.0.0</expressly.version>
         <findbugs.version>3.0.2</findbugs.version>
         <jandex.version>3.6.1</jandex.version>
         <javax.annotation-api.version>1.3.2</javax.annotation-api.version>
         <javax.inject.version>1</javax.inject.version>
         <parsson.version>1.1.9</parsson.version>
-        <resteasy-microprofile.version>3.0.1.Final</resteasy-microprofile.version>
+        <resteasy-microprofile.version>3.0.2.Final</resteasy-microprofile.version>
         <resteasy-spring-web.version>3.2.0.Final</resteasy-spring-web.version>
         <resteasy.version>7.0.5.Final</resteasy.version>
         <resteasy-jackson-provider.version>1.0.1.Final</resteasy-jackson-provider.version>
@@ -44,7 +44,7 @@
         <microprofile-fault-tolerance-api.version>4.1.2</microprofile-fault-tolerance-api.version>
         <microprofile-reactive-streams-operators.version>3.0.1</microprofile-reactive-streams-operators.version>
         <microprofile-rest-client.version>4.0</microprofile-rest-client.version>
-        <microprofile-jwt.version>2.1</microprofile-jwt.version>
+        <microprofile-jwt.version>2.2.1</microprofile-jwt.version>
         <microprofile-lra.version>2.0.2</microprofile-lra.version>
         <microprofile-openapi.version>4.2</microprofile-openapi.version>
         <smallrye-common.version>2.20.0</smallrye-common.version>
@@ -55,13 +55,13 @@
         <smallrye-serial.version>1.0.beta6</smallrye-serial.version>
         <smallrye-graphql.version>3.0.0.Beta9</smallrye-graphql.version>
         <!-- smallrye-fault-tolerance.version is located in the root POM -->
-        <smallrye-jwt.version>5.0.0</smallrye-jwt.version>
+        <smallrye-jwt.version>6.0.0.Beta2</smallrye-jwt.version>
         <smallrye-context-propagation.version>2.4.0</smallrye-context-propagation.version>
         <smallrye-reactive-streams-operators.version>1.0.13</smallrye-reactive-streams-operators.version>
         <smallrye-reactive-types-converter.version>3.0.3</smallrye-reactive-types-converter.version>
         <smallrye-openssl.version>0.2.3+tcnative-2.0.85.Final</smallrye-openssl.version>
-        <smallrye-mutiny-vertx-binding.version>4.1.0</smallrye-mutiny-vertx-binding.version>
-        <smallrye-reactive-messaging.version>5.0.0-RC2</smallrye-reactive-messaging.version>
+        <smallrye-mutiny-vertx-binding.version>4.1.1</smallrye-mutiny-vertx-binding.version>
+        <smallrye-reactive-messaging.version>5.0.0</smallrye-reactive-messaging.version>
         <smallrye-stork.version>3.0.3</smallrye-stork.version>
         <jakarta.activation.version>2.1.4</jakarta.activation.version>
         <jakarta.annotation-api.version>3.0.0</jakarta.annotation-api.version>
@@ -84,7 +84,7 @@
         <jakarta.ws.rs-api.version>4.0.0</jakarta.ws.rs-api.version>
         <jakarta.xml.bind-api.version>4.0.5</jakarta.xml.bind-api.version>
         <jaxb-runtime.version>4.0.9</jaxb-runtime.version>
-        <asm.version>9.11</asm.version>
+        <asm.version>9.11.1</asm.version>
         <commons-io.version>2.22.0</commons-io.version>
         <jboss-metadata-web.version>17.1.0</jboss-metadata-web.version>
         <maven-toolchain.version>3.0-alpha-2</maven-toolchain.version>
@@ -96,7 +96,7 @@
         <jackson2-bom.version>2.21.8</jackson2-bom.version>
         <lettuce.version>8.0.0.BETA1</lettuce.version>
         <commons-logging-jboss-logging.version>2.0.0.Final</commons-logging-jboss-logging.version>
-        <commons-lang3.version>3.21.0</commons-lang3.version>
+        <commons-lang3.version>3.22.0</commons-lang3.version>
         <commons-codec.version>1.23.0</commons-codec.version>
         <classmate.version>1.8.0</classmate.version>
         <!-- See root POM for hibernate-orm.version, hibernate-reactive.version, hibernate-validator.version,
@@ -144,7 +144,6 @@
         <jboss-logging.version>3.6.3.Final</jboss-logging.version>
         <mutiny.version>3.3.1</mutiny.version>
         <jctools-core.version>4.0.5</jctools-core.version>
-        <kafka.version>4.2.2</kafka.version>
         <lz4.version>1.11.4</lz4.version> <!-- dependency of the kafka-clients that could be overridden by other imported BOMs in the platform -->
         <snappy.version>1.1.10.11</snappy.version>
         <strimzi-test-container.version>0.117.0</strimzi-test-container.version>
@@ -165,7 +164,7 @@
         <maven-invoker.version>3.2.0</maven-invoker.version>
         <awaitility.version>4.3.0</awaitility.version>
         <jboss-logmanager.version>3.2.2.Final</jboss-logmanager.version>
-        <flyway.version>13.12.1</flyway.version>
+        <flyway.version>13.12.2</flyway.version>
         <yasson.version>3.0.5</yasson.version>
         <!-- liquibase-mongodb is not released everytime with liquibase anymore, but the two versions need to be compatible -->
         <liquibase.version>4.33.0</liquibase.version>
@@ -186,7 +185,7 @@
         <mockito.version>5.24.0</mockito.version>
         <jna.version>5.8.0</jna.version><!-- should satisfy both testcontainers and mongodb -->
         <quarkus-security.version>2.3.2</quarkus-security.version>
-        <keycloak-client.version>26.0.12</keycloak-client.version>
+        <keycloak-client.version>26.0.13</keycloak-client.version>
         <logstash-gelf.version>1.15.1</logstash-gelf.version>
         <checker-qual.version>4.3.1</checker-qual.version>
         <error-prone-annotations.version>2.52.0</error-prone-annotations.version>
@@ -212,14 +211,14 @@
         <jline.version>4.2.1</jline.version> <!-- Keep in sync with dekorate -->
         <!-- these two artifacts needs to be compatible together -->
         <strimzi-oauth.version>0.16.1</strimzi-oauth.version>
-        <strimzi-oauth.nimbus.version>10.10</strimzi-oauth.nimbus.version>
+        <nimbus-jose-jwt.version>10.10</nimbus-jose-jwt.version>
         <jose4j.version>0.9.7</jose4j.version>
         <java-buildpack-client.version>0.0.17</java-buildpack-client.version>
         <crac.version>1.5.0</crac.version>
         <sshd-common.version>2.20.0</sshd-common.version>
         <mime4j.version>0.8.15</mime4j.version>
         <mutiny-zero.version>1.3.1</mutiny-zero.version>
-        <pulsar-client.version>4.2.1</pulsar-client.version>
+        <pulsar-client.version>4.2.3</pulsar-client.version>
         <async-http-client.version>2.16.1</async-http-client.version>
         <!-- keep in-sync, if possible, with Micrometer registry Prometheus -->
         <prometheus.version>0.16.0</prometheus.version>
@@ -228,7 +227,7 @@
         <webauthn4j.version>0.31.11.RELEASE</webauthn4j.version>
         <jsoup.version>1.24.1</jsoup.version> <!-- JSoup is used by Camel and LangChain4J so be careful when updating -->
         <reactor.version>3.8.7</reactor.version>
-        <zstd-jni.version>1.5.7-16</zstd-jni.version> <!-- used by kafka-clients and some Camel components -->
+        <zstd-jni.version>1.5.7-25</zstd-jni.version> <!-- used by kafka-clients and some Camel components -->
     </properties>
 
     <pluginRepositories>
@@ -2446,6 +2445,46 @@
             <dependency>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-load-shedding-deployment-spi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-http-rate-limit</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-http-rate-limit-deployment</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-http-rate-limit-jfr</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-http-rate-limit-jfr-deployment</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-http-rate-limit-micrometer</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-http-rate-limit-micrometer-deployment</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-http-rate-limit-redis</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-http-rate-limit-redis-deployment</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -4834,14 +4873,6 @@
                 <groupId>jakarta.interceptor</groupId>
                 <artifactId>jakarta.interceptor-api</artifactId>
                 <version>${jakarta.interceptor-api.version}</version>
-                <exclusions>
-                    <!-- There is a bug in 1.2.5 -->
-                    <!-- The dependency is removed in main: https://github.com/eclipse-ee4j/interceptor-api/commit/017aeb56849bbb448319aaf36df45a07ec54f451 -->
-                    <exclusion>
-                        <groupId>jakarta.ejb</groupId>
-                        <artifactId>jakarta.ejb-api</artifactId>
-                    </exclusion>
-                </exclusions>
             </dependency>
             <dependency>
                 <groupId>jakarta.json</groupId>
@@ -5004,7 +5035,7 @@
             <dependency>
                 <groupId>com.nimbusds</groupId>
                 <artifactId>nimbus-jose-jwt</artifactId>
-                <version>${strimzi-oauth.nimbus.version}</version>
+                <version>${nimbus-jose-jwt.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.bitbucket.b_c</groupId>
@@ -5376,15 +5407,6 @@
                 <groupId>org.jboss.resteasy</groupId>
                 <artifactId>resteasy-json-binding-provider</artifactId>
                 <version>${resteasy.version}</version>
-                <exclusions>
-                    <!-- This is needed until RESTEasy upgrades to Yasson 3.0.5 requiring the groupId change to
-                         org.eclipse.yasson.
-                    -->
-                    <exclusion>
-                        <groupId>org.eclipse</groupId>
-                        <artifactId>yasson</artifactId>
-                    </exclusion>
-                </exclusions>
             </dependency>
             <dependency>
                 <groupId>org.jboss.resteasy</groupId>
@@ -6589,7 +6611,7 @@
 
             <dependency>
                 <groupId>org.keycloak</groupId>
-                <artifactId>keycloak-admin-client</artifactId>
+                <artifactId>keycloak-admin-client-jackson3</artifactId>
                 <version>${keycloak-client.version}</version>
             </dependency>
             <dependency>
@@ -6605,6 +6627,11 @@
             <dependency>
                 <groupId>org.keycloak</groupId>
                 <artifactId>keycloak-client-common-synced</artifactId>
+                <version>${keycloak-client.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.keycloak</groupId>
+                <artifactId>keycloak-client-common-synced-jackson3</artifactId>
                 <version>${keycloak-client.version}</version>
             </dependency>
             <dependency>

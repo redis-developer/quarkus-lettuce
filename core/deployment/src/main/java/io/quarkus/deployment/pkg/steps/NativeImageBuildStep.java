@@ -49,6 +49,7 @@ import io.quarkus.deployment.pkg.builditem.JarTreeShakeBuildItem;
 import io.quarkus.deployment.pkg.builditem.NativeImageBuildItem;
 import io.quarkus.deployment.pkg.builditem.NativeImageRunnerBuildItem;
 import io.quarkus.deployment.pkg.builditem.NativeImageSourceJarBuildItem;
+import io.quarkus.deployment.pkg.builditem.NativeImageSourcesBuildItem;
 import io.quarkus.deployment.pkg.builditem.OutputTargetBuildItem;
 import io.quarkus.deployment.pkg.builditem.ProcessInheritIODisabledBuildItem;
 import io.quarkus.deployment.pkg.jar.LegacyThinJarFormat;
@@ -61,6 +62,7 @@ import io.quarkus.runtime.graal.GraalVM.Distribution;
 import io.quarkus.runtime.graal.GraalVM.Version;
 import io.quarkus.runtime.graal.JVMChecksFeature;
 import io.quarkus.runtime.graal.SkipConsoleServiceProvidersFeature;
+import io.quarkus.runtime.util.CommandLineQuoting;
 import io.quarkus.sbom.CoreSbomContributionConfig;
 import io.quarkus.sbom.Purl;
 import io.smallrye.common.os.OS;
@@ -134,7 +136,8 @@ public class NativeImageBuildStep {
             List<NativeImageFeatureBuildItem> nativeImageFeatures,
             NativeImageRunnerBuildItem nativeImageRunner,
             List<NativeMonitoringBuildItem> nativeMonitoringBuildItems,
-            CurateOutcomeBuildItem curateOutcomeBuildItem) {
+            CurateOutcomeBuildItem curateOutcomeBuildItem,
+            BuildProducer<NativeImageSourcesBuildItem> nativeImageSources) {
 
         Path outputDir;
         try {
@@ -169,16 +172,26 @@ public class NativeImageBuildStep {
                 .setNativeMonitoringOptions(nativeMonitoringBuildItems)
                 .build();
         List<String> command = nativeImageArgs.getArgs();
+        String graalVMVersion = GraalVM.Version.CURRENT.getVersionAsString();
+        Optional<String> builderImage = nativeImageRunner.isContainerBuild()
+                ? Optional.of(nativeConfig.builderImage().getEffectiveImage())
+                : Optional.empty();
 
         try {
-            Files.writeString(outputDir.resolve("native-image.args"), String.join(" ", command));
-            Files.writeString(outputDir.resolve("graalvm.version"), GraalVM.Version.CURRENT.getVersionAsString());
-            if (nativeImageRunner.isContainerBuild()) {
-                Files.writeString(outputDir.resolve("native-builder.image"), nativeConfig.builderImage().getEffectiveImage());
+            // Use argument-file quoting, not shell quoting: native-image consumes this file with @native-image.args.
+            Files.writeString(outputDir.resolve("native-image.args"), command.stream()
+                    .map(CommandLineQuoting::quoteForArgumentFile)
+                    .collect(Collectors.joining(" ")));
+            Files.writeString(outputDir.resolve("graalvm.version"), graalVMVersion);
+            if (builderImage.isPresent()) {
+                Files.writeString(outputDir.resolve("native-builder.image"), builderImage.get());
             }
         } catch (IOException | RuntimeException e) {
             throw new RuntimeException("Failed to build native image sources", e);
         }
+
+        nativeImageSources.produce(new NativeImageSourcesBuildItem(outputDir, runnerJar.getFileName().toString(),
+                nativeImageName, command, graalVMVersion, builderImage));
 
         log.info("The sources for a subsequent native-image run along with the necessary arguments can be found in "
                 + outputDir);
@@ -299,7 +312,7 @@ public class NativeImageBuildStep {
                         nativeImageName,
                         resultingExecutableName, outputDir,
                         graalVMVersion, nativeConfig.debug().enabled(),
-                        processInheritIODisabledBuildItem.isPresent());
+                        processInheritIODisabledBuildItem.isPresent(), nativeConfig.enableReports());
             } catch (Throwable t) {
                 throw imageGenerationFailed(t, isContainerBuild);
             }
@@ -504,7 +517,7 @@ public class NativeImageBuildStep {
 
             log.info("Rebuilding native image with PGO profile...");
             localRunner.build(pgoArgs, nativeImageName, resultingExecutableName, outputDir,
-                    null, nativeConfig.debug().enabled(), false);
+                    null, nativeConfig.debug().enabled(), false, nativeConfig.enableReports());
 
             // Copy the optimized binary from outputDir to targetDir (same as the original build flow)
             Path generatedBinary = outputDir.resolve(resultingExecutableName);

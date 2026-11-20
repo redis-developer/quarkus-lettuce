@@ -294,6 +294,7 @@ public class QuarkusPlugin implements Plugin<Project> {
         TaskProvider<QuarkusBuild> quarkusBuild = tasks.register(QUARKUS_BUILD_TASK_NAME, QuarkusBuild.class, build -> {
             configureQuarkusBuildTask(project, build, quarkusBuildAppModelTask, serviceProvider, customFs, quarkusExt);
             build.dependsOn(quarkusBuildDependencies, quarkusBuildCacheableAppParts);
+            build.getApplicationParts().from(quarkusBuildCacheableAppParts, quarkusBuildDependencies);
             build.getOutputs().doNotCacheIf(
                     "Only collects and combines the outputs of " + QUARKUS_BUILD_APP_PARTS_TASK_NAME + " and "
                             + QUARKUS_BUILD_DEP_TASK_NAME + ", see 'cacheLargeArtifacts' in the 'quarkus' Gradle extension " +
@@ -386,6 +387,10 @@ public class QuarkusPlugin implements Plugin<Project> {
                     SourceSetContainer sourceSets = project.getExtensions().getByType(SourceSetContainer.class);
                     SourceSet mainSourceSet = sourceSets.getByName(SourceSet.MAIN_SOURCE_SET_NAME);
                     SourceSet testSourceSet = sourceSets.getByName(SourceSet.TEST_SOURCE_SET_NAME);
+
+                    // The models only record the output directories that exist, so they run after the tasks creating them
+                    quarkusGenerateAppModelTask.configure(task -> task.dependsOn(resourcesTask));
+                    quarkusGenerateTestAppModelTask.configure(task -> task.dependsOn(classesTask));
 
                     quarkusGenerateCode.configure(task -> {
                         Configuration config = project.getConfigurations().getByName(

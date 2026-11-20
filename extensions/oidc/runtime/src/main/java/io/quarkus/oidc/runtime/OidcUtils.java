@@ -35,16 +35,11 @@ import java.util.regex.Pattern;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
+import jakarta.json.JsonException;
+
 import org.eclipse.microprofile.jwt.Claims;
 import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.logging.Logger;
-import org.jose4j.jwa.AlgorithmConstraints;
-import org.jose4j.jwe.JsonWebEncryption;
-import org.jose4j.jwk.JsonWebKey;
-import org.jose4j.jwk.PublicJsonWebKey;
-import org.jose4j.jwt.JwtClaims;
-import org.jose4j.jwt.consumer.InvalidJwtException;
-import org.jose4j.lang.JoseException;
 
 import io.quarkus.oidc.AccessTokenCredential;
 import io.quarkus.oidc.AuthorizationCodeFlow;
@@ -69,6 +64,7 @@ import io.quarkus.oidc.runtime.OidcTenantConfig.Authentication;
 import io.quarkus.oidc.runtime.OidcTenantConfig.Logout.ClearSiteData;
 import io.quarkus.oidc.runtime.OidcTenantConfig.Roles;
 import io.quarkus.oidc.runtime.OidcTenantConfig.Token;
+import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.security.AuthenticationFailedException;
 import io.quarkus.security.credential.TokenCredential;
 import io.quarkus.security.identity.AuthenticationRequestContext;
@@ -77,10 +73,16 @@ import io.quarkus.security.identity.request.TokenAuthenticationRequest;
 import io.quarkus.security.runtime.QuarkusSecurityIdentity;
 import io.quarkus.security.runtime.QuarkusSecurityIdentity.Builder;
 import io.quarkus.vertx.http.runtime.security.HttpSecurityUtils;
+import io.smallrye.jwe.JweDecrypter;
+import io.smallrye.jwe.JweEncrypter;
+import io.smallrye.jwe.JweException;
+import io.smallrye.jwk.AsymmetricJsonWebKey;
+import io.smallrye.jwk.JsonWebKey;
 import io.smallrye.jwt.algorithm.ContentEncryptionAlgorithm;
 import io.smallrye.jwt.algorithm.KeyEncryptionAlgorithm;
 import io.smallrye.jwt.algorithm.SignatureAlgorithm;
 import io.smallrye.jwt.build.Jwt;
+import io.smallrye.jwt.common.JwtClaims;
 import io.smallrye.jwt.util.KeyUtils;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.UniEmitter;
@@ -135,6 +137,8 @@ public final class OidcUtils {
     public static final String DEFAULT_SCOPE_SEPARATOR = " ";
     public static final String ANNOTATION_BASED_TENANT_RESOLUTION_ENABLED = "io.quarkus.oidc.runtime.select-tenants-with-annotation";
     static final String UNDERSCORE = "_";
+    // Tenant id and cookie suffix are not expected to contain many underscores
+    static final int MAX_TENANT_ID_UNDERSCORES = 5;
     static final String CODE_ACCESS_TOKEN_RESULT = "code_flow_access_token_result";
     static final String CODE_ACCESS_TOKEN_FAILURE = "code_flow_access_token_failure";
     static final String COMMA = ",";
@@ -399,7 +403,7 @@ public final class OidcUtils {
             jwtClaims.setClaim(Claims.raw_token.name(), credential.getToken());
             jwtPrincipal = new OidcJwtCallerPrincipal(jwtClaims, credential,
                     config.token().principalClaim().isPresent() ? config.token().principalClaim().get() : null);
-        } catch (InvalidJwtException e) {
+        } catch (JsonException e) {
             throw new AuthenticationFailedException(e);
         }
         builder.addAttribute(QUARKUS_IDENTITY_EXPIRE_TIME, jwtPrincipal.getExpirationTime());
@@ -605,12 +609,11 @@ public final class OidcUtils {
     }
 
     public static String encryptString(String jweString, Key key, KeyEncryptionAlgorithm algorithm) throws Exception {
-        JsonWebEncryption jwe = new JsonWebEncryption();
-        jwe.setAlgorithmHeaderValue(algorithm.getAlgorithm());
-        jwe.setEncryptionMethodHeaderParameter(ContentEncryptionAlgorithm.A256GCM.getAlgorithm());
-        jwe.setKey(key);
-        jwe.setPlaintext(jweString);
-        return jwe.getCompactSerialization();
+        return JweEncrypter.builder(key)
+                .keyAlgorithm(algorithm)
+                .contentAlgorithm(ContentEncryptionAlgorithm.A256GCM)
+                .build()
+                .encrypt(jweString);
     }
 
     public static JsonObject decryptJson(String jweString, Key key) throws Exception {
@@ -621,13 +624,11 @@ public final class OidcUtils {
         return decryptString(jweString, key, KeyEncryptionAlgorithm.A256GCMKW);
     }
 
-    public static String decryptString(String jweString, Key key, KeyEncryptionAlgorithm algorithm) throws JoseException {
-        JsonWebEncryption jwe = new JsonWebEncryption();
-        jwe.setAlgorithmConstraints(new AlgorithmConstraints(AlgorithmConstraints.ConstraintType.PERMIT,
-                algorithm.getAlgorithm()));
-        jwe.setKey(key);
-        jwe.setCompactSerialization(jweString);
-        return jwe.getPlaintextString();
+    public static String decryptString(String jweString, Key key, KeyEncryptionAlgorithm algorithm) throws JweException {
+        return JweDecrypter.builder(key)
+                .keyAlgorithm(algorithm)
+                .build()
+                .decrypt(jweString);
     }
 
     public static boolean isFormUrlEncodedRequest(RoutingContext context) {
@@ -725,6 +726,21 @@ public final class OidcUtils {
     }
 
     public static String getTenantIdFromCookie(String cookiePrefix, String cookieName, boolean sessionCookie) {
+        return getTenantIdFromCookie(cookiePrefix, cookieName, sessionCookie, null);
+    }
+
+    /**
+     * Get a tenant id from the session or state cookie name.
+     *
+     * @param cookiePrefix session or state cookie name prefix, for example, `q_session` or `q_auth`
+     * @param cookieName cookie name which has already been checked to start with the cookie prefix
+     * @param sessionCookie true if the cookie is a session cookie, false if it is a state cookie
+     * @param tenantConfigBean tenant config bean which knows the ids of the default, static and already created dynamic
+     *        tenants, can be null in which case only the default tenant id is known
+     * @return tenant id
+     */
+    public static String getTenantIdFromCookie(String cookiePrefix, String cookieName, boolean sessionCookie,
+            TenantConfigBean tenantConfigBean) {
         // It has already been checked the cookieName starts with the cookiePrefix
         if (cookieName.length() == cookiePrefix.length()) {
             return OidcUtils.DEFAULT_TENANT_ID;
@@ -735,10 +751,62 @@ public final class OidcUtils {
                 return OidcUtils.DEFAULT_TENANT_ID;
             } else {
                 // It can be either a tenant_id, or a tenant_id and cookie suffix property, example, q_session_github or q_session_github_test
-                // or it can be a session cookie chunk like q_session_chunk_1 in which case the suffix will be chunk_1
-                int index = suffix.indexOf("_", 0);
-                return index == -1 ? suffix : suffix.substring(0, index);
+                // or it can be a session cookie chunk like q_session_github_chunk_1 in which case the suffix will be github_chunk_1
+                // or it can be a state cookie with a state value appended if multiple code flows are allowed, example, q_auth_github_<state>
+                int index = suffix.indexOf(UNDERSCORE, 0);
+                if (index == -1) {
+                    return suffix;
+                }
+                // The suffix contains an underscore, the tenant id itself may contain underscores too, for example,
+                // q_session_a_1 can be a cookie of the tenant `a_1` or a cookie of the tenant `a` with a cookie suffix `1`.
+                // Check the candidates ending at each underscore, starting with the whole suffix without the session cookie
+                // chunk tail, and prefer the longest known tenant id, for example, for `a_1_chunk_2` check `a_1` and `a`.
+                // Cookie names longer than the maximum cookie length are not created by Quarkus and the candidates with
+                // more than MAX_TENANT_ID_UNDERSCORES underscores removed are not checked to limit the work done for
+                // unexpected cookie names.
+                if (tenantConfigBean != null && suffix.length() <= MAX_COOKIE_LENGTH) {
+                    int chunkIndex = sessionCookie ? suffix.indexOf(SESSION_COOKIE_CHUNK) : -1;
+                    String candidate = chunkIndex == -1 ? suffix : suffix.substring(0, chunkIndex);
+                    for (int i = 0; i <= MAX_TENANT_ID_UNDERSCORES; i++) {
+                        if (tenantConfigBean.isKnownTenantId(candidate)) {
+                            return candidate;
+                        }
+                        int lastIndex = candidate.lastIndexOf(UNDERSCORE);
+                        if (lastIndex == -1) {
+                            break;
+                        }
+                        candidate = candidate.substring(0, lastIndex);
+                    }
+                }
+                // No known tenant id matches, for example, a dynamic tenant has not been created yet after a restart,
+                // fall back to the first segment
+                return suffix.substring(0, index);
             }
+        }
+    }
+
+    /**
+     * Verify that the tenant id does not start with the id of a web-app or hybrid tenant followed by an underscore,
+     * for example, `q_session_a_1` would be resolved to the tenant `a_1` even if it is a cookie of the tenant `a`
+     * with a cookie suffix `1`.
+     *
+     * @param oidcConfig tenant configuration
+     * @param tenantConfigBean tenant config bean which knows the static and already created dynamic tenants
+     */
+    static void verifyTenantId(OidcTenantConfig oidcConfig, TenantConfigBean tenantConfigBean) {
+        String tenantId = oidcConfig.tenantId().get();
+        // Check the same candidates which getTenantIdFromCookie checks, except for the tenant id itself
+        int index = tenantId.lastIndexOf(UNDERSCORE);
+        while (index > 0) {
+            String shorterTenantId = tenantId.substring(0, index);
+            OidcTenantConfig shorterTenantConfig = tenantConfigBean.getTenantConfig(shorterTenantId);
+            if (shorterTenantConfig != null && shorterTenantConfig.tenantEnabled() && !isServiceApp(shorterTenantConfig)) {
+                throw new ConfigurationException(String.format(
+                        "Tenant id '%s' starts with the id of the tenant '%s' followed by '_', the cookies of the tenant '%s'"
+                                + " can be resolved to the tenant '%s'. Please change the id of the tenant '%s' or '%s'.",
+                        tenantId, shorterTenantId, shorterTenantId, tenantId, shorterTenantId, tenantId));
+            }
+            index = tenantId.lastIndexOf(UNDERSCORE, index - 1);
         }
     }
 
@@ -877,12 +945,14 @@ public final class OidcUtils {
 
         String keyContent = KeyUtils.readKeyContent(decryptionKeyLocation);
         if (keyContent != null) {
-            List<JsonWebKey> keys = KeyUtils.loadJsonWebKeys(keyContent);
-            if (keys != null && keys.size() == 1 &&
-                    (keys.get(0).getAlgorithm() == null
-                            || keys.get(0).getAlgorithm().equals(algorithm.getAlgorithm()))
-                    && ("enc".equals(keys.get(0).getUse()) || keys.get(0).getUse() == null)) {
-                key = PublicJsonWebKey.class.cast(keys.get(0)).getPrivateKey();
+            io.smallrye.jwk.JsonWebKeySet keys = KeyUtils.loadJsonWebKeys(keyContent);
+            if (keys != null && keys.keys().size() == 1) {
+                JsonWebKey jwk = keys.keys().get(0);
+                if (jwk instanceof AsymmetricJsonWebKey asymmetricJwk
+                        && (jwk.algorithm() == null || jwk.algorithm().equals(algorithm.getAlgorithm()))
+                        && (jwk.keyUse() == null || JoseConstants.ENCRYPTION_USE.equals(jwk.keyUse()))) {
+                    key = asymmetricJwk.privateKey();
+                }
             }
         }
         if (key == null) {
@@ -915,7 +985,7 @@ public final class OidcUtils {
 
             try {
                 return OidcUtils.decryptString(token, decryptionKey, encryptionAlgorithm);
-            } catch (JoseException ex) {
+            } catch (JweException ex) {
                 LOG.warnf("Failed to decrypt a token: %s", ex.getMessage());
             }
         }
