@@ -147,6 +147,13 @@ public abstract class CommandsTestBase {
         return list.isEmpty() ? 0 : list.split("\n").length;
     }
 
+    /**
+     * Makes the server hold its replies back for the given time ({@code CLIENT PAUSE}).
+     */
+    protected static void pauseServer(Duration duration) {
+        connection.sync().clientPause(duration.toMillis());
+    }
+
     protected static void rawSet(String key, String value) {
         connection.sync().set(key.getBytes(StandardCharsets.UTF_8), value.getBytes(StandardCharsets.UTF_8));
     }

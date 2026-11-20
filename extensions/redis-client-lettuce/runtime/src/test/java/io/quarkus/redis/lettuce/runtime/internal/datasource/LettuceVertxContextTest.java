@@ -2,6 +2,7 @@ package io.quarkus.redis.lettuce.runtime.internal.datasource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -80,6 +81,9 @@ class LettuceVertxContextTest extends CommandsTestBase {
     void withoutACallerContextTheCommandCompletesWhereLettuceCompletedIt() throws Exception {
         rawSet(key, "hello");
         CompletableFuture<String> thread = new CompletableFuture<>();
+        // the reply is held back until the subscription is in place: a reply that is already there would be emitted on
+        // the subscribing thread
+        pauseServer(Duration.ofMillis(200));
         // subscribed from the test thread, which has no Vert.x context: the item is emitted by Lettuce's completion,
         // on the Vert.x event loop thread that serves the connection
         ds.value(String.class, String.class).get(key).subscribe().with(
