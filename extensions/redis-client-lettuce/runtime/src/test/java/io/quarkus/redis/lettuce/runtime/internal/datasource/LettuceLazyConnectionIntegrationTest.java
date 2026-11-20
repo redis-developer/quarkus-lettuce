@@ -2,6 +2,7 @@ package io.quarkus.redis.lettuce.runtime.internal.datasource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -158,7 +159,8 @@ class LettuceLazyConnectionIntegrationTest extends CommandsTestBase {
 
         shared.get(0).close();
 
-        assertThat(connectionCount()).isEqualTo(open - 1);
+        // the server takes the connection off its list a moment after the client closed it
+        await().atMost(TIMEOUT).untilAsserted(() -> assertThat(connectionCount()).isEqualTo(open - 1));
         assertThatThrownBy(() -> ds.value(String.class, String.class).get(key).await().atMost(TIMEOUT))
                 .isInstanceOf(IllegalStateException.class);
     }
