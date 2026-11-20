@@ -9,6 +9,7 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.resource.ClientResources;
 import io.quarkus.arc.InactiveBeanException;
 import io.quarkus.redis.client.RedisClientName;
 import io.quarkus.test.QuarkusExtensionTest;
@@ -38,6 +39,10 @@ public class LettuceInactiveClientTest {
     @Inject
     @RedisClientName("inactive-lettuce")
     StatefulRedisConnection<String, String> connection;
+
+    @Inject
+    @RedisClientName("inactive-lettuce")
+    ClientResources clientResources;
 
     @Test
     void shouldNotRun() {
