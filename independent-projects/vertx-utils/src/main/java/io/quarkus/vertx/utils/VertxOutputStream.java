@@ -40,7 +40,7 @@ public class VertxOutputStream extends OutputStream {
     private boolean committed;
     private boolean closed;
     private boolean waitingForDrain;
-    private Throwable throwable;
+    private volatile Throwable throwable;
 
     public VertxOutputStream(VertxJavaIoContext context) {
         this.context = context;
@@ -55,13 +55,15 @@ public class VertxOutputStream extends OutputStream {
                 throwable = event;
                 log.debugf(event, "IO Exception ");
                 request.connection().close();
-                lock.lock();
-                try {
-                    if (waitingForDrain) {
-                        drainCondition.signalAll();
+                // tryLock: avoid deadlock with the Vert.x connection monitor held by the event loop
+                if (lock.tryLock()) {
+                    try {
+                        if (waitingForDrain) {
+                            drainCondition.signalAll();
+                        }
+                    } finally {
+                        lock.unlock();
                     }
-                } finally {
-                    lock.unlock();
                 }
             }
         });
@@ -72,13 +74,15 @@ public class VertxOutputStream extends OutputStream {
         context.getRoutingContext().addEndHandler(new Handler<>() {
             @Override
             public void handle(AsyncResult<Void> event) {
-                lock.lock();
-                try {
-                    if (waitingForDrain) {
-                        drainCondition.signalAll();
+                // tryLock: same deadlock avoidance as the exception handler above
+                if (lock.tryLock()) {
+                    try {
+                        if (waitingForDrain) {
+                            drainCondition.signalAll();
+                        }
+                    } finally {
+                        lock.unlock();
                     }
-                } finally {
-                    lock.unlock();
                 }
             }
         });
@@ -120,6 +124,12 @@ public class VertxOutputStream extends OutputStream {
             return;
         }
         assert lock.isHeldByCurrentThread();
+        if (throwable != null) {
+            throw new IOException(throwable);
+        }
+        if (response.closed()) {
+            throw new IOException("Connection has been closed");
+        }
         while (response.writeQueueFull()) {
             if (throwable != null) {
                 throw new IOException(throwable);
@@ -171,6 +181,9 @@ public class VertxOutputStream extends OutputStream {
         }
         if (closed) {
             throw new IOException("Stream is closed");
+        }
+        if (response.closed()) {
+            throw new IOException("Connection has been closed");
         }
 
         int rem = len;
