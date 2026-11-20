@@ -8,8 +8,10 @@ import java.lang.reflect.Type;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -19,6 +21,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import io.lettuce.core.RedisChannelHandler;
+import io.lettuce.core.RedisCommandTimeoutException;
 import io.lettuce.core.RedisConnectionStateListener;
 import io.lettuce.core.RedisFuture;
 import io.lettuce.core.pubsub.RedisPubSubAdapter;
@@ -154,6 +157,23 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
                 onException));
     }
 
+    /**
+     * The failure of a subscription the server did not confirm within {@code quarkus.redis.subscribe-timeout} (see
+     * {@code LettuceConnectionFactory.NonBlockingCommandTimeoutSource}), reported with a {@link TimeoutException} as
+     * the Vert.x backend does; any other failure as it is.
+     */
+    private static Throwable unconfirmed(Throwable failure) {
+        Throwable cause = failure instanceof CompletionException && failure.getCause() != null ? failure.getCause()
+                : failure;
+        if (cause instanceof RedisCommandTimeoutException) {
+            TimeoutException timeout = new TimeoutException(
+                    "No subscription confirmation received from Redis in time: " + cause.getMessage());
+            timeout.initCause(cause);
+            return timeout;
+        }
+        return failure;
+    }
+
     private static void validateCollection(Collection<String> col, String name) {
         notNullOrEmpty(col, name);
 
@@ -208,7 +228,7 @@ public class LettuceReactivePubSubCommandsImpl<V> extends AbstractLettuceCommand
                     subscriber.subscribe().whenComplete((ignored, subscribeFailure) -> {
                         if (subscribeFailure != null) {
                             subscriber.discard();
-                            result.completeExceptionally(subscribeFailure);
+                            result.completeExceptionally(unconfirmed(subscribeFailure));
                         } else if (!result.complete(subscriber) || cancelled.get()) {
                             subscriber.discard();
                         }

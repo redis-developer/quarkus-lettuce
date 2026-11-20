@@ -1329,6 +1329,7 @@ The number of concurrent subscribers is bounded only by the Redis server's `maxc
 Where a subscriber's connection goes follows the client type: to the server of a standalone client, to a node of the cluster Lettuce picks (a cluster delivers every message to every node), to the master the sentinels report for a Sentinel client, following a failover when the connection is re-established, and to the first configured host that answers for a replication client, master or replica (Redis propagates `PUBLISH` to the replicas, so a subscriber on a replica receives the messages published to the master).
 
 A subscriber's `onEnd` callback runs, and the `Multi` returned by the streaming `subscribe(...)` methods completes, when the last channel or pattern is unsubscribed and when the client is shut down with the application.
+As on the Vert.x backend, a subscription the server does not confirm within `quarkus.redis.subscribe-timeout` fails with a `TimeoutException` and its connection is closed; `quarkus.redis.timeout` does not apply to it, and `0` disables the limit.
 A subscriber's connection that is lost (the server restarted, the network failed) is re-established and re-subscribed by Lettuce transparently: messages published in the meantime are missed, as with any Pub/Sub subscriber, but the subscription goes on and `onEnd` is not called, where the Vert.x backend ends the subscription.
 `onException` receives the I/O errors reported on the connection and the failures to decode a message.
 

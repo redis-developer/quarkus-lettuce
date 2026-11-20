@@ -41,7 +41,8 @@ class LettuceCommandTimeoutIntegrationTest extends CommandsTestBase {
     @BeforeEach
     void connectWithShortCommandTimeout() {
         factory = new LettuceConnectionFactory("timeout-test", lettuceResources.clientResources(),
-                RedisURI.create(REDIS.getHost(), REDIS.getFirstMappedPort()), ClientOptions.create(), COMMAND_TIMEOUT);
+                RedisURI.create(REDIS.getHost(), REDIS.getFirstMappedPort()), ClientOptions.create(), COMMAND_TIMEOUT,
+                COMMAND_TIMEOUT);
         conn = factory.connect();
         pool = new LettuceConnectionPool(factory::connectAsync, 1, 1, 0);
         ds = new LettuceBlockingRedisDataSourceImpl(

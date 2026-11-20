@@ -5,6 +5,7 @@ import static io.smallrye.mutiny.helpers.ParameterValidation.nonNull;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -85,13 +86,15 @@ public class LettuceConnectionFactory {
      * @param clientOptions the client options, carrying the TLS material (see {@link LettuceClientSettings}); the
      *        command timeout options are added to them
      * @param timeout the {@code quarkus.redis.timeout} applied to non-blocking commands
+     * @param subscribeTimeout the {@code quarkus.redis.subscribe-timeout} a Pub/Sub subscription is confirmed within;
+     *        zero or negative for no limit
      */
     public LettuceConnectionFactory(String clientName, ClientResources clientResources, RedisURI redisUri,
-            ClientOptions clientOptions, Duration timeout) {
+            ClientOptions clientOptions, Duration timeout, Duration subscribeTimeout) {
         LOGGER.infof("Creating Lettuce RedisClient '%s' for %s:%d%s", clientName, redisUri.getHost(), redisUri.getPort(),
                 redisUri.isSsl() ? " (TLS)" : "");
         RedisClient client = RedisClient.create(clientResources, redisUri);
-        client.setOptions(withCommandTimeout(clientOptions, timeout));
+        client.setOptions(withCommandTimeout(clientOptions, timeout, subscribeTimeout));
         this.clientName = clientName;
         this.topology = new Standalone(client, redisUri);
     }
@@ -113,10 +116,12 @@ public class LettuceConnectionFactory {
      *        {@link LettuceClientSettings#topologyRefreshOptions})
      * @param readFrom the nodes read-only commands are sent to (see {@link LettuceClientSettings#readFrom})
      * @param timeout the {@code quarkus.redis.timeout} applied to non-blocking commands
+     * @param subscribeTimeout the {@code quarkus.redis.subscribe-timeout} a Pub/Sub subscription is confirmed within;
+     *        zero or negative for no limit
      */
     public LettuceConnectionFactory(String clientName, ClientResources clientResources, List<RedisURI> seeds,
             ClientOptions clientOptions, ClusterTopologyRefreshOptions topologyRefresh, ReadFrom readFrom,
-            Duration timeout) {
+            Duration timeout, Duration subscribeTimeout) {
         nonNull(seeds, "seeds");
         nonNull(topologyRefresh, "topologyRefresh");
         nonNull(readFrom, "readFrom");
@@ -127,7 +132,7 @@ public class LettuceConnectionFactory {
         LOGGER.infof("Creating Lettuce RedisClusterClient '%s' for the seed nodes %s%s, reading from %s", clientName,
                 describe(seeds), seeds.getFirst().isSsl() ? " (TLS)" : "", describe(readFrom));
         RedisClusterClient client = RedisClusterClient.create(clientResources, seeds);
-        client.setOptions(ClusterClientOptions.builder(withCommandTimeout(clientOptions, timeout))
+        client.setOptions(ClusterClientOptions.builder(withCommandTimeout(clientOptions, timeout, subscribeTimeout))
                 .topologyRefreshOptions(topologyRefresh)
                 .build());
         this.clientName = clientName;
@@ -159,9 +164,12 @@ public class LettuceConnectionFactory {
      *        command timeout options are added to them
      * @param readFrom the nodes read-only commands are sent to (see {@link LettuceClientSettings#readFrom})
      * @param timeout the {@code quarkus.redis.timeout} applied to non-blocking commands
+     * @param subscribeTimeout the {@code quarkus.redis.subscribe-timeout} a Pub/Sub subscription is confirmed within;
+     *        zero or negative for no limit
      */
     public LettuceConnectionFactory(String clientName, ClientResources clientResources, MasterReplicaMode mode,
-            List<RedisURI> nodes, ClientOptions clientOptions, ReadFrom readFrom, Duration timeout) {
+            List<RedisURI> nodes, ClientOptions clientOptions, ReadFrom readFrom, Duration timeout,
+            Duration subscribeTimeout) {
         nonNull(mode, "mode");
         nonNull(nodes, "nodes");
         nonNull(readFrom, "readFrom");
@@ -185,16 +193,17 @@ public class LettuceConnectionFactory {
                     clientName, describe(nodes), tls, describe(readFrom));
         }
         RedisClient client = RedisClient.create(clientResources);
-        client.setOptions(withCommandTimeout(clientOptions, timeout));
+        client.setOptions(withCommandTimeout(clientOptions, timeout, subscribeTimeout));
         this.clientName = clientName;
         this.topology = new MasterReplica(client, mode, List.copyOf(nodes), readFrom);
     }
 
-    private static ClientOptions withCommandTimeout(ClientOptions clientOptions, Duration timeout) {
+    private static ClientOptions withCommandTimeout(ClientOptions clientOptions, Duration timeout,
+            Duration subscribeTimeout) {
         return clientOptions.mutate()
                 .timeoutOptions(TimeoutOptions.builder()
                         .timeoutCommands(true)
-                        .timeoutSource(new NonBlockingCommandTimeoutSource(timeout))
+                        .timeoutSource(new NonBlockingCommandTimeoutSource(timeout, subscribeTimeout))
                         .build())
                 .build();
     }
@@ -590,13 +599,19 @@ public class LettuceConnectionFactory {
     /**
      * Applies the command timeout to every command but the ones bounded otherwise: the commands of a transaction, and
      * the blocking commands (see {@link BlockingCommands}), whether typed or sent through {@code execute(...)}.
+     * {@code SUBSCRIBE} and {@code PSUBSCRIBE} complete when the server confirms the subscription, which is bounded by
+     * the subscribe timeout instead, as on the Vert.x backend, or not at all when that one is zero or negative.
      */
     static final class NonBlockingCommandTimeoutSource extends TimeoutOptions.TimeoutSource {
 
-        private final long timeoutMillis;
+        private static final Set<String> SUBSCRIBING = Set.of("SUBSCRIBE", "PSUBSCRIBE");
 
-        NonBlockingCommandTimeoutSource(Duration timeout) {
+        private final long timeoutMillis;
+        private final long subscribeTimeoutMillis;
+
+        NonBlockingCommandTimeoutSource(Duration timeout, Duration subscribeTimeout) {
             this.timeoutMillis = timeout.toMillis();
+            this.subscribeTimeoutMillis = subscribeTimeout.isPositive() ? subscribeTimeout.toMillis() : -1;
         }
 
         @Override
@@ -605,6 +620,9 @@ public class LettuceConnectionFactory {
                 return -1; // completes on EXEC, bounded by the EXEC timeout
             }
             ProtocolKeyword type = command.getType();
+            if (SUBSCRIBING.contains(type.toString())) {
+                return subscribeTimeoutMillis; // bounded by the subscribe timeout
+            }
             if (BlockingCommands.alwaysBlocks(type)) {
                 return -1; // bounded by its own timeout
             }

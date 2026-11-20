@@ -23,7 +23,32 @@ class NonBlockingCommandTimeoutSourceTest {
 
     private static final long TIMEOUT = 500;
 
-    private final NonBlockingCommandTimeoutSource source = new NonBlockingCommandTimeoutSource(Duration.ofMillis(TIMEOUT));
+    private static final long SUBSCRIBE_TIMEOUT = 700;
+
+    private final NonBlockingCommandTimeoutSource source = new NonBlockingCommandTimeoutSource(Duration.ofMillis(TIMEOUT),
+            Duration.ofMillis(SUBSCRIBE_TIMEOUT));
+
+    @Test
+    void subscriptionsAreBoundedByTheSubscribeTimeout() {
+        assertThat(source.getTimeout(command(CommandType.SUBSCRIBE, args().addKey(bytes("channel")))))
+                .isEqualTo(SUBSCRIBE_TIMEOUT);
+        assertThat(source.getTimeout(command(CommandType.PSUBSCRIBE, args().addKey(bytes("channel*")))))
+                .isEqualTo(SUBSCRIBE_TIMEOUT);
+        // the other Pub/Sub commands keep the command timeout
+        assertThat(source.getTimeout(command(CommandType.UNSUBSCRIBE, args().addKey(bytes("channel")))))
+                .isEqualTo(TIMEOUT);
+        assertThat(source.getTimeout(command(CommandType.PUBLISH, args().addKey(bytes("channel")).add("message"))))
+                .isEqualTo(TIMEOUT);
+    }
+
+    @Test
+    void subscriptionsAreNotTimedWhenTheSubscribeTimeoutIsDisabled() {
+        NonBlockingCommandTimeoutSource disabled = new NonBlockingCommandTimeoutSource(Duration.ofMillis(TIMEOUT),
+                Duration.ZERO);
+        assertThat(disabled.getTimeout(command(CommandType.SUBSCRIBE, args().addKey(bytes("channel"))))).isEqualTo(-1);
+        assertThat(disabled.getTimeout(command(CommandType.PSUBSCRIBE, args().addKey(bytes("channel*"))))).isEqualTo(-1);
+        assertThat(disabled.getTimeout(command(CommandType.GET, args().addKey(bytes("k"))))).isEqualTo(TIMEOUT);
+    }
 
     @Test
     void ordinaryCommandsAreTimed() {

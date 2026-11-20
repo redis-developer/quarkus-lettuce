@@ -56,7 +56,7 @@ class LettuceClientResourcesTest {
 
         String redisUri = String.format("redis://%s:%d", REDIS.getHost(), REDIS.getFirstMappedPort());
         connectionFactory = new LettuceConnectionFactory("test", lettuceResources.clientResources(),
-                RedisURI.create(redisUri), ClientOptions.create(), Duration.ofSeconds(10));
+                RedisURI.create(redisUri), ClientOptions.create(), Duration.ofSeconds(10), Duration.ofSeconds(10));
     }
 
     @AfterAll
