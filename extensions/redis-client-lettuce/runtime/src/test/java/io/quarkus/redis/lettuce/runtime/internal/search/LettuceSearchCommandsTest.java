@@ -379,17 +379,13 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
         });
 
         // > FT.SEARCH itemIdx '(@name:(bluetooth))|(@description:(bluetooth))' RETURN 3 name description price HIGHLIGHT FIELDS 2 name description TAGS '<b>' '</b>'
-        await().untilAsserted(() -> {
-            var result = blockingSearch.ftSearch("itemIdx", "(@name:(bluetooth))|(@description:(bluetooth))", new QueryArgs()
-                    .returnAttribute("name").returnAttribute("description").returnAttribute("price")
-                    .highlight(new HighlightArgs().fields("name", "description").tags("<b>", "</b>")));
-            assertThat(result.count()).isEqualTo(2);
-            assertThat(result.documents()).hasSize(2).allSatisfy(d -> {
-                assertThat(d.property("name").asString()).isNotNull();
-                assertThat(d.property("price").asDouble()).isGreaterThan(0);
-                assertThat(d.property("description").asString()).contains("<b>Bluetooth</b>");
-            });
-        });
+        // Redis 8 rejects HIGHLIGHT on a JSON index (Redis Stack 7.2 accepted it); highlighting is covered on a
+        // hash index in testHighlightOnHashIndex.
+        assertThatThrownBy(
+                () -> blockingSearch.ftSearch("itemIdx", "(@name:(bluetooth))|(@description:(bluetooth))", new QueryArgs()
+                        .returnAttribute("name").returnAttribute("description").returnAttribute("price")
+                        .highlight(new HighlightArgs().fields("name", "description").tags("<b>", "</b>"))))
+                .hasMessageContaining("HIGHLIGHT/SUMMARIZE is not supported with JSON indexes");
 
         // Part 4 - Aggregation
         // > FT.AGGREGATE itemIdx '*' LOAD 4 name $.price AS originalPrice APPLY '@originalPrice - (@originalPrice * 0.10)' AS salePrice SORTBY 2 @salePrice ASC
@@ -405,6 +401,21 @@ class LettuceSearchCommandsTest extends CommandsTestBase {
                 assertThat(price).isGreaterThan(0);
                 assertThat(d.property("salePrice").asDouble()).isCloseTo(price - price * 0.10, Offset.offset(0.1));
             });
+        });
+    }
+
+    @Test
+    void testHighlightOnHashIndex() {
+        setupMovies();
+
+        // > FT.SEARCH idx:movie '@title:(godfather)' RETURN 2 title release_year HIGHLIGHT FIELDS 1 title TAGS '<b>' '</b>'
+        await().untilAsserted(() -> {
+            var result = blockingSearch.ftSearch("idx:movie", "@title:(godfather)", new QueryArgs()
+                    .returnAttribute("title").returnAttribute("release_year")
+                    .highlight(new HighlightArgs().fields("title").tags("<b>", "</b>")));
+            assertThat(result.count()).isEqualTo(1);
+            assertThat(result.documents().getFirst().property("title").asString()).isEqualTo("The <b>Godfather</b>");
+            assertThat(result.documents().getFirst().property("release_year").asInteger()).isEqualTo(1972);
         });
     }
 
