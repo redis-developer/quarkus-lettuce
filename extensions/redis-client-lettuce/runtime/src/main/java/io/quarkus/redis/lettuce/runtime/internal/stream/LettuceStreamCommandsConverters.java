@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.List;
 
 import io.lettuce.core.Range;
+import io.lettuce.core.XReadArgs.StreamOffset;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.protocol.CommandArgs;
 import io.quarkus.redis.datasource.RedisCommandExtraArguments;
@@ -19,7 +20,7 @@ import io.quarkus.redis.datasource.stream.XReadArgs;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.redis.datasource.stream.XTrimArgs;
 import io.quarkus.redis.lettuce.runtime.internal.ArgReplay;
-import io.quarkus.redis.lettuce.runtime.internal.BlockingReads;
+import io.quarkus.redis.lettuce.runtime.internal.BlockingCommandArgs;
 
 final class LettuceStreamCommandsConverters {
 
@@ -70,32 +71,36 @@ final class LettuceStreamCommandsConverters {
         return args != null && args.toArgs().contains("BLOCK");
     }
 
-    static io.lettuce.core.XReadArgs toXReadArgs(XReadArgs quarkus) {
+    static CommandArgs<byte[], byte[]> toXReadCommandArgs(XReadArgs quarkus, StreamOffset<byte[]>[] streams) {
         List<Object> tokens = quarkus.toArgs();
-        boolean blocking = tokens.contains("BLOCK");
-        return new io.lettuce.core.XReadArgs() {
-            @Override
-            public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(tokens, args);
-                if (blocking) {
-                    BlockingReads.mark(args);
-                }
-            }
-        };
+        CommandArgs<byte[], byte[]> args = streamReadArgs(tokens);
+        ArgReplay.replay(tokens, args);
+        return addStreams(args, streams);
     }
 
-    static io.lettuce.core.XReadArgs toXReadArgs(XReadGroupArgs quarkus) {
+    static CommandArgs<byte[], byte[]> toXReadGroupCommandArgs(byte[] group, byte[] consumer, XReadGroupArgs quarkus,
+            StreamOffset<byte[]>[] streams) {
         List<Object> tokens = quarkus.toArgs();
-        boolean blocking = tokens.contains("BLOCK");
-        return new io.lettuce.core.XReadArgs() {
-            @Override
-            public <K, V> void build(CommandArgs<K, V> args) {
-                ArgReplay.replay(tokens, args);
-                if (blocking) {
-                    BlockingReads.mark(args);
-                }
-            }
-        };
+        CommandArgs<byte[], byte[]> args = streamReadArgs(tokens).add("GROUP").add(group).add(consumer);
+        ArgReplay.replay(tokens, args);
+        return addStreams(args, streams);
+    }
+
+    private static CommandArgs<byte[], byte[]> streamReadArgs(List<Object> tokens) {
+        return tokens.contains("BLOCK") ? new BlockingCommandArgs<>(ByteArrayCodec.INSTANCE)
+                : new CommandArgs<>(ByteArrayCodec.INSTANCE);
+    }
+
+    private static CommandArgs<byte[], byte[]> addStreams(CommandArgs<byte[], byte[]> args,
+            StreamOffset<byte[]>[] streams) {
+        args.add("STREAMS");
+        for (StreamOffset<byte[]> stream : streams) {
+            args.addKey(stream.getName());
+        }
+        for (StreamOffset<byte[]> stream : streams) {
+            args.add(stream.getOffset());
+        }
+        return args;
     }
 
     static io.lettuce.core.XTrimArgs toXTrimArgs(XTrimArgs quarkus) {

@@ -21,6 +21,7 @@ import io.lettuce.core.XReadArgs.StreamOffset;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.models.stream.PendingMessages;
 import io.lettuce.core.output.StatusOutput;
+import io.lettuce.core.output.StreamReadOutput;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandType;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -378,9 +379,8 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(key, "key");
         notNullOrBlank(id, "id");
         nonNull(args, "args");
-        io.lettuce.core.XReadArgs lettuceArgs = LettuceStreamCommandsConverters.toXReadArgs(args);
-        StreamOffset<byte[]>[] offsets = toStreamOffsets(key, id);
-        return command(async -> async.xread(lettuceArgs, offsets), this::decodeStreamMessages);
+        return streamRead(CommandType.XREAD,
+                LettuceStreamCommandsConverters.toXReadCommandArgs(args, toStreamOffsets(key, id)));
     }
 
     @Override
@@ -395,9 +395,8 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
             Map<K, String> lastIdsPerStream, XReadArgs args) {
         nonNull(lastIdsPerStream, "lastIdsPerStream");
         nonNull(args, "args");
-        io.lettuce.core.XReadArgs lettuceArgs = LettuceStreamCommandsConverters.toXReadArgs(args);
-        StreamOffset<byte[]>[] offsets = toStreamOffsets(lastIdsPerStream);
-        return command(async -> async.xread(lettuceArgs, offsets), this::decodeStreamMessages);
+        return streamRead(CommandType.XREAD,
+                LettuceStreamCommandsConverters.toXReadCommandArgs(args, toStreamOffsets(lastIdsPerStream)));
     }
 
     @Override
@@ -448,10 +447,8 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         nonNull(key, "key");
         notNullOrBlank(id, "id");
         nonNull(args, "args");
-        Consumer<byte[]> lettuceConsumer = consumer(group, consumer);
-        io.lettuce.core.XReadArgs lettuceArgs = LettuceStreamCommandsConverters.toXReadArgs(args);
-        StreamOffset<byte[]>[] offsets = toStreamOffsets(key, id);
-        return command(async -> async.xreadgroup(lettuceConsumer, lettuceArgs, offsets), this::decodeStreamMessages);
+        return streamRead(CommandType.XREADGROUP, LettuceStreamCommandsConverters.toXReadGroupCommandArgs(
+                marshaller.encode(group), marshaller.encode(consumer), args, toStreamOffsets(key, id)));
     }
 
     @Override
@@ -470,10 +467,8 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
         notNullOrBlank(consumer, "consumer");
         nonNull(lastIdsPerStream, "lastIdsPerStream");
         nonNull(args, "args");
-        Consumer<byte[]> lettuceConsumer = consumer(group, consumer);
-        io.lettuce.core.XReadArgs lettuceArgs = LettuceStreamCommandsConverters.toXReadArgs(args);
-        StreamOffset<byte[]>[] offsets = toStreamOffsets(lastIdsPerStream);
-        return command(async -> async.xreadgroup(lettuceConsumer, lettuceArgs, offsets), this::decodeStreamMessages);
+        return streamRead(CommandType.XREADGROUP, LettuceStreamCommandsConverters.toXReadGroupCommandArgs(
+                marshaller.encode(group), marshaller.encode(consumer), args, toStreamOffsets(lastIdsPerStream)));
     }
 
     @Override
@@ -560,9 +555,12 @@ public class LettuceReactiveStreamCommandsImpl<K, F, V> extends AbstractLettuceC
                 LettuceReactiveStreamCommandsImpl::decodePendingMessages);
     }
 
-    // Lettuce declares xread/xreadgroup with a generic varargs parameter (StreamOffset<K>...) on an interface,
-    // which cannot carry @SafeVarargs. Passing a single StreamOffset would make javac create a generic array at
-    // every call site and emit an unchecked warning, so the array is built here and the suppression stays local.
+    private LettuceCommand<List<io.lettuce.core.StreamMessage<byte[], byte[]>>, List<StreamMessage<K, F, V>>> streamRead(
+            CommandType type, CommandArgs<byte[], byte[]> args) {
+        return command(async -> async.dispatch(type, new StreamReadOutput<>(ByteArrayCodec.INSTANCE), args),
+                this::decodeStreamMessages);
+    }
+
     @SuppressWarnings("unchecked")
     private StreamOffset<byte[]>[] toStreamOffsets(K key, String id) {
         return new StreamOffset[] { StreamOffset.from(marshaller.encode(key), id) };

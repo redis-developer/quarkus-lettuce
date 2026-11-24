@@ -14,6 +14,8 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 import io.lettuce.core.protocol.CommandArgs;
+import io.lettuce.core.protocol.CommandType;
+import io.quarkus.redis.lettuce.runtime.internal.BlockingCommandArgs;
 import io.vertx.redis.client.Command;
 
 /**
@@ -102,6 +104,24 @@ class LettuceRawCommandArgsTest {
         // Lettuce renders a key argument as key<...> and a plain byte argument in base64
         assertThat(args.toCommandString()).isEqualTo("key<k> dg== RVg= MTA=");
         assertThat(LettuceReactiveRedisDataSourceImpl.rawArgs(Command.PING, (String[]) null).count()).isZero();
+    }
+
+    @Test
+    void theArgumentsOfABlockingCommandAreBlockingOutsideATransaction() {
+        assertThat(LettuceReactiveRedisDataSourceImpl.executeArgs(CommandType.BLPOP, Command.BLPOP, "k", "1"))
+                .isInstanceOf(BlockingCommandArgs.class);
+        CommandArgs<byte[], byte[]> read = LettuceReactiveRedisDataSourceImpl.executeArgs(CommandType.XREAD,
+                Command.XREAD, "BLOCK", "100", "STREAMS", "k", "$");
+        assertThat(read).isInstanceOf(BlockingCommandArgs.class);
+        // the same arguments as the plain form, keys included
+        assertThat(read.toCommandString()).isEqualTo(LettuceReactiveRedisDataSourceImpl
+                .rawArgs(Command.XREAD, "BLOCK", "100", "STREAMS", "k", "$").toCommandString());
+        assertThat(firstKey(read)).isEqualTo("k");
+
+        assertThat(LettuceReactiveRedisDataSourceImpl.executeArgs(CommandType.XREAD, Command.XREAD, "STREAMS", "k", "0"))
+                .isNotInstanceOf(BlockingCommandArgs.class);
+        assertThat(LettuceReactiveRedisDataSourceImpl.executeArgs(CommandType.GET, Command.GET, "k"))
+                .isNotInstanceOf(BlockingCommandArgs.class);
     }
 
     private static String firstKey(CommandArgs<byte[], byte[]> args) {
