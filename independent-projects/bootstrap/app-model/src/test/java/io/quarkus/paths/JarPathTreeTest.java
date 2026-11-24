@@ -1,6 +1,7 @@
 package io.quarkus.paths;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -9,6 +10,8 @@ import java.io.UncheckedIOException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -138,8 +141,32 @@ public class JarPathTreeTest {
     @Test
     public void getResourceNames() {
         final PathTree tree = PathTree.ofDirectoryOrArchive(root);
-        assertThat(tree.getResourceNames())
-                .containsExactlyInAnyOrderElementsOf(DirectoryPathTreeTest.getMultiReleaseMappedPaths().keySet());
+        final Set<String> expected = new HashSet<>(DirectoryPathTreeTest.getMultiReleaseMappedPaths().keySet());
+        expected.remove("");
+        assertThat(tree.getResourceNames()).containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(tree.getResourceNames()).doesNotContain("");
+    }
+
+    @Test
+    public void emptyResourceNameNotContained() throws Exception {
+        final PathTree tree = PathTree.ofDirectoryOrArchive(root);
+        assertThat(tree.contains("")).isFalse();
+        tree.apply("", visit -> {
+            assertThat(visit).isNull();
+            return null;
+        });
+        tree.accept("", visit -> assertThat(visit).isNull());
+
+        try (OpenPathTree open = tree.open()) {
+            assertThat(open.contains("")).isFalse();
+            assertThat(open.getPath("")).isNull();
+            assertThat(open.getResourceNames()).doesNotContain("");
+            open.apply("", visit -> {
+                assertThat(visit).isNull();
+                return null;
+            });
+            open.accept("", visit -> assertThat(visit).isNull());
+        }
     }
 
     @Test
@@ -243,5 +270,29 @@ public class JarPathTreeTest {
         } finally {
             Thread.interrupted();
         }
+    }
+
+    @Test
+    public void openingAnInvalidArchiveReportsTheArchive() throws Exception {
+        final Path notAJar = Path.of("target/not-a-jar-" + java.util.UUID.randomUUID() + ".jar");
+        Files.createDirectories(notAJar.getParent());
+        Files.writeString(notAJar, "this is not a zip archive");
+        // a non-shared tree, the kind returned when a PathFilter is set
+        // or quarkus.bootstrap.disable-jar-cache=true
+        final ArchivePathTree tree = new ArchivePathTree(notAJar);
+        assertThatThrownBy(tree::open)
+                .isInstanceOf(UncheckedIOException.class)
+                .hasMessageContaining(notAJar.toString());
+    }
+
+    @Test
+    public void doubleCloseIsNoOp() throws Exception {
+        // a non-shared tree, the kind returned when a PathFilter is set
+        // or quarkus.bootstrap.disable-jar-cache=true
+        final ArchivePathTree tree = new ArchivePathTree(root);
+        final OpenPathTree open = tree.open();
+        open.close();
+        assertThatNoException().isThrownBy(open::close);
+        assertThat(open.isOpen()).isFalse();
     }
 }

@@ -154,8 +154,8 @@ public class LettuceDataSourceTest {
     @Test
     public void testConnectionIsCachedAndStaysOpen() {
         assertThat(sharedConnection.isOpen()).isTrue();
-        // Synthetic bean is @ApplicationScoped over a supplier that caches the connection
-        // in LettuceRecorder; every lookup must return the same proxy.
+        // Synthetic bean is @ApplicationScoped over the connection the StatefulConnection service opened once;
+        // every lookup must return the same proxy.
         StatefulRedisConnection<String, String> first = connectionInstance.get();
         StatefulRedisConnection<String, String> second = connectionInstance.get();
         assertThat(first).isSameAs(second);

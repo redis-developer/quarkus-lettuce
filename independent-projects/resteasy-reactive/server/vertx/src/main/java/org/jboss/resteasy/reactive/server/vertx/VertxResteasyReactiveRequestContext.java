@@ -52,10 +52,10 @@ import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
+import io.vertx.core.http.impl.HttpServerConnection;
 import io.vertx.core.impl.buffer.VertxByteBufAllocator;
 import io.vertx.core.internal.buffer.BufferInternal;
 import io.vertx.core.net.HostAndPort;
-import io.vertx.core.net.impl.ConnectionBase;
 import io.vertx.ext.web.RoutingContext;
 
 public class VertxResteasyReactiveRequestContext extends ResteasyReactiveRequestContext
@@ -97,7 +97,9 @@ public class VertxResteasyReactiveRequestContext extends ResteasyReactiveRequest
                 });
             }
         };
-        request.pause();
+        if (!request.isEnded()) {
+            request.pause();
+        }
     }
 
     @Override
@@ -143,7 +145,7 @@ public class VertxResteasyReactiveRequestContext extends ResteasyReactiveRequest
 
     @Override
     protected EventLoop getEventLoop() {
-        return ((ConnectionBase) context.request().connection()).channel().eventLoop();
+        return ((HttpServerConnection) context.request().connection()).context().nettyEventLoop();
     }
 
     @Override
@@ -305,7 +307,9 @@ public class VertxResteasyReactiveRequestContext extends ResteasyReactiveRequest
 
     @Override
     public ServerHttpResponse pauseRequestInput() {
-        request.pause();
+        if (!request.isEnded()) {
+            request.pause();
+        }
         return this;
     }
 
@@ -315,8 +319,27 @@ public class VertxResteasyReactiveRequestContext extends ResteasyReactiveRequest
             continueState = ContinueState.SENT;
             response.writeContinue();
         }
-        request.resume();
+        if (isOnIoThread()) {
+            resumeIfNotEnded();
+        } else {
+            contextExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    resumeIfNotEnded();
+                }
+            });
+        }
         return this;
+    }
+
+    /**
+     * Resumes the request unless it has ended. This runs on the event loop of the request, so the request cannot
+     * end between the check and the resume.
+     */
+    private void resumeIfNotEnded() {
+        if (!request.isEnded()) {
+            request.resume();
+        }
     }
 
     @Override
@@ -374,7 +397,7 @@ public class VertxResteasyReactiveRequestContext extends ResteasyReactiveRequest
 
     @Override
     public boolean isOnIoThread() {
-        return ((ConnectionBase) request.connection()).channel().eventLoop().inEventLoop();
+        return ((HttpServerConnection) request.connection()).context().nettyEventLoop().inEventLoop();
     }
 
     @SuppressWarnings("unchecked")

@@ -23,6 +23,7 @@ import org.hibernate.search.engine.reporting.FailureHandler;
 import org.hibernate.search.mapper.pojo.work.IndexingPlanSynchronizationStrategy;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationValue;
+import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
 import org.jboss.jandex.IndexView;
 import org.jboss.logging.Logger;
@@ -42,6 +43,9 @@ import io.quarkus.deployment.recording.RecorderContext;
 import io.quarkus.deployment.util.JandexUtil;
 import io.quarkus.elasticsearch.restclient.common.deployment.DevservicesElasticsearchBuildItem;
 import io.quarkus.elasticsearch.restclient.common.deployment.ElasticsearchCommonBuildTimeConfig.ElasticsearchDevServicesBuildTimeConfig.Distribution;
+import io.quarkus.hibernate.accessor.FieldAccess;
+import io.quarkus.hibernate.accessor.deployment.HibernateAccessorFactoryBuildItem;
+import io.quarkus.hibernate.accessor.deployment.HibernateAccessorRegistrationBuildItem;
 import io.quarkus.hibernate.orm.deployment.PersistenceUnitDescriptorBuildItem;
 import io.quarkus.hibernate.orm.deployment.spi.HibernateOrmIntegrationRuntimeConfiguredBuildItem;
 import io.quarkus.hibernate.orm.deployment.spi.HibernateOrmIntegrationStaticConfiguredBuildItem;
@@ -49,6 +53,7 @@ import io.quarkus.hibernate.orm.deployment.spi.component.PersistenceUnitRequestB
 import io.quarkus.hibernate.orm.runtime.PersistenceUnitUtil;
 import io.quarkus.hibernate.orm.runtime.spi.HibernateOrmIntegrationRuntimeInitListener;
 import io.quarkus.hibernate.orm.runtime.spi.HibernateOrmIntegrationStaticInitListener;
+import io.quarkus.hibernate.search.backend.elasticsearch.common.deployment.HibernateSearchAccessorDiscovery;
 import io.quarkus.hibernate.search.backend.elasticsearch.common.deployment.HibernateSearchBackendElasticsearchEnabledBuildItem;
 import io.quarkus.hibernate.search.backend.elasticsearch.common.runtime.ElasticsearchVersionSubstitution;
 import io.quarkus.hibernate.search.orm.elasticsearch.runtime.HibernateSearchElasticsearchBuildTimeConfig;
@@ -177,6 +182,25 @@ class HibernateSearchElasticsearchProcessor {
     }
 
     @BuildStep
+    public void discoverRootAnnotationMappedClassNames(CombinedIndexBuildItem combinedIndexBuildItem,
+            BuildProducer<HibernateSearchOrmRootMappedClassesBuildItem> mappedClassesBuildItem) {
+        IndexView index = combinedIndexBuildItem.getIndex();
+
+        Set<String> rootAnnotationMappedClassNames = collectRootAnnotationMappedClasses(index);
+
+        mappedClassesBuildItem.produce(new HibernateSearchOrmRootMappedClassesBuildItem(rootAnnotationMappedClassNames));
+    }
+
+    @BuildStep
+    void registerAccessors(CombinedIndexBuildItem index,
+            BuildProducer<HibernateAccessorRegistrationBuildItem> accessors) {
+        for (ClassInfo type : HibernateSearchAccessorDiscovery.collectTypes(index)) {
+            accessors.produce(new HibernateAccessorRegistrationBuildItem.Builder(type)
+                    .source(HibernateSearchElasticsearchProcessor.class.getName()).all(type, FieldAccess.READ).build());
+        }
+    }
+
+    @BuildStep
     void registerBeans(List<HibernateSearchElasticsearchPersistenceUnitConfiguredBuildItem> searchEnabledPUs,
             BuildProducer<UnremovableBeanBuildItem> unremovableBean) {
         if (searchEnabledPUs.isEmpty()) {
@@ -191,16 +215,14 @@ class HibernateSearchElasticsearchProcessor {
     @BuildStep
     @Record(ExecutionTime.STATIC_INIT)
     void setStaticConfig(RecorderContext recorderContext, HibernateSearchElasticsearchRecorder recorder,
-            CombinedIndexBuildItem combinedIndexBuildItem,
             List<HibernateSearchIntegrationStaticConfiguredBuildItem> integrationStaticConfigBuildItems,
             List<HibernateSearchElasticsearchPersistenceUnitConfiguredBuildItem> configuredPersistenceUnits,
+            HibernateSearchOrmRootMappedClassesBuildItem mappedClassesBuildItem,
+            HibernateAccessorFactoryBuildItem hibernateAccessorFactory,
             BuildProducer<HibernateOrmIntegrationStaticConfiguredBuildItem> staticConfigured) {
         // Make it possible to record the settings as bytecode:
         recorderContext.registerSubstitution(ElasticsearchVersion.class,
                 String.class, ElasticsearchVersionSubstitution.class);
-
-        IndexView index = combinedIndexBuildItem.getIndex();
-        Set<String> rootAnnotationMappedClassNames = collectRootAnnotationMappedClassNames(index);
 
         for (HibernateSearchElasticsearchPersistenceUnitConfiguredBuildItem configuredPersistenceUnit : configuredPersistenceUnits) {
             String puName = configuredPersistenceUnit.getPersistenceUnitName();
@@ -223,14 +245,15 @@ class HibernateSearchElasticsearchProcessor {
                                     // we cannot pass a config group to a recorder so passing the whole config
                                     recorder.createStaticInitListener(
                                             configuredPersistenceUnit.mapperContext,
-                                            rootAnnotationMappedClassNames,
-                                            integrationStaticInitListeners))
+                                            mappedClassesBuildItem.getRootAnnotationMappedClassNames(),
+                                            integrationStaticInitListeners,
+                                            hibernateAccessorFactory.accessorFactory()))
                             .xmlMappingRequired(xmlMappingRequired)
                             .build());
         }
     }
 
-    private static Set<String> collectRootAnnotationMappedClassNames(IndexView index) {
+    private static Set<String> collectRootAnnotationMappedClasses(IndexView index) {
         // Look for classes annotated with annotations meta-annotated with @RootMapping:
         // those classes will have their annotations processed on every persistence unit.
         // At the moment only @ProjectionConstructor is meta-annotated with @RootMapping.

@@ -805,7 +805,7 @@ You can find instructions on how to quickly set up this application in this guid
 
 This debugging guide has the following requirements:
 
-* JDK 21+ installed with `JAVA_HOME` configured appropriately
+* JDK {jdk-version-earliest}+ installed with `JAVA_HOME` configured appropriately
 * Apache Maven {maven-version}
 * A working container runtime (Docker, podman)
 
@@ -2147,9 +2147,9 @@ such as importing test data into the database.
 [source,properties]
 ----
 quarkus.native.resources.includes=version.txt
-%test.quarkus.native.resources.includes=version.txt,import-dev.sql
+%test.quarkus.native.resources.includes=version.txt,data-dev.sql
 %test.quarkus.hibernate-orm.schema-management.strategy=drop-and-create
-%test.quarkus.hibernate-orm.sql-load-script=import-dev.sql
+%test.quarkus.hibernate-orm.data-management.init-script=data-dev.sql
 ----
 
 With the aforementioned example in your `application.properties`, your Hibernate ORM managed database will be populated with test
@@ -2234,7 +2234,7 @@ The project generation provides a `Dockerfile.native` in the `src/main/docker` d
 
 [source,dockerfile]
 ----
-FROM registry.access.redhat.com/ubi10/ubi-minimal:10.2
+FROM registry.access.redhat.com/ubi10/ubi-minimal:10.3
 WORKDIR /work/
 RUN chown 1001 /work \
     && chmod "g+rwX" /work \
@@ -2465,13 +2465,14 @@ getting-started-1.0.0-SNAPSHOT-runner.jar  graalvm.version  lib  native-image.ar
 
 From the output above one can see that, in addition to the produced jar file and the associated lib directory, a text file named `native-image.args` was created.
 This file holds all parameters (including the name of the JAR to compile) to pass along to GraalVM's `native-image` command.
+Use `@native-image.args` to read this file so that arguments containing spaces are preserved.
 A text file named `graalvm.version` was also created and holds the GraalVM version that should be used.
 If you have GraalVM installed and it matches this version, you can start the native compilation by executing:
 
 [source,bash]
 ----
 $ cd target/native-sources
-$ native-image $(cat native-image.args)
+$ native-image @native-image.args
 ...
 $ ls
 native-image.args
@@ -2502,7 +2503,7 @@ docker run \
   -w /work \# <2>
   --entrypoint /bin/sh \
   $(cat native-builder.image) \# <3>
-  -c "native-image $(cat native-image.args) -J-Xmx4g"# <4>
+  -c "native-image @native-image.args -J-Xmx4g"# <4>
 ----
 <1> Mount the host's directory `target/native-image` to the container's `/work`. Thus, the generated binary will also be written to this directory.
 <2> Switch the working directory to `/work`, which we have mounted in <1>.
@@ -2867,16 +2868,11 @@ See <<gc-logging,Native Memory Management GC Logging section>> for details.
 
 === Can I get a thread dump of a native executable?
 
-Yes, Quarkus sets up a signal handler for the `SIGQUIT` signal (or `SIGBREAK` on windows) that will result in a thread
-dump being printed when receiving the `SIGQUIT/SIGBREAK` signal.
+Yes, Quarkus enables GraalVM's built-in thread dump support by default.
+A thread dump is printed when the native executable receives `SIGQUIT` (or `SIGBREAK` on Windows).
 You may use `kill -SIGQUIT <pid>` to trigger a thread dump.
 
-[NOTE]
-====
-Quarkus uses its own signal handler, to use GraalVM's default signal handler instead you will need to:
-1. Add `-H:+DumpThreadStacksOnSignal` to `quarkus.native.additional-build-args` and rebuild the application.
-2. Set the environment variable `DISABLE_SIGNAL_HANDLERS` before running the app.
-====
+Setting `quarkus.native.monitoring=none` disables this support.
 
 [[heap-dumps]]
 === Can I get a heap dump of a native executable? e.g. if it runs out of memory

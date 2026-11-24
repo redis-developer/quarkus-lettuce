@@ -1,6 +1,7 @@
 package io.quarkus.redis.lettuce.runtime.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -30,6 +31,7 @@ import io.netty.channel.ChannelOption;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceClientSettings.UserInfo;
 import io.quarkus.redis.runtime.client.config.RedisClientConfig;
 import io.quarkus.redis.runtime.client.config.RedisConfig;
+import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.runtime.configuration.DurationConverter;
 import io.quarkus.tls.TlsConfiguration;
 import io.quarkus.tls.TlsConfigurationRegistry;
@@ -374,14 +376,35 @@ class LettuceClientSettingsTest {
         assertThat(settings.reconnectDelay()).isPresent();
         assertThat(settings.nettyCustomizer()).isPresent();
 
-        // the defaults: no queue bound (the Vert.x default of 2048 would bound the single shared connection), the
-        // Lettuce protocol negotiation, no name
+        // the defaults: the queue bound of max-waiting-handlers (Lettuce has none by itself), the Lettuce protocol
+        // negotiation, no name
         settings = LettuceClientSettings.create(RedisConfig.DEFAULT_CLIENT_NAME, config(Map.of()), hosts, null, NO_TLS);
-        assertThat(settings.clientOptions().getRequestQueueSize()).isEqualTo(Integer.MAX_VALUE);
+        assertThat(settings.clientOptions().getRequestQueueSize()).isEqualTo(2048);
         assertThat(settings.clientOptions().getConfiguredProtocolVersion()).isNull();
         assertThat(settings.redisUri().getClientName()).isNull();
         assertThat(settings.reconnectDelay()).isEmpty();
         assertThat(settings.nettyCustomizer()).isEmpty();
+    }
+
+    @Test
+    void rejectsTheValkeySchemesWithAMessage() {
+        // the Vert.x client accepts valkey:// and valkeys:// in hosts; the Lettuce backend connects to Redis and
+        // rejects such a host up front, instead of Lettuce's "Scheme valkey not supported" at client creation
+        assertThatThrownBy(() -> LettuceClientSettings.rejectUnsupportedScheme("<default>",
+                URI.create("valkey://localhost:6379")))
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessageContaining("valkey://localhost:6379")
+                .hasMessageContaining("Lettuce Redis client '<default>'")
+                .hasMessageContaining("'valkey' scheme")
+                .hasMessageContaining("redis:// or rediss://");
+        assertThatThrownBy(() -> LettuceClientSettings.rejectUnsupportedScheme("<default>",
+                URI.create("VALKEYS://localhost:6380")))
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessageContaining("'VALKEYS' scheme");
+        // the Redis schemes and anything else pass: Lettuce decides
+        LettuceClientSettings.rejectUnsupportedScheme("<default>", URI.create("redis://localhost:6379"));
+        LettuceClientSettings.rejectUnsupportedScheme("<default>", URI.create("rediss://localhost:6379"));
+        LettuceClientSettings.rejectUnsupportedScheme("<default>", URI.create("unix:///tmp/redis.sock"));
     }
 
     /** A TLS registry without any configuration: the TLS settings are not under test here. */

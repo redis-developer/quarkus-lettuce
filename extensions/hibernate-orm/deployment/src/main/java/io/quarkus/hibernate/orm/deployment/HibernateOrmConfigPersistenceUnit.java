@@ -44,6 +44,18 @@ public interface HibernateOrmConfigPersistenceUnit {
     @ConfigDocSection
     HibernateOrmConfigPersistenceUnitDialect dialect();
 
+    /**
+     * Schema management configuration.
+     */
+    @ConfigDocSection
+    HibernateOrmConfigPersistenceUnitSchemaManagement schemaManagement();
+
+    /**
+     * Data management configuration.
+     */
+    @ConfigDocSection
+    HibernateOrmConfigPersistenceUnitDataManagement dataManagement();
+
     // @formatter:off
     /**
      * Paths to files containing the SQL statements to execute when Hibernate ORM starts.
@@ -51,15 +63,17 @@ public interface HibernateOrmConfigPersistenceUnit {
      * The files are retrieved from the classpath resources,
      * so they must be located in the resources directory (e.g. `src/main/resources`).
      *
-     * The default value for this setting differs depending on the Quarkus launch mode:
+     * When set to a script, this property replaces both `quarkus.hibernate-orm.schema-management.init-script`
+     * and `quarkus.hibernate-orm.data-management.init-script`,
+     * and the scripts are only executed when Hibernate ORM creates the schema, in every launch mode.
+     * It cannot be combined with those properties or their default files (`schema.sql`, `data.sql`),
+     * nor with `quarkus.hibernate-orm.data-management.strategy`.
+     * When set to `no-file`, those properties and their default files apply.
      *
-     * * In dev and test modes, it defaults to `import.sql`.
-     *   Simply add an `import.sql` file in the root of your resources directory
-     *   and it will be picked up without having to set this property.
-     *   Pass `no-file` to force Hibernate ORM to ignore the SQL import file.
-     * * In production mode, it defaults to `no-file`.
-     *   It means Hibernate ORM won't try to execute any SQL import file by default.
-     *   Pass an explicit value to force Hibernate ORM to execute the SQL import file.
+     * In dev and test modes, an `import.sql` file in the classpath has the same effect as setting this property
+     * to `import.sql`.
+     * To stop using it, move its statements to `data.sql` if they load data and/or to `schema.sql`
+     * if they complete the schema, then delete it, or set this property to `no-file`.
      *
      * If you need different SQL statements between dev mode, test (`@QuarkusTest`) and in production, use Quarkus
      * https://quarkus.io/guides/config#configuration-profiles[configuration profiles facility].
@@ -79,10 +93,17 @@ public interface HibernateOrmConfigPersistenceUnit {
      * Each SQL statement must be terminated by a semicolon.
      * ====
      *
+     * @deprecated Use `quarkus.hibernate-orm.data-management.init-script` to load data
+     *             (executed regardless of how the schema is managed, see `quarkus.hibernate-orm.data-management.strategy`)
+     *             or `quarkus.hibernate-orm.schema-management.init-script` to complete the schema
+     *             (executed only when Hibernate ORM creates the schema).
+     *             Scripts configured with this deprecated property keep their historical behavior:
+     *             they are executed only when Hibernate ORM creates the schema.
      * @asciidoclet
      */
     // @formatter:on
-    @ConfigDocDefault("import.sql in dev and test modes ; no-file otherwise")
+    @Deprecated(since = "4.0", forRemoval = true)
+    @ConfigDocDefault("import.sql in dev and test modes if it exists in the classpath; no-file otherwise")
     Optional<List<@WithConverter(TrimmedStringConverter.class) String>> sqlLoadScript();
 
     /**
@@ -208,7 +229,7 @@ public interface HibernateOrmConfigPersistenceUnit {
          * For xref:datasource.adoc#extensions-and-database-drivers-reference[supported databases],
          * this property does not need to be set explicitly:
          * it is selected automatically based on the datasource,
-         * and configured using the xref:datasource.adoc#quarkus-datasource_quarkus.datasource.db-version[DB version set on the
+         * and configured using the xref:datasource.adoc#quarkus-datasource_quarkus-datasource-db-version[DB version set on the
          * datasource]
          * to benefit from the best performance and latest features.
          *
@@ -268,6 +289,11 @@ public interface HibernateOrmConfigPersistenceUnit {
         Id id();
 
         Duration duration();
+
+        /**
+         * Java time configuration.
+         */
+        JavaTime javaTime();
 
         /**
          * The preferred JDBC type to use for storing {@link java.time.Instant} values.
@@ -377,6 +403,38 @@ public interface HibernateOrmConfigPersistenceUnit {
             @WithName("preferred-jdbc-type")
             @ConfigDocDefault("INTERVAL_SECOND")
             Optional<@WithConverter(TrimmedStringConverter.class) String> durationPreferredJdbcType();
+        }
+
+        @ConfigGroup
+        interface JavaTime {
+
+            /**
+             * Whether to use direct JDBC for `java.time` type handling.
+             * <p>
+             * When enabled, `java.time` types are passed directly to the JDBC driver
+             * via `PreparedStatement.setObject()` / `ResultSet.getObject()`,
+             * bypassing conversion to legacy `java.sql` types
+             * such as `java.sql.Timestamp`.
+             * <p>
+             * When disabled (the default), Hibernate converts `java.time` values
+             * through `java.sql`/`java.util` types before passing them
+             * to the JDBC driver, matching the behavior of Hibernate ORM 7.4 and earlier.
+             * <p>
+             * *WARNING*: Direct JDBC mode is experimental in Quarkus.
+             * Known limitations:
+             * * On Oracle, `LocalTime` may shift values on a write/read cycle
+             * depending on the JVM timezone.</li>
+             * * The `quarkus.hibernate-orm.jdbc.timezone` setting may be ignored
+             * for some `java.time` types.</li>
+             * * The `quarkus.hibernate-orm.mapping.timezone.default-storage` setting
+             * may be ignored for some `java.time` types.</li>
+             * </ul>
+             *
+             * @asciidoclet
+             */
+            @WithName("use-direct-jdbc")
+            @WithDefault("false")
+            boolean useDirectJdbc();
         }
 
     }
@@ -645,7 +703,7 @@ public interface HibernateOrmConfigPersistenceUnit {
          * This is useful for entities with highly variable sizes (e.g., JSON blobs).
          * <p>
          * Mutually exclusive with {@code object-count}. Requires a {@code weigher-class} to assign
-         * weights to entries; without one, each entry has a default weight of 1.
+         * weights to entries.
          */
         OptionalLong maximumWeight();
 
@@ -653,7 +711,7 @@ public interface HibernateOrmConfigPersistenceUnit {
          * The fully qualified class name of a {@code com.github.benmanes.caffeine.cache.Weigher}
          * implementation used to assign weights to cache entries.
          * <p>
-         * Only used when {@code maximum-weight} is set. The class must have a public no-arg constructor.
+         * Required when {@code maximum-weight} is set. The class must have a public no-arg constructor.
          */
         Optional<String> weigherClass();
     }
@@ -752,10 +810,23 @@ public interface HibernateOrmConfigPersistenceUnit {
         @WithDefault("auto")
         Set<ValidationMode> mode();
 
+        /**
+         * Controls whether Jakarta Validation constraints (such as `@NotNull`, `@Size`, `@Digits` and others)
+         * influence the generated DDL schema.
+         *
+         * When not set, the behavior depends on the validation mode:
+         * if validation mode includes `auto`, DDL influence defaults to `auto`;
+         * otherwise it defaults to `disabled`, preserving backward compatibility.
+         *
+         * @asciidoclet
+         */
+        @ConfigDocDefault("auto when validation mode is auto; disabled otherwise")
+        Optional<DdlInfluence> ddlInfluence();
+
         enum ValidationMode {
             /**
-             * If a Bean Validation provider is present then behaves as if both `ValidationMode#CALLBACK` and
-             * `ValidationMode#DDL` modes are configured. Otherwise, same as `ValidationMode#NONE`.
+             * If a Bean Validation provider is present then behaves as if `ValidationMode#CALLBACK` is configured
+             * and DDL influence is enabled. Otherwise, same as `ValidationMode#NONE`.
              *
              * @asciidoclet
              */
@@ -769,8 +840,11 @@ public interface HibernateOrmConfigPersistenceUnit {
             /**
              * Bean Validation constraints will be considered for the DDL operations.
              *
+             * @deprecated Use `ddl-influence` instead. This value is deprecated following the deprecation
+             *             of `org.hibernate.boot.beanvalidation.ValidationMode.DDL` in Hibernate ORM 8.
              * @asciidoclet
              */
+            @Deprecated(since = "3.22", forRemoval = true)
             DDL,
             /**
              * Bean Validation integration will be disabled.
@@ -779,6 +853,113 @@ public interface HibernateOrmConfigPersistenceUnit {
              */
             NONE
         }
+
+        enum DdlInfluence {
+            /**
+             * Apply validation constraints to the DDL schema if the application uses quarkus-hibernate-validator;
+             * silently skip otherwise.
+             *
+             * @asciidoclet
+             */
+            AUTO,
+            /**
+             * Apply validation constraints to the DDL schema, failing with an error
+             * if no Jakarta Validation provider is available.
+             *
+             * @asciidoclet
+             */
+            REQUIRED,
+            /**
+             * Do not apply validation constraints to the DDL schema.
+             *
+             * @asciidoclet
+             */
+            DISABLED
+        }
+    }
+
+    @ConfigGroup
+    interface HibernateOrmConfigPersistenceUnitSchemaManagement {
+
+        // @formatter:off
+        /**
+         * Paths to files containing SQL statements to execute right after Hibernate ORM created the database schema,
+         * typically to complete the schema with objects Hibernate ORM cannot generate (constraints, views, ...).
+         *
+         * The scripts are only executed when Hibernate ORM creates the schema,
+         * i.e. when `quarkus.hibernate-orm.schema-management.strategy` is `create` or `drop-and-create`.
+         * To load data regardless of how the schema is managed, use `quarkus.hibernate-orm.data-management.init-script` instead.
+         *
+         * The files are retrieved from the classpath resources,
+         * so they must be located in the resources directory (e.g. `src/main/resources`).
+         *
+         * By default, a `schema.sql` file in the root of your resources directory is picked up
+         * without having to set this property, in every launch mode:
+         * whether the script is executed only depends on `quarkus.hibernate-orm.schema-management.strategy`.
+         * Pass `no-file` to force Hibernate ORM to ignore the file.
+         * An `import.sql` file is not picked up: in dev and test modes, it enables a deprecated behavior instead.
+         *
+         * [NOTE]
+         * ====
+         * Quarkus supports files with SQL statements or comments spread over multiple lines,
+         * or `.zip` files containing those files.
+         * Each SQL statement must be terminated by a semicolon.
+         * ====
+         *
+         * @asciidoclet
+         */
+        // @formatter:on
+        @ConfigDocDefault("`schema.sql` if it exists in the classpath; `no-file` otherwise")
+        Optional<List<@WithConverter(TrimmedStringConverter.class) String>> initScript();
+
+    }
+
+    @ConfigGroup
+    interface HibernateOrmConfigPersistenceUnitDataManagement {
+
+        // @formatter:off
+        /**
+         * Paths to files containing SQL statements to execute when Hibernate ORM starts, to load data into the database
+         * (reference data, test data, ...).
+         *
+         * The scripts are executed regardless of whether the schema is created by Hibernate ORM
+         * or managed by another tool such as Flyway or Liquibase,
+         * as long as `quarkus.hibernate-orm.data-management.strategy` is `create`
+         * (the default in dev and test modes only).
+         *
+         * The files are retrieved from the classpath resources,
+         * so they must be located in the resources directory (e.g. `src/main/resources`).
+         *
+         * By default, a `data.sql` file in the root of your resources directory is picked up
+         * without having to set this property, in every launch mode:
+         * whether the script is executed only depends on `quarkus.hibernate-orm.data-management.strategy`.
+         * Pass `no-file` to force Hibernate ORM to ignore the file.
+         * Don't name your data init script `import.sql`: that file enables a deprecated behavior.
+         *
+         * If you need different SQL statements between dev mode, test (`@QuarkusTest`) and in production, use Quarkus
+         * https://quarkus.io/guides/config#configuration-profiles[configuration profiles facility].
+         *
+         * [source,property]
+         * .application.properties
+         * ----
+         * %dev.quarkus.hibernate-orm.data-management.init-script = data-dev.sql
+         * %test.quarkus.hibernate-orm.data-management.init-script = data-test.sql
+         * %prod.quarkus.hibernate-orm.data-management.init-script = no-file
+         * ----
+         *
+         * [NOTE]
+         * ====
+         * Quarkus supports files with SQL statements or comments spread over multiple lines,
+         * or `.zip` files containing those files.
+         * Each SQL statement must be terminated by a semicolon.
+         * ====
+         *
+         * @asciidoclet
+         */
+        // @formatter:on
+        @ConfigDocDefault("`data.sql` if it exists in the classpath; `no-file` otherwise")
+        Optional<List<@WithConverter(TrimmedStringConverter.class) String>> initScript();
+
     }
 
 }

@@ -22,16 +22,16 @@
         <compiler-plugin.version>${version.compiler.plugin}</compiler-plugin.version>
         <kotlin.version>2.4.20</kotlin.version>
         <ksp-gradle-plugin.version>2.2.10-2.0.2</ksp-gradle-plugin.version> <!-- Kotlin Symbol Processing plugin used in a test -->
-        <dokka.version>2.2.0</dokka.version>
+        <dokka.version>2.3.0</dokka.version>
 
         <jboss-bridger-plugin.version>1.6.Final</jboss-bridger-plugin.version>
 
         <!-- Jandex versions -->
-        <jandex.version>3.6.0</jandex.version>
+        <jandex.version>3.6.1</jandex.version>
         <jandex-gradle-plugin.version>2.3.0</jandex-gradle-plugin.version>
 
-        <asciidoctorj.version>3.0.0</asciidoctorj.version>
-        <htmlunit.version>5.6.0</htmlunit.version>
+        <asciidoctorj.version>3.0.1</asciidoctorj.version>
+        <htmlunit.version>5.7.0</htmlunit.version>
         <javaparser-core.version>3.28.2</javaparser-core.version>
         <jdeparser2.version>2.1.0</jdeparser2.version>
         <jdeparser.version>3.0.beta1</jdeparser.version>
@@ -39,8 +39,8 @@
 
         <!-- Dev tools -->
         <freemarker.version>2.3.35</freemarker.version>
-        <commonmark.version>0.30.1</commonmark.version>
-        <jgit.version>7.8.0.202609011348-r</jgit.version>
+        <commonmark.version>0.32.0</commonmark.version>
+        <jgit.version>7.8.1.202611041320-r</jgit.version>
 
         <!-- Arquillian BOM -->
         <arquillian.version>1.7.0.Final</arquillian.version>
@@ -48,7 +48,8 @@
         <!-- Enable APT by default for Eclipse -->
         <m2e.apt.activation>jdt_apt</m2e.apt.activation>
 
-        <!-- These 2 properties are used in catalog-overrides.json -->
+        <!-- These 2 properties are used in catalog-overrides.json and in docs/src/main/asciidoc/_attributes.adoc,
+             where jdk-version-all lists every supported version by hand: update it when these change -->
         <minimum-java-version>${maven.compiler.release}</minimum-java-version>
         <recommended-java-version>25</recommended-java-version>
 
@@ -64,7 +65,7 @@
         <!-- Supported Gradle versions, interpreted as a version range -->
         <minimum-gradle-version>9.6</minimum-gradle-version>
         <supported-gradle-versions>[9.6,)</supported-gradle-versions>
-        <gradle-wrapper.version>9.7.0</gradle-wrapper.version>
+        <gradle-wrapper.version>9.9.0</gradle-wrapper.version>
         <quarkus-gradle-plugin.version>${project.version}</quarkus-gradle-plugin.version>
         <quarkus-maven-plugin.version>${project.version}</quarkus-maven-plugin.version>
         <maven-plugin-plugin.version>3.8.1</maven-plugin-plugin.version>
@@ -133,10 +134,10 @@
         <junit4.version>4.13.2</junit4.version>
 
         <!-- The image to use for tests that run Keycloak -->
-        <keycloak.server.version>26.7.4</keycloak.server.version>
+        <keycloak.server.version>26.8.2</keycloak.server.version>
         <keycloak.docker.image>quay.io/keycloak/keycloak:${keycloak.server.version}</keycloak.docker.image>
 
-        <unboundid-ldap.version>7.0.5</unboundid-ldap.version>
+        <unboundid-ldap.version>7.0.6</unboundid-ldap.version>
 
         <assertj.version>3.27.7</assertj.version>
         <!-- Keep in sync with VineflowerDecompiler.DEFAULT_VINEFLOWER_VERSION -->
@@ -175,7 +176,7 @@
         <!-- revapi API check -->
         <revapi-maven-plugin.version>0.14.7</revapi-maven-plugin.version>
         <revapi-java-plugin.version>0.26.1</revapi-java-plugin.version>
-        <build-helper-plugin.version>3.6.2</build-helper-plugin.version>
+        <build-helper-plugin.version>3.8.0</build-helper-plugin.version>
         <revapi-reporter-text.version>0.14.5</revapi-reporter-text.version>
         <revapi-reporter-json.version>0.4.5</revapi-reporter-json.version>
         <!-- Latest release to be used by api-compatibility-check to check backwards compatibility of the Quarkus API. -->
@@ -205,7 +206,7 @@
         <jakarta.jms-api.version>3.1.0</jakarta.jms-api.version>
 
         <!-- Quarkus Analytics -->
-        <properties-maven-plugin.version>1.3.1</properties-maven-plugin.version>
+        <properties-maven-plugin.version>1.4.0</properties-maven-plugin.version>
         <quarkus.analytics.disabled>true</quarkus.analytics.disabled>
 
         <!-- If PTS is enabled at the global level  -->

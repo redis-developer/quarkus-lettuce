@@ -13,7 +13,7 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.lettuce.deployment.RedisClusterTestResource;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceRecorder;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceClientSetup;
 import io.quarkus.test.QuarkusExtensionTest;
 import io.quarkus.test.common.QuarkusTestResource;
 
@@ -29,7 +29,7 @@ public class LettuceClusterDatabaseWarningTest {
             .withEmptyApplication()
             .overrideConfigKey("quarkus.redis.hosts", "${redis.cluster.hosts-db1}")
             .overrideConfigKey("quarkus.redis.client-type", "cluster")
-            .setLogRecordPredicate(record -> LettuceRecorder.class.getName().equals(record.getLoggerName())
+            .setLogRecordPredicate(record -> LettuceClientSetup.class.getName().equals(record.getLoggerName())
                     && record.getLevel().intValue() >= Level.WARNING.intValue())
             .assertLogRecords(records -> assertThat(records)
                     .extracting(LettuceClusterDatabaseWarningTest::message)

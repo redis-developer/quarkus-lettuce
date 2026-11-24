@@ -27,7 +27,6 @@ import jakarta.xml.bind.JAXBContext;
 import jakarta.xml.bind.JAXBException;
 import jakarta.xml.bind.Unmarshaller;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
@@ -41,6 +40,7 @@ import io.quarkus.deployment.builditem.ConfigurationBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.LaunchModeBuildItem;
 import io.quarkus.deployment.builditem.LogHandlerBuildItem;
+import io.quarkus.deployment.builditem.NamedLogHandlersBuildItem;
 import io.quarkus.deployment.builditem.ObjectSubstitutionBuildItem;
 import io.quarkus.deployment.builditem.RunTimeConfigBuilderBuildItem;
 import io.quarkus.deployment.builditem.RunTimeConfigurationDefaultBuildItem;
@@ -69,6 +69,7 @@ import io.quarkus.extest.runtime.subst.DSAPublicKeyObjectSubstitution;
 import io.quarkus.extest.runtime.subst.KeyProxy;
 import io.quarkus.runtime.RuntimeValue;
 import io.quarkus.undertow.deployment.ServletBuildItem;
+import io.smallrye.config.Config;
 import io.smallrye.config.ConfigValue;
 
 /**
@@ -98,6 +99,17 @@ public final class TestProcessor {
     @Record(RUNTIME_INIT)
     LogHandlerBuildItem registerAdditionalLogHandler(final AdditionalLogHandlerValueFactory factory) {
         return new LogHandlerBuildItem(factory.create());
+    }
+
+    /**
+     * Register an additional named log handler
+     *
+     * @return NamedLogHandlersBuildItem
+     */
+    @BuildStep
+    @Record(RUNTIME_INIT)
+    NamedLogHandlersBuildItem registerAdditionalNamedLogHandler(final AdditionalLogHandlerValueFactory factory) {
+        return new NamedLogHandlersBuildItem(factory.createNamed());
     }
 
     @BuildStep
@@ -191,7 +203,7 @@ public final class TestProcessor {
     @Record(STATIC_INIT)
     PublicKeyBuildItem loadDSAPublicKey(TestRecorder recorder, BuildProducer<ObjectSubstitutionBuildItem> substitutions)
             throws IOException, GeneralSecurityException {
-        String path = ConfigProvider.getConfig().getValue("keys.root.dsa-key-location", String.class);
+        String path = Config.get().getValue("keys.root.dsa-key-location", String.class);
         try (InputStream is = getClass().getResourceAsStream(path)) {
             if (is == null) {
                 throw new IOException("Failed to load resource: " + path);

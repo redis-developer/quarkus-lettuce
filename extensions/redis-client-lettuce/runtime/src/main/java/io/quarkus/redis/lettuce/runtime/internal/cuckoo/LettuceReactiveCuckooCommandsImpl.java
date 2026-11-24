@@ -12,24 +12,16 @@ import io.quarkus.redis.datasource.cuckoo.CfReserveArgs;
 import io.quarkus.redis.datasource.cuckoo.ReactiveCuckooCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
 public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveCuckooCommands<K, V> {
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveCuckooCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType, Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, valueType));
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+            LettuceConnectionSource source, Type keyType, Type valueType) {
+        super(dataSource, source, keyType, valueType, new Marshaller(keyType, valueType));
     }
 
     @Override
@@ -40,7 +32,7 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
     LettuceCommand<Boolean, Void> _cfadd(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return LettuceCommand.discarding(() -> async.cfAdd(marshaller.encode(key), marshaller.encode(value)));
+        return discarding(async -> async.cfAdd(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @Override
@@ -51,7 +43,7 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
     LettuceCommand<Boolean, Boolean> _cfaddnx(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return LettuceCommand.of(() -> async.cfAddNx(marshaller.encode(key), marshaller.encode(value)));
+        return command(async -> async.cfAddNx(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @Override
@@ -62,7 +54,7 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
     LettuceCommand<Long, Long> _cfcount(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return LettuceCommand.of(() -> async.cfCount(marshaller.encode(key), marshaller.encode(value)));
+        return command(async -> async.cfCount(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @Override
@@ -73,7 +65,7 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
     LettuceCommand<Boolean, Boolean> _cfdel(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return LettuceCommand.of(() -> async.cfDel(marshaller.encode(key), marshaller.encode(value)));
+        return command(async -> async.cfDel(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @Override
@@ -84,7 +76,7 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
     LettuceCommand<Boolean, Boolean> _cfexists(K key, V value) {
         nonNull(key, "key");
         nonNull(value, "value");
-        return LettuceCommand.of(() -> async.cfExists(marshaller.encode(key), marshaller.encode(value)));
+        return command(async -> async.cfExists(marshaller.encode(key), marshaller.encode(value)));
     }
 
     @SafeVarargs
@@ -98,9 +90,9 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
         nonNull(key, "key");
         doesNotContainNull(values, "values");
         if (values.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
+            return failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
-        return LettuceCommand.discarding(() -> async.cfInsert(marshaller.encode(key), marshaller.encodeAsArray(values)));
+        return discarding(async -> async.cfInsert(marshaller.encode(key), marshaller.encodeAsArray(values)));
     }
 
     @SafeVarargs
@@ -115,12 +107,11 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
         nonNull(args, "args");
         doesNotContainNull(values, "values");
         if (values.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
+            return failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
         io.lettuce.core.probabilistic.arguments.CfInsertArgs lettuceArgs = LettuceCuckooCommandsConverters
                 .toLettuceCfInsertArgs(args);
-        return LettuceCommand
-                .discarding(() -> async.cfInsert(marshaller.encode(key), lettuceArgs, marshaller.encodeAsArray(values)));
+        return discarding(async -> async.cfInsert(marshaller.encode(key), lettuceArgs, marshaller.encodeAsArray(values)));
     }
 
     @SafeVarargs
@@ -134,9 +125,9 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
         nonNull(key, "key");
         doesNotContainNull(values, "values");
         if (values.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
+            return failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
-        return LettuceCommand.of(() -> async.cfInsertNx(marshaller.encode(key), marshaller.encodeAsArray(values)),
+        return command(async -> async.cfInsertNx(marshaller.encode(key), marshaller.encodeAsArray(values)),
                 AbstractLettuceCommands::nullsToFalse);
     }
 
@@ -152,12 +143,12 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
         nonNull(args, "args");
         doesNotContainNull(values, "values");
         if (values.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
+            return failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
         io.lettuce.core.probabilistic.arguments.CfInsertArgs lettuceArgs = LettuceCuckooCommandsConverters
                 .toLettuceCfInsertArgs(args);
-        return LettuceCommand.of(
-                () -> async.cfInsertNx(marshaller.encode(key), lettuceArgs, marshaller.encodeAsArray(values)),
+        return command(
+                async -> async.cfInsertNx(marshaller.encode(key), lettuceArgs, marshaller.encodeAsArray(values)),
                 AbstractLettuceCommands::nullsToFalse);
     }
 
@@ -172,9 +163,9 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
         nonNull(key, "key");
         doesNotContainNull(values, "values");
         if (values.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`values` must contain at least one item"));
+            return failing(new IllegalArgumentException("`values` must contain at least one item"));
         }
-        return LettuceCommand.of(() -> async.cfMExists(marshaller.encode(key), marshaller.encodeAsArray(values)),
+        return command(async -> async.cfMExists(marshaller.encode(key), marshaller.encodeAsArray(values)),
                 AbstractLettuceCommands::decodeList);
     }
 
@@ -185,7 +176,7 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
 
     LettuceCommand<String, Void> _cfreserve(K key, long capacity) {
         nonNull(key, "key");
-        return LettuceCommand.discarding(() -> async.cfReserve(marshaller.encode(key), capacity));
+        return discarding(async -> async.cfReserve(marshaller.encode(key), capacity));
     }
 
     @Override
@@ -198,7 +189,7 @@ public class LettuceReactiveCuckooCommandsImpl<K, V> extends AbstractLettuceComm
         nonNull(args, "args");
         io.lettuce.core.probabilistic.arguments.CfReserveArgs lettuceArgs = LettuceCuckooCommandsConverters
                 .toLettuceCfReserveArgs(args);
-        return LettuceCommand.discarding(() -> async.cfReserve(marshaller.encode(key), capacity, lettuceArgs));
+        return discarding(async -> async.cfReserve(marshaller.encode(key), capacity, lettuceArgs));
     }
 
 }

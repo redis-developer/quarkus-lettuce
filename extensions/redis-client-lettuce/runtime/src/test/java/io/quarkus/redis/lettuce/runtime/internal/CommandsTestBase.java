@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletionStage;
@@ -16,7 +17,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.utility.DockerImageName;
 
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
@@ -34,7 +34,6 @@ import io.vertx.mutiny.core.Vertx;
 public abstract class CommandsTestBase {
 
     protected static final Duration TIMEOUT = Duration.ofSeconds(5);
-    protected static final String REDIS_DEFAULT_IMAGE = "redis:8-alpine";
     protected static final GenericContainer<?> REDIS = createContainer();
     protected static final int MAX_POOL_SIZE = 6;
     protected static final int MAX_POOL_WAITING = 24;
@@ -93,9 +92,7 @@ public abstract class CommandsTestBase {
     }
 
     private static GenericContainer<?> createContainer() {
-        GenericContainer<?> container = new GenericContainer<>(
-                DockerImageName.parse(System.getProperty("redis.base.image", REDIS_DEFAULT_IMAGE)));
-        container.withExposedPorts(6379);
+        GenericContainer<?> container = RedisImage.plainServer();
         // The mapped port can accept TCP connections before Redis serves RESP; wait for the server's ready log line.
         container.waitingFor(Wait.forLogMessage(".*Ready to accept connections.*\\n", 1));
         return container;
@@ -150,6 +147,13 @@ public abstract class CommandsTestBase {
         return list.isEmpty() ? 0 : list.split("\n").length;
     }
 
+    /**
+     * Makes the server hold its replies back for the given time ({@code CLIENT PAUSE}).
+     */
+    protected static void pauseServer(Duration duration) {
+        connection.sync().clientPause(duration.toMillis());
+    }
+
     protected static void rawSet(String key, String value) {
         connection.sync().set(key.getBytes(StandardCharsets.UTF_8), value.getBytes(StandardCharsets.UTF_8));
     }
@@ -179,6 +183,38 @@ public abstract class CommandsTestBase {
             }
         }
         throw new AssertionError("No client with id " + clientId + " in CLIENT LIST");
+    }
+
+    /** The fields of the {@code CLIENT LIST} line of the client {@code clientId}; {@code null} once it is gone. */
+    protected static Map<String, String> clientInfo(long clientId) {
+        for (String line : connection.sync().clientList().split("\n")) {
+            Map<String, String> info = parseClientLine(line);
+            if (String.valueOf(clientId).equals(info.get("id"))) {
+                return info;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * As upstream's {@code TransactionInternalErrorHandlingTest}: no client of the server is in a transaction
+     * ({@code multi=-1}, no {@code x} flag).
+     */
+    protected static void assertNoClientInTransaction() {
+        connection.sync().clientList().lines().forEach(line -> {
+            Map<String, String> info = parseClientLine(line);
+            assertThat(info.getOrDefault("multi", "")).as(line).isEqualTo("-1");
+            assertThat(info.getOrDefault("flags", "")).as(line).doesNotContain("x");
+        });
+    }
+
+    private static Map<String, String> parseClientLine(String line) {
+        Map<String, String> result = new HashMap<>();
+        for (String element : line.split("\\s+")) {
+            String[] parts = element.split("=", 2);
+            result.put(parts[0], parts.length > 1 ? parts[1] : "");
+        }
+        return result;
     }
 
     protected static void assertImmutable(Collection<?> collection) {

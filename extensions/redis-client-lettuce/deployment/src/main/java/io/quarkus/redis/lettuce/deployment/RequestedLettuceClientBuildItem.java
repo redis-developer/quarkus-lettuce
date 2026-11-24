@@ -12,8 +12,14 @@ import io.quarkus.builder.item.MultiBuildItem;
 public final class RequestedLettuceClientBuildItem extends MultiBuildItem {
 
     public final String name;
+    /**
+     * Whether a Lettuce connection type is injected for the client: only then are the connection beans registered,
+     * and their connection opened at startup.
+     */
+    public final boolean connection;
 
-    public RequestedLettuceClientBuildItem(String name) {
+    public RequestedLettuceClientBuildItem(String name, boolean connection) {
         this.name = name;
+        this.connection = connection;
     }
 }

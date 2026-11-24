@@ -20,7 +20,6 @@ import java.util.stream.Collectors;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import io.quarkus.arc.Arc;
@@ -39,7 +38,7 @@ import io.quarkus.vertx.http.runtime.options.HttpServerTlsConfig;
 import io.quarkus.vertx.http.runtime.security.annotation.BasicAuthentication;
 import io.quarkus.vertx.http.security.CSRF;
 import io.quarkus.vertx.http.security.HttpSecurity;
-import io.smallrye.config.SmallRyeConfig;
+import io.smallrye.config.Config;
 import io.vertx.core.http.ClientAuth;
 
 /**
@@ -242,7 +241,7 @@ public final class HttpSecurityConfiguration {
             final VertxHttpConfig vertxHttpConfig;
             final VertxHttpBuildTimeConfig vertxHttpBuildTimeConfig;
             if (httpConfig == null) {
-                SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
+                Config config = Config.get();
                 vertxHttpConfig = config.getConfigMapping(VertxHttpConfig.class);
                 vertxHttpBuildTimeConfig = config.getConfigMapping(VertxHttpBuildTimeConfig.class);
             } else {
@@ -449,7 +448,8 @@ public final class HttpSecurityConfiguration {
         return true;
     }
 
-    RolesMapping rolesMapping() {
+    // not a public API — this class is subject to change
+    public RolesMapping rolesMapping() {
         return rolesMapping;
     }
 
@@ -465,7 +465,8 @@ public final class HttpSecurityConfiguration {
         return formPostLocation;
     }
 
-    CORSConfig getCorsConfig() {
+    // not a public API — this class is subject to change
+    public CORSConfig getCorsConfig() {
         return corsConfig;
     }
 

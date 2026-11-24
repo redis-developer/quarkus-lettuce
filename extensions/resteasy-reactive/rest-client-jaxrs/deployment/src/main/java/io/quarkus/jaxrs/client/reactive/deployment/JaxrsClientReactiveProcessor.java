@@ -143,6 +143,7 @@ import org.jboss.resteasy.reactive.multipart.FileUpload;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.BeanArchiveIndexBuildItem;
 import io.quarkus.arc.deployment.BeanContainerBuildItem;
+import io.quarkus.arc.deployment.ValidationPhaseBuildItem;
 import io.quarkus.arc.processor.DotNames;
 import io.quarkus.arc.processor.Types;
 import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
@@ -316,6 +317,7 @@ public class JaxrsClientReactiveProcessor {
             List<MessageBodyWriterOverrideBuildItem> messageBodyWriterOverrideBuildItems,
             List<JaxrsClientReactiveEnricherBuildItem> enricherBuildItems,
             BeanArchiveIndexBuildItem beanArchiveIndexBuildItem,
+            ValidationPhaseBuildItem validationPhase,
             ApplicationIndexBuildItem applicationIndexBuildItem,
             Optional<ResourceScanningResultBuildItem> resourceScanningResultBuildItem,
             Capabilities capabilities, Optional<MetricsCapabilityBuildItem> metricsCapability,
@@ -341,7 +343,7 @@ public class JaxrsClientReactiveProcessor {
 
         SerializersUtil.setupSerializers(recorder, reflectiveClassBuildItemBuildProducer, messageBodyReaderBuildItems,
                 messageBodyWriterBuildItems, messageBodyReaderOverrideBuildItems, messageBodyWriterOverrideBuildItems,
-                beanContainerBuildItem, applicationResultBuildItem, serialisers,
+                beanContainerBuildItem, validationPhase, applicationResultBuildItem, serialisers,
                 RuntimeType.CLIENT);
         Set<DotName> scannedParameterContainers = new HashSet<>();
 
@@ -1192,7 +1194,8 @@ public class JaxrsClientReactiveProcessor {
                                     param.type, methodCreator.getThis(),
                                     getGenericTypeFromArray(methodCreator, methodGenericParametersField, paramIdx),
                                     getAnnotationsFromArray(methodCreator, methodParamAnnotationsField, paramIdx));
-                        } else if (param.parameterType == ParameterType.BODY) {
+                        } else if (param.parameterType == ParameterType.BODY
+                                || param.parameterType == ParameterType.ENTITY_PART_LIST) {
                             if (param.declaredType.equals(Multi.class.getName())) {
                                 if (!param.signature.equals(MULTI_BUFFER_SIGNATURE)
                                         && !param.signature.equals(MULTI_BYTE_ARRAY_SIGNATURE)) {
@@ -1887,7 +1890,8 @@ public class JaxrsClientReactiveProcessor {
                                             subParamField.paramIndex),
                                     getAnnotationsFromArray(subMethodCreator, subParamField.paramAnnotationsField,
                                             subParamField.paramIndex));
-                        } else if (param.parameterType == ParameterType.BODY) {
+                        } else if (param.parameterType == ParameterType.BODY
+                                || param.parameterType == ParameterType.ENTITY_PART_LIST) {
                             // just store the index of parameter used to create the body, we'll use it later
                             bodyParameterValue = paramValue;
                         } else if (param.parameterType == ParameterType.HEADER) {
@@ -2046,7 +2050,8 @@ public class JaxrsClientReactiveProcessor {
                                     subMethodCreator.readInstanceField(clientField, subMethodCreator.getThis()),
                                     getGenericTypeFromArray(subMethodCreator, subMethodGenericParametersField, paramIdx),
                                     getAnnotationsFromArray(subMethodCreator, subMethodParamAnnotationsField, paramIdx));
-                        } else if (param.parameterType == ParameterType.BODY) {
+                        } else if (param.parameterType == ParameterType.BODY
+                                || param.parameterType == ParameterType.ENTITY_PART_LIST) {
                             // just store the index of parameter used to create the body, we'll use it later
                             bodyParameterValue = subMethodCreator.getMethodParam(paramIdx);
                         } else if (param.parameterType == ParameterType.HEADER) {

@@ -7,10 +7,13 @@ import static org.awaitility.Awaitility.await;
 import java.net.ConnectException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -26,6 +29,7 @@ import io.lettuce.core.RedisException;
 import io.lettuce.core.RedisURI;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.Cancellable;
+import io.vertx.core.Context;
 
 class LettuceConnectionPoolTest extends CommandsTestBase {
 
@@ -163,8 +167,8 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         String missingKey = UUID.randomUUID().toString();
 
         Cancellable subscription = pool
-                .withPooled(conn -> LettuceResult
-                        .toUni(() -> conn.async().blpop(30L, missingKey.getBytes(StandardCharsets.UTF_8))))
+                .withPooled(conn -> Uni.createFrom()
+                        .completionStage(() -> conn.async().blpop(30L, missingKey.getBytes(StandardCharsets.UTF_8))))
                 .subscribe().with(item -> {
                 }, failure -> {
                 });
@@ -273,7 +277,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
                 });
                 Future<Long> acquire = executor.submit(() -> {
                     barrier.await();
-                    return pool.withPooled(conn -> LettuceResult.toUni(() -> conn.async().clientId()))
+                    return pool.withPooled(conn -> Uni.createFrom().completionStage(() -> conn.async().clientId()))
                             .await().atMost(TIMEOUT);
                 });
                 release.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
@@ -330,14 +334,18 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
     }
 
     @Test
-    void cancellingWithScopedCancelsTheBodyAndReleasesTheConnection() {
+    void cancellingWithScopedCancelsTheBodyAndClosesTheConnection() {
         LettuceConnectionPool pool = pool(1, 1);
         AtomicBoolean bodyCancelled = new AtomicBoolean();
+        AtomicReference<LettuceConnection> borrowed = new AtomicReference<>();
 
         Cancellable subscription = pool
-                .withScoped(conn -> Uni.createFrom().<Void> emitter(e -> {
-                    // never completes
-                }).onCancellation().invoke(() -> bodyCancelled.set(true)))
+                .withScoped(conn -> {
+                    borrowed.set(conn);
+                    return Uni.createFrom().<Void> emitter(e -> {
+                        // never completes
+                    }).onCancellation().invoke(() -> bodyCancelled.set(true));
+                })
                 .subscribe().with(x -> {
                 }, t -> {
                 });
@@ -345,10 +353,171 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
 
         subscription.cancel();
 
-        // Unlike withPooled, a scoped connection follows the caller: cancelling propagates to the
-        // body and frees the connection right away.
+        // Unlike withPooled, a scoped connection follows the caller: cancelling propagates to the body. What the
+        // cancelled body left on the connection is unknown, so it is closed, not handed to the next borrower.
         assertThat(bodyCancelled).isTrue();
+        assertThat(pool.getObjectCount()).isZero();
+        assertThat(pool.getIdle()).isZero();
+        await().atMost(TIMEOUT).until(() -> !borrowed.get().isOpen());
+
+        // the pool opens a fresh connection for the next borrower
+        LettuceConnection next = pool.acquireBlocking(TIMEOUT);
+        assertThat(next).isNotSameAs(borrowed.get());
+        pool.release(next).await().atMost(TIMEOUT);
+    }
+
+    @Test
+    void theBodyOfACancelledScopeIsCancelledBeforeTheNextBorrowerStarts() {
+        // Releasing first and cancelling the body afterwards would hand the connection to the queued borrower while
+        // the cancelled body could still use it.
+        LettuceConnectionPool pool = pool(1, 1);
+        List<String> events = new CopyOnWriteArrayList<>();
+        AtomicReference<LettuceConnection> first = new AtomicReference<>();
+        AtomicReference<LettuceConnection> second = new AtomicReference<>();
+
+        Cancellable cancelled = pool.withScoped(conn -> {
+            first.set(conn);
+            return Uni.createFrom().<Void> emitter(e -> {
+                // never completes
+            }).onCancellation().invoke(() -> events.add("first body cancelled"));
+        }).subscribe().with(x -> {
+        }, t -> {
+        });
+        await().atMost(TIMEOUT).until(() -> first.get() != null);
+        // queued: the only connection of the pool is checked out
+        pool.withScoped(conn -> {
+            events.add("second body started");
+            second.set(conn);
+            return Uni.createFrom().voidItem();
+        }).subscribe().with(x -> {
+        }, t -> {
+        });
+
+        cancelled.cancel();
+
+        await().atMost(TIMEOUT).until(() -> second.get() != null);
+        assertThat(events).containsExactly("first body cancelled", "second body started");
+        assertThat(second.get()).isNotSameAs(first.get());
         await().atMost(TIMEOUT).until(() -> pool.getIdle() == 1);
+        assertThat(pool.getObjectCount()).isEqualTo(1);
+    }
+
+    @Test
+    void aCallerLeavingAfterTheBodyEndedDoesNotInterruptTheRelease() {
+        // The body ended and its connection is being released, which takes a round trip when the database has to be
+        // reset. A caller that cancels now has nothing left to cancel: the release must still complete, or the
+        // connection is neither idle nor closed, and lost to the pool.
+        LettuceConnectionPool pool = pool(1, 1);
+        String blocker = UUID.randomUUID().toString();
+        AtomicBoolean started = new AtomicBoolean();
+        CompletableFuture<Void> body = new CompletableFuture<>();
+
+        Cancellable subscription = pool.withScoped(conn -> {
+            pool.markDirty(conn);
+            // holds the connection on the server, so that the SELECT of the release stays pending behind it
+            conn.async().blpop(30L, blocker.getBytes(StandardCharsets.UTF_8));
+            started.set(true);
+            return Uni.createFrom().completionStage(body);
+        }).subscribe().with(x -> {
+        }, t -> {
+        });
+        await().atMost(TIMEOUT).until(started::get);
+        // the body ends on this thread, and its release has begun when complete() returns
+        body.complete(null);
+
+        subscription.cancel();
+        rawPush(blocker, "unblocked");
+
+        await().atMost(TIMEOUT).until(() -> pool.getIdle() == 1);
+        assertThat(pool.getObjectCount()).isEqualTo(1);
+    }
+
+    @Test
+    void aBodyIsNotStartedForACallerThatLeftWhileItsContextWasBusy() throws Exception {
+        LettuceConnectionPool pool = pool(1, 1);
+        LettuceConnection held = pool.acquireBlocking(TIMEOUT);
+        AtomicBoolean bodyRan = new AtomicBoolean();
+        Context context = vertx.getDelegate().getOrCreateContext();
+
+        // the caller, on an event loop context, queues for the only connection of the pool
+        CompletableFuture<Cancellable> subscribed = new CompletableFuture<>();
+        context.runOnContext(ignored -> subscribed.complete(pool.withScoped(conn -> {
+            bodyRan.set(true);
+            return Uni.createFrom().voidItem();
+        }).subscribe().with(x -> {
+        }, t -> {
+        })));
+        Cancellable subscription = subscribed.get(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+
+        // its event loop is busy when the connection is handed over, from this thread: the body can only be started
+        // by a task queued on the caller's context
+        CountDownLatch busy = new CountDownLatch(1);
+        CountDownLatch idle = new CountDownLatch(1);
+        context.runOnContext(ignored -> {
+            busy.countDown();
+            try {
+                idle.await(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        assertThat(busy.await(TIMEOUT.toSeconds(), TimeUnit.SECONDS)).isTrue();
+        pool.release(held).await().atMost(TIMEOUT);
+
+        // the caller leaves before that task runs
+        subscription.cancel();
+        idle.countDown();
+
+        await().atMost(TIMEOUT).until(() -> pool.getIdle() == 1);
+        assertThat(bodyRan).isFalse();
+    }
+
+    @Test
+    void aScopedBodyEndingWhileItsCallerLeavesNeverLosesTheConnection() throws Exception {
+        // The body ending and the caller cancelling race for the connection: whichever wins, it is released or
+        // closed, once. There is no hook into the window, so race the two many times.
+        LettuceConnectionPool pool = pool(1, 1);
+        // as in releaseRacingAnExhaustedAcquireNeverLosesTheWakeUp: run through Mutiny once before racing
+        pool.release(pool.acquireBlocking(TIMEOUT)).await().atMost(TIMEOUT);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            for (int i = 0; i < 300; i++) {
+                CompletableFuture<Void> body = new CompletableFuture<>();
+                AtomicBoolean started = new AtomicBoolean();
+                Cancellable scope = pool.withScoped(conn -> {
+                    started.set(true);
+                    return Uni.createFrom().completionStage(body);
+                }).subscribe().with(x -> {
+                }, t -> {
+                });
+                await().atMost(TIMEOUT).pollInterval(Duration.ofMillis(1)).until(started::get);
+
+                CyclicBarrier barrier = new CyclicBarrier(2);
+                Future<?> end = executor.submit(() -> {
+                    barrier.await();
+                    body.complete(null);
+                    return null;
+                });
+                Future<?> cancel = executor.submit(() -> {
+                    barrier.await();
+                    scope.cancel();
+                    return null;
+                });
+                end.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+                cancel.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+
+                // released and idle, or closed and gone: either way nothing stays checked out
+                await().atMost(TIMEOUT).pollInterval(Duration.ofMillis(1))
+                        .until(() -> pool.getObjectCount() == pool.getIdle());
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(pool.getObjectCount()).isLessThanOrEqualTo(1);
+
+        // With maxTotal=1 this would queue forever had a connection been lost.
+        LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
+        pool.release(conn).await().atMost(TIMEOUT);
     }
 
     @Test
@@ -386,7 +555,7 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         assertThat(pool.getIdle()).isEqualTo(1);
 
         // With maxTotal=1, this would queue forever (and time out) had the connection leaked.
-        Long pong = pool.withPooled(conn -> LettuceResult.toUni(() -> conn.async().clientId()))
+        Long pong = pool.withPooled(conn -> Uni.createFrom().completionStage(() -> conn.async().clientId()))
                 .await().atMost(TIMEOUT);
         assertThat(pong).isNotNull();
         assertThat(pool.getIdle()).isEqualTo(1);
@@ -468,10 +637,9 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         try {
             LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
             // several cleaner runs past the recycle timeout while the connection is checked out
-            Thread.sleep(600);
-            assertThat(conn.isOpen()).isTrue();
+            await().during(Duration.ofMillis(600)).atMost(TIMEOUT)
+                    .until(() -> conn.isOpen() && pool.getObjectCount() == 1);
             assertThat(sync(conn).ping()).isEqualTo("PONG");
-            assertThat(pool.getObjectCount()).isEqualTo(1);
             pool.release(conn).await().atMost(TIMEOUT);
             // released, it is recycled like any idle connection
             await().atMost(TIMEOUT).until(() -> pool.getObjectCount() == 0);
@@ -491,12 +659,11 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
 
             // a borrower every 60 ms gets the most recently released connection back each time, so the other
             // one stays idle from its release on
-            for (int i = 0; i < 10; i++) {
+            await().pollInterval(Duration.ofMillis(60)).during(Duration.ofMillis(600)).atMost(TIMEOUT).until(() -> {
                 LettuceConnection borrowed = pool.acquireBlocking(TIMEOUT);
-                assertThat(borrowed).isSameAs(second);
                 pool.release(borrowed).await().atMost(TIMEOUT);
-                Thread.sleep(60);
-            }
+                return borrowed == second;
+            });
 
             // well past the recycle timeout: the idle one is gone, the busy one is kept
             await().atMost(TIMEOUT).until(() -> pool.getObjectCount() == 1);
@@ -514,9 +681,8 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         try {
             LettuceConnection conn = pool.acquireBlocking(TIMEOUT);
             pool.release(conn).await().atMost(TIMEOUT);
-            Thread.sleep(300);
-            assertThat(pool.getIdle()).isEqualTo(1);
-            assertThat(conn.isOpen()).isTrue();
+            // well past the recycle timeout, the idle connection is still there
+            await().during(Duration.ofMillis(300)).atMost(TIMEOUT).until(() -> pool.getIdle() == 1 && conn.isOpen());
         } finally {
             pool.close().await().atMost(TIMEOUT);
         }
@@ -549,6 +715,39 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
 
     private static void rawPush(String key, String value) {
         connection.sync().rpush(key.getBytes(StandardCharsets.UTF_8), value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void connectionReleasedWithATransactionOpenIsClosedNotReused() {
+        // a borrower that left MULTI open (or could not close it) must not poison the next borrower
+        LettuceConnectionPool pool = pool(1, 1);
+        LettuceConnection first = pool.acquireBlocking(TIMEOUT);
+        sync(first).multi();
+        assertThat(first.isMulti()).isTrue();
+        pool.release(first).await().atMost(TIMEOUT);
+        assertThat(first.isOpen()).isFalse();
+        assertThat(pool.getObjectCount()).isZero();
+
+        LettuceConnection second = pool.acquireBlocking(TIMEOUT);
+        assertThat(second).isNotSameAs(first);
+        assertThat(second.isMulti()).isFalse();
+        assertThat(sync(second).ping()).isEqualTo("PONG");
+        pool.release(second).await().atMost(TIMEOUT);
+        assertThat(pool.getIdle()).isEqualTo(1);
+    }
+
+    @Test
+    void connectionMarkedBrokenIsClosedOnRelease() {
+        LettuceConnectionPool pool = pool(1, 1);
+        LettuceConnection first = pool.acquireBlocking(TIMEOUT);
+        first.markBroken();
+        pool.release(first).await().atMost(TIMEOUT);
+        assertThat(first.isOpen()).isFalse();
+
+        LettuceConnection second = pool.acquireBlocking(TIMEOUT);
+        assertThat(second).isNotSameAs(first);
+        assertThat(sync(second).ping()).isEqualTo("PONG");
+        pool.release(second).await().atMost(TIMEOUT);
     }
 
 }

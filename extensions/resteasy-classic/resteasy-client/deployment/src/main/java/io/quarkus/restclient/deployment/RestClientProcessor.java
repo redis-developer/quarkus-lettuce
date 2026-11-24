@@ -51,9 +51,9 @@ import org.jboss.resteasy.microprofile.client.RestClientProxy;
 import org.jboss.resteasy.microprofile.client.async.AsyncInterceptorRxInvokerProvider;
 import org.jboss.resteasy.microprofile.client.publisher.MpPublisherMessageBodyReader;
 import org.jboss.resteasy.plugins.providers.sse.client.SseEventSourceImpl;
+import org.jboss.resteasy.spi.InjectorFactory;
 import org.jboss.resteasy.spi.ResteasyConfiguration;
 
-import io.quarkus.arc.BeanDestroyer;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.BeanArchiveIndexBuildItem;
 import io.quarkus.arc.deployment.InterceptorResolverBuildItem;
@@ -62,13 +62,13 @@ import io.quarkus.arc.deployment.SyntheticBeanBuildItem.ExtendedBeanConfigurator
 import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
 import io.quarkus.arc.processor.BuiltinScope;
 import io.quarkus.arc.processor.InterceptorInfo;
+import io.quarkus.core.Phase;
+import io.quarkus.core.deployment.service.ServiceRegistrar;
 import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.Feature;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
-import io.quarkus.deployment.annotations.ExecutionTime;
-import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.ExtensionSslNativeSupportBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
@@ -100,7 +100,6 @@ import io.quarkus.restclient.runtime.RestClientBase;
 import io.quarkus.restclient.runtime.RestClientRecorder;
 import io.quarkus.resteasy.common.deployment.JaxrsProvidersToRegisterBuildItem;
 import io.quarkus.resteasy.common.deployment.RestClientBuildItem;
-import io.quarkus.resteasy.common.deployment.ResteasyInjectionReadyBuildItem;
 import io.quarkus.resteasy.common.spi.ResteasyDotNames;
 import io.quarkus.resteasy.common.spi.ResteasyJaxrsProviderBuildItem;
 import io.quarkus.runtime.metrics.MetricsFactory;
@@ -147,15 +146,16 @@ class RestClientProcessor {
     }
 
     @BuildStep
-    @Record(ExecutionTime.STATIC_INIT)
     void setup(BuildProducer<FeatureBuildItem> feature,
             BuildProducer<AdditionalBeanBuildItem> additionalBeans,
             BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
-            RestClientRecorder restClientRecorder) {
+            ServiceRegistrar serviceRegistrar) {
 
         feature.produce(new FeatureBuildItem(Feature.RESTEASY_CLIENT));
 
-        restClientRecorder.setRestClientBuilderResolver();
+        serviceRegistrar.forService("io.quarkus.resteasy-client.builder-resolver")
+                .atPhase(Phase.STATIC_INIT)
+                .onStart(ctx -> RestClientRecorder.setRestClientBuilderResolver());
 
         additionalBeans.produce(new AdditionalBeanBuildItem(RestClient.class));
 
@@ -230,6 +230,20 @@ class RestClientProcessor {
             proxyDefinition.produce(
                     new NativeImageProxyDefinitionBuildItem(iName, RestClientProxy.class.getName(), Closeable.class.getName()));
             reflectiveClass.produce(ReflectiveClassBuildItem.builder(iName).methods().build());
+        }
+
+        // the interfaces returned by sub-resource locators are proxied by RESTEasy at runtime as well
+        Set<DotName> subResources = new HashSet<>();
+        Set<DotName> visited = new HashSet<>();
+        for (ClassInfo iface : interfaces.values()) {
+            collectSubResources(index, iface, subResources, visited);
+        }
+        for (DotName subResource : subResources) {
+            if (!interfaces.containsKey(subResource)) {
+                String iName = subResource.toString();
+                proxyDefinition.produce(new NativeImageProxyDefinitionBuildItem(iName, ResteasyClientProxy.class.getName()));
+                reflectiveClass.produce(ReflectiveClassBuildItem.builder(iName).methods().build());
+            }
         }
 
         // Incoming headers
@@ -309,7 +323,7 @@ class RestClientProcessor {
                         rtInterface, rtBaseUri, rtConfigKey, rtRestClientProviders);
                 bc.return_(bc.invokeVirtual(MethodDesc.of(RestClientBase.class, "create", Object.class), base));
             });
-            configurator.destroyer(BeanDestroyer.CloseableDestroyer.class);
+            configurator.autoClose(true);
             syntheticBeans.produce(configurator.done());
         }
     }
@@ -421,6 +435,42 @@ class RestClientProcessor {
         }
     }
 
+    /**
+     * Collects the interfaces returned by the sub-resource locators of the given interface, recursively: the methods
+     * annotated with {@code @Path} without an HTTP method annotation and returning an interface, like RESTEasy does.
+     */
+    private static void collectSubResources(IndexView index, ClassInfo iface, Set<DotName> subResources,
+            Set<DotName> visited) {
+        if (!visited.add(iface.name())) {
+            return;
+        }
+        for (MethodInfo method : iface.methods()) {
+            if (!method.hasDeclaredAnnotation(PATH) || hasHttpMethodAnnotation(method)) {
+                continue;
+            }
+            ClassInfo returnType = index.getClassByName(method.returnType().name());
+            if (returnType != null && returnType.isInterface()) {
+                subResources.add(returnType.name());
+                collectSubResources(index, returnType, subResources, visited);
+            }
+        }
+        for (Type interfaceType : iface.interfaceTypes()) {
+            ClassInfo parent = index.getClassByName(interfaceType.name());
+            if (parent != null) {
+                collectSubResources(index, parent, subResources, visited);
+            }
+        }
+    }
+
+    private static boolean hasHttpMethodAnnotation(MethodInfo method) {
+        for (DotName httpMethod : ResteasyDotNames.JAXRS_METHOD_ANNOTATIONS) {
+            if (method.hasDeclaredAnnotation(httpMethod)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void processInterfaceReturnTypes(ClassInfo classInfo, Set<Type> returnTypes) {
         for (MethodInfo method : classInfo.methods()) {
             Type type = method.returnType();
@@ -437,31 +487,40 @@ class RestClientProcessor {
     }
 
     @BuildStep
-    @Record(ExecutionTime.STATIC_INIT)
     void registerProviders(BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
             JaxrsProvidersToRegisterBuildItem jaxrsProvidersToRegisterBuildItem,
             List<IgnoreClientProviderBuildItem> ignoreClientProviderBuildItems,
             CombinedIndexBuildItem combinedIndexBuildItem,
-            ResteasyInjectionReadyBuildItem injectorFactory,
-            RestClientRecorder restClientRecorder, Capabilities capabilities) {
+            ServiceRegistrar serviceRegistrar, Capabilities capabilities) {
 
+        Set<String> effectiveProviders = new HashSet<>(jaxrsProvidersToRegisterBuildItem.getProviders());
+        Set<String> effectiveContributedProviders = new HashSet<>(jaxrsProvidersToRegisterBuildItem.getContributedProviders());
         for (IgnoreClientProviderBuildItem item : ignoreClientProviderBuildItems) {
-            jaxrsProvidersToRegisterBuildItem.getProviders().remove(item.getProviderClassName());
-            jaxrsProvidersToRegisterBuildItem.getContributedProviders().remove(item.getProviderClassName());
+            effectiveProviders.remove(item.getProviderClassName());
+            effectiveContributedProviders.remove(item.getProviderClassName());
         }
 
-        restClientRecorder.initializeResteasyProviderFactory(injectorFactory.getInjectorFactory(),
-                jaxrsProvidersToRegisterBuildItem.useBuiltIn(),
-                jaxrsProvidersToRegisterBuildItem.getProviders(), jaxrsProvidersToRegisterBuildItem.getContributedProviders());
+        boolean useBuiltIn = jaxrsProvidersToRegisterBuildItem.useBuiltIn();
+        Set<String> providersToRegister = Set.copyOf(effectiveProviders);
+        Set<String> contributedProviders = Set.copyOf(effectiveContributedProviders);
+        // ResteasyProviderFactory will use our implementation when accessing instance statically. That's not
+        // necessary when RESTEasy classic is present as then provider factory with correct provider classes is generated.
+        boolean setProviderFactoryInstance = !capabilities.isPresent(Capability.RESTEASY)
+                && !capabilities.isPresent(Capability.RESTEASY_REACTIVE);
 
-        if (!capabilities.isPresent(Capability.RESTEASY) && !capabilities.isPresent(Capability.RESTEASY_REACTIVE)) {
-            // ResteasyProviderFactory will use our implementation when accessing instance statically. That's not
-            // necessary when RESTEasy classic is present as then provider factory with correct provider classes is generated.
-            restClientRecorder.setResteasyProviderFactoryInstance();
-        }
+        serviceRegistrar.forService("io.quarkus.resteasy-client.provider-factory")
+                .atPhase(Phase.STATIC_INIT)
+                .require(InjectorFactory.class)
+                .onStart((ctx, injectorFactory) -> {
+                    RestClientRecorder.initializeResteasyProviderFactory(injectorFactory, useBuiltIn, providersToRegister,
+                            contributedProviders);
+                    if (setProviderFactoryInstance) {
+                        RestClientRecorder.setResteasyProviderFactoryInstance();
+                    }
+                });
 
         // register the providers for reflection
-        for (String providerToRegister : jaxrsProvidersToRegisterBuildItem.getProviders()) {
+        for (String providerToRegister : effectiveProviders) {
             reflectiveClass.produce(ReflectiveClassBuildItem.builder(providerToRegister).build());
         }
 

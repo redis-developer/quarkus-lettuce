@@ -26,8 +26,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.DeploymentException;
 import jakarta.inject.Singleton;
 
-import org.eclipse.microprofile.config.Config;
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationTarget;
 import org.jboss.jandex.AnnotationTarget.Kind;
@@ -81,11 +79,11 @@ import io.quarkus.grpc.runtime.GrpcClientInterceptorContainer;
 import io.quarkus.grpc.runtime.GrpcClientRecorder;
 import io.quarkus.grpc.runtime.config.GrpcClientBuildTimeConfig;
 import io.quarkus.grpc.runtime.stork.GrpcStorkRecorder;
-import io.quarkus.grpc.runtime.stork.StorkMeasuringGrpcInterceptor;
 import io.quarkus.grpc.runtime.stork.VertxStorkMeasuringGrpcInterceptor;
 import io.quarkus.grpc.runtime.supports.Channels;
 import io.quarkus.grpc.runtime.supports.GrpcClientConfigProvider;
 import io.quarkus.grpc.runtime.supports.IOThreadClientInterceptor;
+import io.smallrye.config.Config;
 
 public class GrpcClientProcessor {
 
@@ -106,7 +104,6 @@ public class GrpcClientProcessor {
 
     @BuildStep
     void registerStorkInterceptor(BuildProducer<AdditionalBeanBuildItem> beans) {
-        beans.produce(new AdditionalBeanBuildItem(StorkMeasuringGrpcInterceptor.class));
         beans.produce(new AdditionalBeanBuildItem(VertxStorkMeasuringGrpcInterceptor.class));
     }
 
@@ -292,8 +289,7 @@ public class GrpcClientProcessor {
 
     @BuildStep
     void registerSslResources(BuildProducer<NativeImageResourceBuildItem> resourceBuildItem) {
-        Config config = ConfigProvider.getConfig();
-        registerResourcesForProperties(config, resourceBuildItem, TRUST_STORE_PATTERN, CERTIFICATE_PATTERN, KEY_PATTERN);
+        registerResourcesForProperties(Config.get(), resourceBuildItem, TRUST_STORE_PATTERN, CERTIFICATE_PATTERN, KEY_PATTERN);
     }
 
     @BuildStep
@@ -428,7 +424,6 @@ public class GrpcClientProcessor {
         }
 
         // it's okay if this one is not used:
-        superfluousInterceptors.remove(StorkMeasuringGrpcInterceptor.class.getName());
         superfluousInterceptors.remove(VertxStorkMeasuringGrpcInterceptor.class.getName());
         if (!superfluousInterceptors.isEmpty()) {
             LOGGER.warnf("At least one unused gRPC client interceptor found: %s. If they are meant to be used globally, " +

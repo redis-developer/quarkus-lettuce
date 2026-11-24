@@ -1,5 +1,6 @@
 package io.quarkus.vertx.http.deployment;
 
+import static io.quarkus.vertx.http.HttpServer.HTTP_SERVER;
 import static io.quarkus.vertx.http.deployment.RequireBodyHandlerBuildItem.getBodyHandlerRequiredConditions;
 import static io.quarkus.vertx.http.deployment.RouteBuildItem.RouteType.FRAMEWORK_ROUTE;
 
@@ -18,18 +19,23 @@ import java.util.logging.Level;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.eclipse.microprofile.config.Config;
-import org.eclipse.microprofile.config.ConfigProvider;
+import jakarta.inject.Singleton;
+
 import org.jboss.logging.Logger;
 
+import io.quarkus.arc.ArcContainer;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.BeanContainerBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
+import io.quarkus.arc.deployment.SyntheticBeansRuntimeInitBuildItem;
 import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
 import io.quarkus.arc.processor.BuiltinScope;
+import io.quarkus.arc.processor.DotNames;
 import io.quarkus.bootstrap.classloading.ClassPathElement;
 import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
 import io.quarkus.builder.BuildException;
+import io.quarkus.core.Phase;
+import io.quarkus.core.deployment.service.ServiceRegistrar;
 import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.IsDevelopment;
@@ -38,13 +44,10 @@ import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.Consume;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.ApplicationStartBuildItem;
 import io.quarkus.deployment.builditem.ExecutorBuildItem;
 import io.quarkus.deployment.builditem.HotDeploymentWatchedFileBuildItem;
 import io.quarkus.deployment.builditem.LaunchModeBuildItem;
 import io.quarkus.deployment.builditem.LogCategoryBuildItem;
-import io.quarkus.deployment.builditem.ModuleEnableNativeAccessBuildItem;
-import io.quarkus.deployment.builditem.NativeImageFeatureBuildItem;
 import io.quarkus.deployment.builditem.RunTimeConfigBuilderBuildItem;
 import io.quarkus.deployment.builditem.ServiceStartBuildItem;
 import io.quarkus.deployment.builditem.ShutdownContextBuildItem;
@@ -57,17 +60,20 @@ import io.quarkus.deployment.logging.LoggingDecorateBuildItem;
 import io.quarkus.devui.spi.buildtime.FooterLogBuildItem;
 import io.quarkus.kubernetes.spi.KubernetesPortBuildItem;
 import io.quarkus.netty.runtime.virtual.VirtualServerChannel;
+import io.quarkus.runtime.Address;
 import io.quarkus.runtime.ErrorPageAction;
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.LiveReloadConfig;
 import io.quarkus.runtime.RuntimeValue;
+import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.runtime.logging.LogBuildTimeConfig;
 import io.quarkus.tls.deployment.spi.TlsRegistryBuildItem;
+import io.quarkus.value.registry.ValueRegistry;
 import io.quarkus.vertx.core.deployment.CoreVertxBuildItem;
 import io.quarkus.vertx.core.deployment.EventLoopCountBuildItem;
+import io.quarkus.vertx.http.HttpServer;
 import io.quarkus.vertx.http.HttpServerConfigCustomizer;
 import io.quarkus.vertx.http.XForwardedForSelector;
-import io.quarkus.vertx.http.deployment.HttpSecurityProcessor.HttpSecurityConfigSetupCompleteBuildItem;
 import io.quarkus.vertx.http.deployment.devmode.NotFoundPageDisplayableEndpointBuildItem;
 import io.quarkus.vertx.http.deployment.spi.FrameworkEndpointsBuildItem;
 import io.quarkus.vertx.http.deployment.spi.GeneratedStaticResourceBuildItem;
@@ -78,18 +84,21 @@ import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
 import io.quarkus.vertx.http.runtime.HostValidationRecorder;
 import io.quarkus.vertx.http.runtime.HttpCertificateUpdateEventListener;
 import io.quarkus.vertx.http.runtime.HttpStaticDirConfig;
+import io.quarkus.vertx.http.runtime.RouteHandler;
 import io.quarkus.vertx.http.runtime.VertxConfigBuilder;
 import io.quarkus.vertx.http.runtime.VertxHttpBuildTimeConfig;
+import io.quarkus.vertx.http.runtime.VertxHttpConfig;
 import io.quarkus.vertx.http.runtime.VertxHttpConfig.InsecureRequests;
 import io.quarkus.vertx.http.runtime.VertxHttpRecorder;
 import io.quarkus.vertx.http.runtime.attribute.ExchangeAttributeBuilder;
 import io.quarkus.vertx.http.runtime.cors.CORSConfig;
-import io.quarkus.vertx.http.runtime.cors.CORSRecorder;
+import io.quarkus.vertx.http.runtime.cors.CORSFilter;
 import io.quarkus.vertx.http.runtime.filters.Filter;
 import io.quarkus.vertx.http.runtime.filters.GracefulShutdownFilter;
-import io.quarkus.vertx.http.runtime.graal.Brotli4jFeature;
 import io.quarkus.vertx.http.runtime.management.ManagementInterfaceBuildTimeConfig;
+import io.quarkus.vertx.http.runtime.security.HttpSecurityConfiguration;
 import io.quarkus.vertx.http.runtime.security.SecurityHandlerPriorities;
+import io.smallrye.config.Config;
 import io.vertx.core.http.impl.http1.Http1ServerRequest;
 import io.vertx.core.impl.VertxImpl;
 import io.vertx.ext.web.Router;
@@ -98,6 +107,7 @@ class VertxHttpProcessor {
 
     private static final String META_INF_SERVICES_EXCHANGE_ATTRIBUTE_BUILDER = "META-INF/services/io.quarkus.vertx.http.runtime.attribute.ExchangeAttributeBuilder";
     private static final Logger logger = Logger.getLogger(VertxHttpProcessor.class);
+    private static final String CORS_FILTER = "io.quarkus.vertx.http.cors-filter";
 
     // For enabling HTTPS port in Kubernetes
     private static final String HTTP_SSL_PREFIX = "quarkus.http.ssl.certificate.";
@@ -159,14 +169,40 @@ class VertxHttpProcessor {
     }
 
     @BuildStep
-    @Record(ExecutionTime.RUNTIME_INIT)
-    FilterBuildItem cors(CORSRecorder recorder,
-            Optional<HttpSecurityConfigSetupCompleteBuildItem> httpSecurityConfigSetupCompleteBuildItem,
-            Capabilities capabilities) {
-        RuntimeValue<CORSConfig> programmaticCorsConfig = httpSecurityConfigSetupCompleteBuildItem
-                .map(i -> i.programmaticCorsConfig).orElse(null);
-        return new FilterBuildItem(
-                recorder.corsHandler(programmaticCorsConfig, capabilities.isPresent(Capability.SECURITY)),
+    FilterBuildItem cors(ServiceRegistrar serviceRegistrar, Capabilities capabilities) {
+        final boolean securityPresent = capabilities.isPresent(Capability.SECURITY);
+        serviceRegistrar.forService(RouteHandler.class, CORS_FILTER)
+                .request(HttpSecurityConfiguration.class)
+                .require(VertxHttpConfig.class)
+                .optional()
+                .onStart((ctx, optionalHttpSecurityConfig, vertxHttpConfig) -> {
+                    CORSConfig corsConfig = optionalHttpSecurityConfig.map(HttpSecurityConfiguration::getCorsConfig)
+                            .orElseGet(vertxHttpConfig::cors);
+                    if (!corsConfig.enabled()) {
+                        return Optional.empty();
+                    }
+                    if (!corsConfig.returnExactOrigins()) {
+                        if (!CORSFilter.isOriginConfiguredWithWildcard(corsConfig.origins())) {
+                            throw new ConfigurationException(
+                                    "'quarkus.http.cors.return-exact-origins=false' can only be used when "
+                                            + "'quarkus.http.cors.origins' is set to '*'.");
+                        }
+                        if (corsConfig.accessControlAllowCredentials().orElse(false)) {
+                            throw new ConfigurationException(
+                                    "'quarkus.http.cors.return-exact-origins=false' is incompatible with "
+                                            + "'quarkus.http.cors.access-control-allow-credentials=true' because the CORS "
+                                            + "specification does not allow credentials when 'Access-Control-Allow-Origin' "
+                                            + "is '*'.");
+                        }
+                        if (securityPresent) {
+                            throw new ConfigurationException(
+                                    "'quarkus.http.cors.return-exact-origins=false' can't be used when "
+                                            + "a Quarkus Security capability is detected.");
+                        }
+                    }
+                    return Optional.of(new CORSFilter(corsConfig)::handle);
+                });
+        return new FilterBuildItem(serviceRegistrar.getRecorderProxy(RouteHandler.class, CORS_FILTER),
                 SecurityHandlerPriorities.CORS);
     }
 
@@ -549,9 +585,15 @@ class VertxHttpProcessor {
         runtimeConfigBuilder.produce(new RunTimeConfigBuilderBuildItem(VertxConfigBuilder.class));
     }
 
+    /**
+     * Binds the sockets after every service has started, so that no request is served before the application is
+     * initialized. It cannot wait for {@code ApplicationStartBuildItem}: the {@code StartupEvent} waits for the
+     * {@link Address} beans, which need the bound ports, so that would be a cycle.
+     */
     @Record(ExecutionTime.RUNTIME_INIT)
     @BuildStep
-    HttpServerStartedBuildItem openSocket(ApplicationStartBuildItem start,
+    HttpServerStartedBuildItem openSocket(
+            List<ServiceStartBuildItem> serviceStarts, // ordering only
             LaunchModeBuildItem launchMode,
             CoreVertxBuildItem vertx,
             ShutdownContextBuildItem shutdown,
@@ -580,6 +622,66 @@ class VertxHttpProcessor {
                 !capabilities.isPresent(Capability.VERTX_WEBSOCKETS)
                         && !capabilities.isPresent(Capability.WEBSOCKETS_NEXT));
         return new HttpServerStartedBuildItem();
+    }
+
+    /**
+     * Registers the {@link HttpServer} as a service, and the {@link Address} of each of its ports as a named service:
+     * {@code vertx-http}, {@code vertx-https} and {@code vertx-management}.
+     * <p>
+     * Other services depend on them with {@code require(HttpServer.class)} or {@code request(Address.class, "vertx-http")}.
+     * The addresses are optional services, since a port may not be available.
+     * <p>
+     * Each address is also available as a CDI bean, and can be injected as {@code @Named("vertx-http") Address}.
+     */
+    @BuildStep
+    void httpServerAddresses(ServiceRegistrar serviceRegistrar) {
+        serviceRegistrar
+                .forService(HttpServer.class)
+                .atPhase(Phase.BINDING)
+                .require(ArcContainer.class)
+                .afterBuildItem(SyntheticBeansRuntimeInitBuildItem.class)
+                // the actual ports are only known once openSocket (still a recorder step) has bound the sockets
+                .afterBuildItem(HttpServerStartedBuildItem.class)
+                .onStart((ctx, container) -> container.instance(ValueRegistry.class).get().get(HTTP_SERVER));
+
+        serviceRegistrar
+                .forService(Address.class, HttpServer.VERTX_HTTP)
+                .atPhase(Phase.BINDING)
+                .require(HttpServer.class)
+                .optional()
+                .onStart((ctx, httpServer) -> httpServer.getAddress());
+
+        serviceRegistrar
+                .forService(Address.class, HttpServer.VERTX_HTTPS)
+                .atPhase(Phase.BINDING)
+                .require(HttpServer.class)
+                .optional()
+                .onStart((ctx, httpServer) -> httpServer.getSecureAddress());
+
+        serviceRegistrar
+                .forService(Address.class, HttpServer.VERTX_MANAGEMENT)
+                .atPhase(Phase.BINDING)
+                .require(HttpServer.class)
+                .optional()
+                .onStart((ctx, httpServer) -> httpServer.getManagementAddress());
+    }
+
+    /**
+     * Exposes each {@link Address} as a {@code @Named} bean. This is a separate build step from
+     * {@link #httpServerAddresses} to avoid a circular dependency.
+     */
+    @BuildStep
+    void httpServerAddressBeans(BuildProducer<SyntheticBeanBuildItem> syntheticBeans) {
+        List<String> serviceNames = List.of(HttpServer.VERTX_HTTP, HttpServer.VERTX_HTTPS, HttpServer.VERTX_MANAGEMENT);
+        for (String name : serviceNames) {
+            syntheticBeans.produce(SyntheticBeanBuildItem.configure(Address.class)
+                    .setRuntimeInit()
+                    .unremovable()
+                    .serviceValue(Address.class, name)
+                    .scope(Singleton.class)
+                    .addQualifier().annotation(DotNames.NAMED).addValue("value", name).done()
+                    .done());
+        }
     }
 
     @BuildStep
@@ -640,7 +742,7 @@ class VertxHttpProcessor {
      * If any of the above rules applied, the port "https" will be generated as part of the Kubernetes resources.
      */
     private static boolean isSslConfigured() {
-        Config config = ConfigProvider.getConfig();
+        Config config = Config.get();
         InsecureRequests insecureRequests = config
                 .getOptionalValue("quarkus.http.insecure-requests", InsecureRequests.class)
                 .orElse(InsecureRequests.ENABLED);
@@ -657,26 +759,5 @@ class VertxHttpProcessor {
         }
 
         return false;
-    }
-
-    @BuildStep
-    NativeImageFeatureBuildItem Brotli4jFeature(VertxHttpBuildTimeConfig httpBuildTimeConfig) {
-        if (isBrotliEnabled(httpBuildTimeConfig)) {
-            return new NativeImageFeatureBuildItem(Brotli4jFeature.class.getName());
-        }
-        return null;
-    }
-
-    @BuildStep
-    ModuleEnableNativeAccessBuildItem brotli4jEnableNativeAccess(VertxHttpBuildTimeConfig httpBuildTimeConfig) {
-        if (isBrotliEnabled(httpBuildTimeConfig)) {
-            return new ModuleEnableNativeAccessBuildItem("com.aayushatharva.brotli4j");
-        }
-        return null;
-    }
-
-    private static boolean isBrotliEnabled(VertxHttpBuildTimeConfig httpBuildTimeConfig) {
-        return httpBuildTimeConfig.compressors().isPresent()
-                && httpBuildTimeConfig.compressors().get().stream().anyMatch(s -> s.equalsIgnoreCase("br"));
     }
 }

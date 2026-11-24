@@ -169,6 +169,7 @@ public final class LoggingSetup {
             final Supplier<String> bannerSupplier,
             boolean includeFilters) {
         boolean color = false;
+        Supplier<String> deferredBannerSupplier = null;
         if (formatter == null) {
             if (isColorEnabled(consoleRuntimeConfig, config)) {
                 formatter = new ColorPatternFormatter(config.darken(), config.format());
@@ -176,13 +177,16 @@ public final class LoggingSetup {
             } else {
                 formatter = new PatternFormatter(config.format());
             }
-            if (bannerSupplier != null) {
-                formatter = new TextBannerFormatter(bannerSupplier, ExtFormatter.wrap(formatter, false));
-            }
+            deferredBannerSupplier = bannerSupplier;
         }
         final ConsoleHandler consoleHandler = new ConsoleHandler(
                 config.stderr() ? ConsoleHandler.Target.SYSTEM_ERR : ConsoleHandler.Target.SYSTEM_OUT, formatter);
-        // Use current System.out/err, not the static reference captured at class-load time
+        if (deferredBannerSupplier != null) {
+            consoleHandler.setFormatter(
+                    new TextBannerFormatter(deferredBannerSupplier, ExtFormatter.wrap(formatter, false)));
+        }
+        // Use current System.out/err, not the static reference captured at class-load time;
+        // this also triggers writeHead, which prints the banner exactly once to the correct stream
         consoleHandler.setOutputStream(config.stderr() ? System.err : System.out);
         consoleHandler.setLevel(config.level());
         consoleHandler.setErrorManager(errorManager);
@@ -671,7 +675,7 @@ public final class LoggingSetup {
      */
     public static boolean shouldCreateNamedHandlers(
             LogRuntimeConfig logRuntimeConfig,
-            List<RuntimeValue<Map<String, Handler>>> additionalNamedHandlers) {
+            List<Map<String, Handler>> additionalNamedHandlers) {
         if (!logRuntimeConfig.categories().isEmpty()) {
             return true;
         }
@@ -769,20 +773,30 @@ public final class LoggingSetup {
     /**
      * Resolve the candidate formatters for a named handler, preferring a formatter configured specifically for
      * that handler and falling back to the global formatters for the handler type.
+     * A named handler that configures a format other than the default does not fall back to the global
+     * formatters, so its pattern formatter is used.
      * <p>
      * RECORDER COMPAT: returns {@link RuntimeValue}-wrapped candidate formatters for the legacy recorder scheme.
      *
      * @param handlerName the named handler name (must not be {@code null})
      * @param namedFormatters the formatters configured per named handler (must not be {@code null})
      * @param globalFormatters the global formatters for the handler type (must not be {@code null})
+     * @param format the format configured on the named handler (must not be {@code null})
+     * @param defaultFormat the default format for the handler type (must not be {@code null})
      * @return the candidate formatters to use for the named handler (not {@code null})
      */
     public static List<RuntimeValue<Optional<Formatter>>> resolveFormatters(
             String handlerName,
             Map<String, Optional<Formatter>> namedFormatters,
-            List<RuntimeValue<Optional<Formatter>>> globalFormatters) {
+            List<RuntimeValue<Optional<Formatter>>> globalFormatters,
+            String format,
+            String defaultFormat) {
         if (namedFormatters.containsKey(handlerName)) {
             return List.of(new RuntimeValue<>(namedFormatters.get(handlerName)));
+        }
+        // A named handler with a custom format uses it instead of inheriting the global formatter.
+        if (!defaultFormat.equals(format)) {
+            return List.of();
         }
         // Fall back to the global formatter (e.g. JSON enabled globally applies to named handlers too).
         return globalFormatters;
@@ -810,7 +824,7 @@ public final class LoggingSetup {
      */
     public static Map<String, Handler> createNamedHandlers(
             LogRuntimeConfig config, ConsoleRuntimeConfig consoleRuntimeConfig,
-            List<RuntimeValue<Map<String, Handler>>> additionalNamedHandlers,
+            List<Map<String, Handler>> additionalNamedHandlers,
             Map<NamedHandlerType, Map<String, Optional<Formatter>>> namedHandlerFormatters,
             List<RuntimeValue<Optional<Formatter>>> possibleConsoleFormatters,
             List<RuntimeValue<Optional<Formatter>>> possibleFileFormatters,
@@ -836,7 +850,8 @@ public final class LoggingSetup {
             }
             final Handler consoleHandler = configureConsoleHandler(namedConsoleConfig, consoleRuntimeConfig,
                     errorManager, cleanupFilter, namedFilters,
-                    resolveFormatters(consoleConfigEntry.getKey(), namedConsoleFormatters, possibleConsoleFormatters),
+                    resolveFormatters(consoleConfigEntry.getKey(), namedConsoleFormatters, possibleConsoleFormatters,
+                            namedConsoleConfig.format(), ConsoleConfig.DEFAULT_FORMAT),
                     null, launchMode, includeFilters);
             addToNamedHandlers(namedHandlers, consoleHandler, consoleConfigEntry.getKey());
         }
@@ -847,7 +862,9 @@ public final class LoggingSetup {
             }
             final Handler fileHandler = configureFileHandler(namedFileConfig, errorManager, cleanupFilter,
                     namedFilters,
-                    resolveFormatters(fileConfigEntry.getKey(), namedFileFormatters, possibleFileFormatters), includeFilters);
+                    resolveFormatters(fileConfigEntry.getKey(), namedFileFormatters, possibleFileFormatters,
+                            namedFileConfig.format(), FileConfig.DEFAULT_FORMAT),
+                    includeFilters);
             addToNamedHandlers(namedHandlers, fileHandler, fileConfigEntry.getKey());
         }
         for (Entry<String, LogRuntimeConfig.SyslogConfig> sysLogConfigEntry : config.syslogHandlers().entrySet()) {
@@ -857,7 +874,8 @@ public final class LoggingSetup {
             }
             final Handler syslogHandler = configureSyslogHandler(namedSyslogConfig, errorManager, cleanupFilter,
                     namedFilters,
-                    resolveFormatters(sysLogConfigEntry.getKey(), namedSyslogFormatters, possibleSyslogFormatters),
+                    resolveFormatters(sysLogConfigEntry.getKey(), namedSyslogFormatters, possibleSyslogFormatters,
+                            namedSyslogConfig.format(), LogRuntimeConfig.SyslogConfig.DEFAULT_FORMAT),
                     includeFilters);
             if (syslogHandler != null) {
                 addToNamedHandlers(namedHandlers, syslogHandler, sysLogConfigEntry.getKey());
@@ -870,7 +888,8 @@ public final class LoggingSetup {
             }
             final Handler socketHandler = configureSocketHandler(namedSocketConfig, errorManager, cleanupFilter,
                     namedFilters,
-                    resolveFormatters(socketConfigEntry.getKey(), namedSocketFormatters, possibleSocketFormatters),
+                    resolveFormatters(socketConfigEntry.getKey(), namedSocketFormatters, possibleSocketFormatters,
+                            namedSocketConfig.format(), SocketConfig.DEFAULT_FORMAT),
                     includeFilters);
             if (socketHandler != null) {
                 addToNamedHandlers(namedHandlers, socketHandler, socketConfigEntry.getKey());
@@ -882,8 +901,8 @@ public final class LoggingSetup {
             additionalNamedHandlersMap = Map.of();
         } else {
             additionalNamedHandlersMap = new HashMap<>();
-            for (RuntimeValue<Map<String, Handler>> runtimeValue : additionalNamedHandlers) {
-                runtimeValue.getValue().forEach(
+            for (Map<String, Handler> namedHandlersMap : additionalNamedHandlers) {
+                namedHandlersMap.forEach(
                         new AdditionalNamedHandlersConsumer(additionalNamedHandlersMap, errorManager,
                                 cleanupFilter.filterElements.values(), shutdownHandler));
             }
@@ -1006,9 +1025,10 @@ public final class LoggingSetup {
      * @param namedHandlers the map of named handlers, keyed by handler name (must not be {@code null})
      * @param effectiveHandlers the list of effective root handlers to add to (must not be {@code null})
      * @param errorManager the error manager to report missing handler links to (must not be {@code null})
+     * @param checkHandlerLinks {@code true} if a missing handler link should be reported as an error
      */
     public static void addNamedHandlersToRootHandlers(Optional<List<String>> handlerNames, Map<String, Handler> namedHandlers,
-            ArrayList<Handler> effectiveHandlers, ErrorManager errorManager) {
+            ArrayList<Handler> effectiveHandlers, ErrorManager errorManager, boolean checkHandlerLinks) {
         if (handlerNames.isEmpty()) {
             return;
         }
@@ -1019,7 +1039,7 @@ public final class LoggingSetup {
             Handler handler = namedHandlers.get(namedHandler);
             if (handler != null) {
                 effectiveHandlers.add(handler);
-            } else {
+            } else if (checkHandlerLinks) {
                 errorManager.error(String.format("Handler with name '%s' is linked to a category but not configured.",
                         namedHandler), null, ErrorManager.GENERIC_FAILURE);
             }
@@ -1100,8 +1120,8 @@ public final class LoggingSetup {
      * <p>
      * The individual root handlers (console, file, syslog, socket, and the dev/test exception-reporting
      * handler) are produced by their own services and passed in via {@code serviceRootHandlers}; they are
-     * already fully configured. Extension-contributed handlers, the streaming handler, and the per-named-handler
-     * formatters are passed in via the {@code // RECORDER COMPAT} bridge wrappers.
+     * already fully configured. Extension-contributed root and named handlers, the streaming handler, and the
+     * per-named-handler formatters are passed in via the {@code // RECORDER COMPAT} bridge wrappers.
      *
      * @param buildConfig the log build-time configuration (must not be {@code null})
      * @param config the log runtime configuration (must not be {@code null})
@@ -1113,6 +1133,8 @@ public final class LoggingSetup {
      * @param namedFilters the map of named filters, keyed by filter name (must not be {@code null})
      * @param serviceRootHandlers the enabled root handlers produced by the handler services (must not be {@code null})
      * @param additionalHandlers extension-contributed root handlers (must not be {@code null})
+     * @param additionalNamedHandlers extension-contributed named handler maps, keyed by handler name (must not be
+     *        {@code null})
      * @param streamingHandler the Dev UI streaming handler, or {@code null} if none
      * @param consoleFormatter the global console formatter for named-handler fallback, or {@code null}
      * @param fileFormatter the global file formatter for named-handler fallback, or {@code null}
@@ -1135,6 +1157,7 @@ public final class LoggingSetup {
             final Map<String, Filter> namedFilters,
             final Collection<Handler> serviceRootHandlers,
             final Collection<AdditionalLogHandler> additionalHandlers,
+            final List<Map<String, Handler>> additionalNamedHandlers,
             final StreamingLogHandler streamingHandler,
             final Formatter consoleFormatter,
             final Formatter fileFormatter,
@@ -1200,8 +1223,8 @@ public final class LoggingSetup {
                 ? Map.of()
                 : namedHandlerFormatters.formatters();
 
-        Map<String, Handler> namedHandlers = shouldCreateNamedHandlers(config, List.of())
-                ? createNamedHandlers(config, consoleRuntimeConfig, List.of(), mergedNamedHandlerFormatters,
+        Map<String, Handler> namedHandlers = shouldCreateNamedHandlers(config, additionalNamedHandlers)
+                ? createNamedHandlers(config, consoleRuntimeConfig, additionalNamedHandlers, mergedNamedHandlerFormatters,
                         toFormatterList(consoleFormatter), toFormatterList(fileFormatter), toFormatterList(syslogFormatter),
                         toFormatterList(socketFormatter), errorManager, cleanupFilter, namedFilters, launchMode, notifier,
                         includeFilters)
@@ -1212,9 +1235,25 @@ public final class LoggingSetup {
                     namedHandlers, true);
         }
 
-        addNamedHandlersToRootHandlers(config.handlers(), namedHandlers, handlers, errorManager);
+        addNamedHandlersToRootHandlers(config.handlers(), namedHandlers, handlers, errorManager, true);
         InitialConfigurator.DELAYED_HANDLER.setAutoFlush(false);
         InitialConfigurator.DELAYED_HANDLER.setHandlers(handlers.toArray(LogContextInitializer.NO_HANDLERS));
+    }
+
+    /**
+     * Remove the cleanup filter from the handlers installed on the root logger, which outlive the application in
+     * dev and test mode (in particular the static delayed handler), so that they do not retain the application
+     * class loader through the filter once the application is stopped.
+     *
+     * @param cleanupFilter the cleanup filter applied by {@link #configureRuntimeLogging}
+     */
+    public static void releaseCleanupFilter(final LogCleanupFilter cleanupFilter) {
+        final java.util.logging.Logger julRootLogger = LogManager.getLogManager().getLogger("");
+        for (Handler handler : julRootLogger.getHandlers()) {
+            if (handler.getFilter() == cleanupFilter) {
+                handler.setFilter(null);
+            }
+        }
     }
 
     /**

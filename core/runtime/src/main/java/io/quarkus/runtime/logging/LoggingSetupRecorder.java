@@ -21,7 +21,6 @@ import java.util.logging.Level;
 import java.util.logging.LogManager;
 import java.util.logging.LogRecord;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.eclipse.microprofile.config.spi.ConfigSource;
 import org.jboss.logmanager.ExtHandler;
 import org.jboss.logmanager.ExtLogRecord;
@@ -43,6 +42,7 @@ import io.quarkus.runtime.console.ConsoleRuntimeConfig;
 import io.quarkus.runtime.logging.LogRuntimeConfig.CategoryConfig;
 import io.quarkus.runtime.logging.LogRuntimeConfig.CleanupFilterConfig;
 import io.quarkus.runtime.shutdown.ShutdownListener;
+import io.smallrye.config.Config;
 import io.smallrye.config.SmallRyeConfig;
 import io.smallrye.config.SmallRyeConfigBuilder;
 
@@ -79,7 +79,10 @@ public class LoggingSetupRecorder {
     }
 
     public static void handleFailedStart(RuntimeValue<Optional<Supplier<String>>> banner) {
-        SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
+        // This is the fallback to set up logging when the application failed to start, so it may run with a
+        // classloader that has no configuration registered, like the augmentation classloader in Dev mode, or
+        // without any Quarkus application at all, as in io.quarkus.test.config.LoggingSetupExtension
+        Config config = Config.getOrCreate();
         // There may be cases where a Config with the mappings is already available, but we can't be sure, so we wrap
         // the original Config and map the logging classes.
         SmallRyeConfig loggingConfig = new SmallRyeConfigBuilder()
@@ -247,8 +250,11 @@ public class LoggingSetupRecorder {
         Map<NamedHandlerType, Map<String, Optional<Formatter>>> mergedNamedHandlerFormatters = LoggingSetup
                 .mergeNamedHandlerFormatters(namedHandlerFormatters);
 
-        Map<String, Handler> namedHandlers = LoggingSetup.shouldCreateNamedHandlers(config, additionalNamedHandlers)
-                ? LoggingSetup.createNamedHandlers(config, consoleRuntimeConfig.getValue(), additionalNamedHandlers,
+        List<Map<String, Handler>> additionalNamedHandlerMaps = additionalNamedHandlers.stream()
+                .map(RuntimeValue::getValue)
+                .toList();
+        Map<String, Handler> namedHandlers = LoggingSetup.shouldCreateNamedHandlers(config, additionalNamedHandlerMaps)
+                ? LoggingSetup.createNamedHandlers(config, consoleRuntimeConfig.getValue(), additionalNamedHandlerMaps,
                         mergedNamedHandlerFormatters,
                         possibleConsoleFormatters, possibleFileFormatters, possibleSyslogFormatters, possibleSocketFormatters,
                         errorManager, cleanupFiler, namedFilters, launchMode,
@@ -284,7 +290,7 @@ public class LoggingSetupRecorder {
                 handlers.add(handler);
             }
         }
-        LoggingSetup.addNamedHandlersToRootHandlers(config.handlers(), namedHandlers, handlers, errorManager);
+        LoggingSetup.addNamedHandlersToRootHandlers(config.handlers(), namedHandlers, handlers, errorManager, true);
         InitialConfigurator.DELAYED_HANDLER.setAutoFlush(false);
         InitialConfigurator.DELAYED_HANDLER.setHandlers(handlers.toArray(LogContextInitializer.NO_HANDLERS));
         return shutdownNotifier;
@@ -339,7 +345,8 @@ public class LoggingSetupRecorder {
         LoggingSetup.setUpCategoryLoggers(buildConfig, categoryDefaultMinLevels, categories, logContext, errorManager,
                 namedHandlers, false);
 
-        LoggingSetup.addNamedHandlersToRootHandlers(config.handlers(), namedHandlers, handlers, errorManager);
+        // named handlers contributed by extensions are not available at build time
+        LoggingSetup.addNamedHandlersToRootHandlers(config.handlers(), namedHandlers, handlers, errorManager, false);
         InitialConfigurator.DELAYED_HANDLER.setAutoFlush(false);
         InitialConfigurator.DELAYED_HANDLER.setBuildTimeHandlers(handlers.toArray(LogContextInitializer.NO_HANDLERS));
     }

@@ -1,5 +1,6 @@
 package io.quarkus.annotation.processor.documentation.config.formatter;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -7,6 +8,7 @@ import org.asciidoctor.Asciidoctor.Factory;
 import org.asciidoctor.Options;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import io.quarkus.annotation.processor.documentation.config.discovery.ParsedJavadoc;
@@ -432,6 +434,99 @@ public class JavadocToAsciidocTransformerConfigItemTest {
         ParsedJavadoc parsed = JavadocUtil.parseConfigItemJavadoc(javaDoc);
         final String asciiDoc = JavadocToAsciidocTransformer.toAsciidoc(parsed.description(), parsed.format());
         final String actual = Factory.create().convert(asciiDoc, Options.builder().build());
+        assertEquals(expected, actual);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "{x}", "{{x}}", "x{y}", "{x}\n{y}", "{@code x}" })
+    void codeWithBalancedBraces(String code) {
+        ParsedJavadoc parsed = JavadocUtil.parseConfigItemJavadoc("Use {@code " + code + "} here.");
+        String asciiDoc = JavadocToAsciidocTransformer.toAsciidoc(parsed.description(), parsed.format());
+        String actual = Factory.create().convert(asciiDoc, Options.builder().build());
+
+        assertThat(actual).isEqualTo("<div class=\"paragraph\">\n<p>Use <code>" + code
+                + "</code> here.</p>\n</div>");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void balancedBracesInMultipleInlineTags(boolean inlineMacroMode) {
+        ParsedJavadoc parsed = JavadocUtil.parseConfigItemJavadoc(
+                "Use {@code {one}} and {@literal {two}}, then {@link #getValue}.");
+        String asciiDoc = JavadocToAsciidocTransformer.toAsciidoc(parsed.description(), parsed.format(), inlineMacroMode);
+        String actual = Factory.create().convert(asciiDoc, Options.builder().build());
+
+        assertThat(actual).isEqualTo("<div class=\"paragraph\">\n<p>Use <code>{one}</code> and <code>{two}</code>, "
+                + "then <code>get-value</code>.</p>\n</div>");
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', textBlock = """
+            Use {@code x} here. | Use `x` here.
+            Use {@literal x} here. | Use `x` here.
+            Use {@link #getValue} here. | Use `get-value` here.
+            Use {@unknown x} here. | Use x here.
+            Use {@code x here. | Use ++{++@code x here.
+            Use {@code {x} here. | Use `++{++x` here.
+            Use {@code {x} then {@code y}. | Use `++{++x` then `y`.
+            """)
+    void preserveInlineTagsWithoutBalancedBraces(String javadoc, String expected) {
+        ParsedJavadoc parsed = JavadocUtil.parseConfigItemJavadoc(javadoc);
+
+        assertThat(JavadocToAsciidocTransformer.toAsciidoc(parsed.description(), parsed.format())).isEqualTo(expected);
+    }
+
+    @Test
+    public void escapeDoubleAngleBracketsInCodeTag() {
+        final String javaDoc = "Use {@code <<empty>>} here.";
+        final String expectedAsciidoc = "Use `++<<++empty>>` here.";
+
+        ParsedJavadoc parsed = JavadocUtil.parseConfigItemJavadoc(javaDoc);
+        final String asciiDoc = JavadocToAsciidocTransformer.toAsciidoc(parsed.description(), parsed.format());
+        assertEquals(expectedAsciidoc, asciiDoc);
+
+        final String actual = Factory.create().convert(asciiDoc, Options.builder().build());
+        final String expected = "<div class=\"paragraph\">\n<p>Use <code>&lt;&lt;empty&gt;&gt;</code> here.</p>\n</div>";
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    public void escapeDoubleAngleBracketsInHtmlCodeTag() {
+        final String javaDoc = "Use <code>&lt;&lt;empty&gt;&gt;</code> here.";
+        final String expectedAsciidoc = "Use `++<<++empty>>` here.";
+
+        ParsedJavadoc parsed = JavadocUtil.parseConfigItemJavadoc(javaDoc);
+        final String asciiDoc = JavadocToAsciidocTransformer.toAsciidoc(parsed.description(), parsed.format());
+        assertEquals(expectedAsciidoc, asciiDoc);
+
+        final String actual = Factory.create().convert(asciiDoc, Options.builder().build());
+        final String expected = "<div class=\"paragraph\">\n<p>Use <code>&lt;&lt;empty&gt;&gt;</code> here.</p>\n</div>";
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    public void escapeDoubleAngleBracketsInTableCell() {
+        final String javaDoc = "<table><tr><th>Name</th></tr><tr><td>{@code <<empty>>}</td></tr></table>";
+
+        ParsedJavadoc parsed = JavadocUtil.parseConfigItemJavadoc(javaDoc);
+        final String asciiDoc = JavadocToAsciidocTransformer.toAsciidoc(parsed.description(), parsed.format());
+
+        final String actual = Factory.create().convert(asciiDoc, Options.builder().build());
+        assertEquals(false, actual.contains("xref"));
+        assertEquals(true, actual.contains("&lt;&lt;empty&gt;&gt;"));
+    }
+
+    @Test
+    public void doNotEscapeSingleAngleBracket() {
+        final String javaDoc = "A <code>List&lt;String&gt;</code> and a {@code List<String>}.";
+        final String expectedAsciidoc = "A `List<String>` and a `List<String>`.";
+
+        ParsedJavadoc parsed = JavadocUtil.parseConfigItemJavadoc(javaDoc);
+        final String asciiDoc = JavadocToAsciidocTransformer.toAsciidoc(parsed.description(), parsed.format());
+        assertEquals(expectedAsciidoc, asciiDoc);
+
+        final String actual = Factory.create().convert(asciiDoc, Options.builder().build());
+        final String expected = "<div class=\"paragraph\">\n<p>A <code>List&lt;String&gt;</code> and a <code>List&lt;String&gt;</code>.</p>\n</div>";
         assertEquals(expected, actual);
     }
 

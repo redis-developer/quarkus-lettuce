@@ -46,13 +46,13 @@ import io.quarkus.arc.deployment.BeanContainerBuildItem;
 import io.quarkus.arc.deployment.BuildTimeConditionBuildItem;
 import io.quarkus.arc.deployment.GeneratedBeanBuildItem;
 import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
+import io.quarkus.core.Phase;
+import io.quarkus.core.deployment.service.ServiceRegistrar;
 import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
-import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Produce;
-import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.AdditionalApplicationArchiveMarkerBuildItem;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.ServiceStartBuildItem;
@@ -376,6 +376,8 @@ public class ResteasyReactiveCommonProcessor {
                 LEGACY_READER_PRIORITY, true));
         readers.produce(new MessageBodyReaderOverrideBuildItem("org.keycloak.admin.client.JacksonProvider",
                 LEGACY_READER_PRIORITY, true));
+        readers.produce(new MessageBodyReaderOverrideBuildItem("org.keycloak.admin.client.jackson3.JacksonProvider3",
+                LEGACY_READER_PRIORITY, true));
 
         writers.produce(new MessageBodyWriterOverrideBuildItem(
                 "org.jboss.resteasy.plugins.providers.jackson.ResteasyJackson2Provider", LEGACY_WRITER_PRIORITY, true));
@@ -384,6 +386,8 @@ public class ResteasyReactiveCommonProcessor {
         writers.produce(new MessageBodyWriterOverrideBuildItem("com.fasterxml.jackson.jakarta.rs.json.JacksonJaxbJsonProvider",
                 LEGACY_WRITER_PRIORITY, true));
         writers.produce(new MessageBodyWriterOverrideBuildItem("org.keycloak.admin.client.JacksonProvider",
+                LEGACY_WRITER_PRIORITY, true));
+        writers.produce(new MessageBodyWriterOverrideBuildItem("org.keycloak.admin.client.jackson3.JacksonProvider3",
                 LEGACY_WRITER_PRIORITY, true));
     }
 
@@ -410,9 +414,10 @@ public class ResteasyReactiveCommonProcessor {
         parameterContainersBuildItemBuildProducer.produce(new ParameterContainersBuildItem(res));
     }
 
-    @Record(ExecutionTime.STATIC_INIT)
     @BuildStep
-    public void setupBlockingOperationSupport(ResteasyReactiveCommonRecorder recorder) {
-        recorder.setupBlockingOperationSupport();
+    public void setupBlockingOperationSupport(ServiceRegistrar serviceRegistrar) {
+        serviceRegistrar.forService("io.quarkus.rest-common.blocking-operation-support")
+                .atPhase(Phase.STATIC_INIT)
+                .onStart(ctx -> ResteasyReactiveCommonRecorder.setupBlockingOperationSupport());
     }
 }

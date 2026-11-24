@@ -5,6 +5,7 @@ import static io.quarkus.credentials.CredentialsProvider.USER_PROPERTY_NAME;
 import static io.quarkus.reactive.datasource.runtime.UnitisedTime.unitised;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -13,9 +14,12 @@ import java.util.function.UnaryOperator;
 
 import org.jboss.logging.Logger;
 
+import io.quarkus.arc.ActiveResult;
 import io.quarkus.credentials.CredentialsProvider;
 import io.quarkus.credentials.runtime.CredentialsProviderFinder;
+import io.quarkus.datasource.common.runtime.DataSourceUtil;
 import io.quarkus.datasource.runtime.DataSourceRuntimeConfig;
+import io.quarkus.datasource.runtime.DataSourcesRuntimeConfig;
 import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.tls.TlsConfiguration;
 import io.quarkus.tls.TlsConfigurationRegistry;
@@ -26,6 +30,7 @@ import io.quarkus.vertx.core.runtime.config.PfxConfiguration;
 import io.vertx.core.Future;
 import io.vertx.core.net.ClientSSLOptions;
 import io.vertx.core.net.JksOptions;
+import io.vertx.core.net.NetClientOptions;
 import io.vertx.core.net.PemKeyCertOptions;
 import io.vertx.core.net.PemTrustOptions;
 import io.vertx.core.net.PfxOptions;
@@ -42,6 +47,23 @@ public final class ReactivePoolUtil {
     private static final Logger log = Logger.getLogger(ReactivePoolUtil.class);
 
     private ReactivePoolUtil() {
+    }
+
+    /**
+     * Whether the pool of the given data source is active, i.e. the data source is not deactivated and has a
+     * reactive URL.
+     */
+    public static ActiveResult checkActive(String dataSourceName, DataSourcesRuntimeConfig runtimeConfig,
+            DataSourcesReactiveRuntimeConfig reactiveRuntimeConfig) {
+        Optional<Boolean> active = runtimeConfig.dataSources().get(dataSourceName).active();
+        if (active.isPresent() && !active.get()) {
+            return ActiveResult.inactive(DataSourceUtil.dataSourceInactiveReasonDeactivated(dataSourceName));
+        }
+        if (reactiveRuntimeConfig.dataSources().get(dataSourceName).reactive().url().isEmpty()) {
+            return ActiveResult.inactive(DataSourceUtil.dataSourceInactiveReasonUrlMissing(dataSourceName,
+                    "reactive.url"));
+        }
+        return ActiveResult.active();
     }
 
     /**
@@ -91,6 +113,43 @@ public final class ReactivePoolUtil {
         }
 
         return poolOptions;
+    }
+
+    /**
+     * Build the {@link NetClientOptions} used by the pool to open connections, from the TCP keep-alive settings of the
+     * generic reactive datasource config.
+     * <p>
+     * When none of these settings is configured, the result is equivalent to the default {@link NetClientOptions}.
+     */
+    public static NetClientOptions toNetClientOptions(DataSourceReactiveRuntimeConfig config) {
+        NetClientOptions netClientOptions = new NetClientOptions();
+
+        netClientOptions.setTcpKeepAlive(config.tcpKeepAlive());
+        if (config.tcpKeepAliveIdle().isPresent()) {
+            netClientOptions.setTcpKeepAliveIdleSeconds(toSeconds("tcp-keep-alive-idle", config.tcpKeepAliveIdle().get()));
+        }
+        if (config.tcpKeepAliveInterval().isPresent()) {
+            netClientOptions.setTcpKeepAliveIntervalSeconds(
+                    toSeconds("tcp-keep-alive-interval", config.tcpKeepAliveInterval().get()));
+        }
+        if (config.tcpKeepAliveCount().isPresent()) {
+            int count = config.tcpKeepAliveCount().getAsInt();
+            if (count < 1) {
+                throw new ConfigurationException("tcp-keep-alive-count must be strictly positive, got " + count);
+            }
+            netClientOptions.setTcpKeepAliveCount(count);
+        }
+
+        return netClientOptions;
+    }
+
+    private static int toSeconds(String property, Duration duration) {
+        long seconds = duration.toSeconds();
+        if (seconds < 1 || seconds > Integer.MAX_VALUE) {
+            throw new ConfigurationException(property + " must be between 1 second and " + Integer.MAX_VALUE
+                    + " seconds, got " + duration);
+        }
+        return (int) seconds;
     }
 
     /**

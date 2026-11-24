@@ -173,6 +173,11 @@ public interface LogRuntimeConfig {
         String DEFAULT_LOG_FILE_NAME = "quarkus.log";
 
         /**
+         * Default log format.
+         */
+        String DEFAULT_FORMAT = "%d{yyyy-MM-dd HH:mm:ss,SSS} %h %N[%i] %-5p [%c{3.}] (%t) %s%e%n";
+
+        /**
          * If file logging should be enabled
          */
         @WithDefault("false")
@@ -181,7 +186,7 @@ public interface LogRuntimeConfig {
         /**
          * The log format
          */
-        @WithDefault("%d{yyyy-MM-dd HH:mm:ss,SSS} %h %N[%i] %-5p [%c{3.}] (%t) %s%e%n")
+        @WithDefault(DEFAULT_FORMAT)
         String format();
 
         /**
@@ -266,6 +271,10 @@ public interface LogRuntimeConfig {
     }
 
     interface ConsoleConfig {
+        /**
+         * Default log format.
+         */
+        String DEFAULT_FORMAT = "%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c] (%t) %s%e%n";
 
         /**
          * If console logging should be enabled
@@ -283,7 +292,7 @@ public interface LogRuntimeConfig {
          * The log format. Note that this value is ignored if an extension is present that takes
          * control of console formatting (e.g., an XML or JSON-format extension).
          */
-        @WithDefault("%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c] (%t) %s%e%n")
+        @WithDefault(DEFAULT_FORMAT)
         String format();
 
         /**
@@ -313,6 +322,11 @@ public interface LogRuntimeConfig {
     }
 
     interface SyslogConfig {
+        /**
+         * Default log format.
+         */
+        String DEFAULT_FORMAT = "%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c] (%t) %s%e%n";
+
         /**
          * If syslog logging should be enabled
          */
@@ -378,7 +392,7 @@ public interface LogRuntimeConfig {
         /**
          * The log message format
          */
-        @WithDefault("%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c] (%t) %s%e%n")
+        @WithDefault(DEFAULT_FORMAT)
         String format();
 
         /**
@@ -399,6 +413,8 @@ public interface LogRuntimeConfig {
          * <p>
          * If not set, the default value is {@code 2048} when {@code sys-log-type} is {@code rfc5424} (which is the default)
          * and {@code 1024} when {@code sys-log-type} is {@code rfc3164}
+         * <p>
+         * The minimum value is {@code 128} bytes. A smaller value is replaced by {@code 128}.
          */
         Optional<MemorySize> maxLength();
 
@@ -423,6 +439,10 @@ public interface LogRuntimeConfig {
     }
 
     interface SocketConfig {
+        /**
+         * Default log format.
+         */
+        String DEFAULT_FORMAT = "%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c] (%t) %s%e%n";
 
         /**
          * If socket logging should be enabled
@@ -455,7 +475,7 @@ public interface LogRuntimeConfig {
         /**
          * The log message format
          */
-        @WithDefault("%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c] (%t) %s%e%n")
+        @WithDefault(DEFAULT_FORMAT)
         String format();
 
         /**

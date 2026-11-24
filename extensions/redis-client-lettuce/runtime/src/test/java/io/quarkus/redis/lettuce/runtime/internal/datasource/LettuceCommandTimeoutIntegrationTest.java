@@ -10,7 +10,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisCommandTimeoutException;
+import io.lettuce.core.RedisURI;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.stream.StreamMessage;
 import io.quarkus.redis.datasource.stream.XGroupCreateArgs;
@@ -39,7 +41,8 @@ class LettuceCommandTimeoutIntegrationTest extends CommandsTestBase {
     @BeforeEach
     void connectWithShortCommandTimeout() {
         factory = new LettuceConnectionFactory("timeout-test", lettuceResources.clientResources(),
-                "redis://" + REDIS.getHost() + ":" + REDIS.getFirstMappedPort(), COMMAND_TIMEOUT);
+                RedisURI.create(REDIS.getHost(), REDIS.getFirstMappedPort()), ClientOptions.create(), COMMAND_TIMEOUT,
+                COMMAND_TIMEOUT);
         conn = factory.connect();
         pool = new LettuceConnectionPool(factory::connectAsync, 1, 1, 0);
         ds = new LettuceBlockingRedisDataSourceImpl(
@@ -95,6 +98,17 @@ class LettuceCommandTimeoutIntegrationTest extends CommandsTestBase {
         start = System.nanoTime();
         read = stream.xreadgroup("g1", "c1", key, ">", new XReadGroupArgs().block(block));
         assertThat(read).isEmpty();
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(block.minusMillis(50));
+    }
+
+    @Test
+    void rawBlockingStreamReadOutlivingTheCommandTimeoutStillCompletes() {
+        // Sent through execute(...), XREAD with BLOCK is the same blocking command: bounded by its BLOCK duration,
+        // not by the command timeout.
+        Duration block = COMMAND_TIMEOUT.multipliedBy(2);
+
+        long start = System.nanoTime();
+        assertThat(ds.execute("XREAD", "BLOCK", String.valueOf(block.toMillis()), "STREAMS", key, "$")).isNull();
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(block.minusMillis(50));
     }
 

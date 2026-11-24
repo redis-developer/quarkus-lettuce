@@ -14,6 +14,7 @@ import java.util.function.Supplier;
 
 import org.jboss.logging.Logger;
 
+import io.lettuce.core.RedisFuture;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.autosuggest.AutoSuggestCommands;
@@ -162,9 +163,9 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         nonNull(tx, "tx");
         LettuceConnection conn = acquire();
         return releasing(conn, () -> {
-            LettuceTransactionHolder holder = new LettuceTransactionHolder();
+            LettuceTransactionHolder holder = new LettuceTransactionHolder(conn);
             BlockingTransactionalRedisDataSourceImpl source = transactionalSource(conn, holder);
-            LettuceResult.toBlocking(conn.multi(), timeout);
+            multi(conn);
             runTxBlock(conn, source, () -> tx.accept(source));
             return assembleResult(conn, holder, source.discarded());
         });
@@ -177,11 +178,10 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         doesNotContainNull(watchedKeys, "watchedKeys");
         LettuceConnection conn = acquire();
         return releasing(conn, () -> {
-            LettuceTransactionHolder holder = new LettuceTransactionHolder();
+            LettuceTransactionHolder holder = new LettuceTransactionHolder(conn);
             BlockingTransactionalRedisDataSourceImpl source = transactionalSource(conn, holder);
-            LettuceResult.toBlocking(conn.watch(LettuceReactiveRedisDataSourceImpl.encodeKeys(watchedKeys)),
-                    timeout);
-            LettuceResult.toBlocking(conn.multi(), timeout);
+            watch(conn, watchedKeys);
+            multi(conn);
             runTxBlock(conn, source, () -> tx.accept(source));
             return assembleResult(conn, holder, source.discarded());
         });
@@ -196,25 +196,20 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
         doesNotContainNull(watchedKeys, "watchedKeys");
         LettuceConnection conn = acquire();
         return releasing(conn, () -> {
-            LettuceTransactionHolder holder = new LettuceTransactionHolder();
+            LettuceTransactionHolder holder = new LettuceTransactionHolder(conn);
             LettuceReactiveRedisDataSourceImpl pinnedReactive = reactive.pinnedTo(conn);
             BlockingTransactionalRedisDataSourceImpl source = new BlockingTransactionalRedisDataSourceImpl(
                     new LettuceReactiveTransactionalRedisDataSourceImpl(pinnedReactive, holder), timeout);
 
-            LettuceResult.toBlocking(conn.watch(LettuceReactiveRedisDataSourceImpl.encodeKeys(watchedKeys)),
-                    timeout);
+            watch(conn, watchedKeys);
             I input;
             try {
                 input = preTx.apply(pinnedTo(pinnedReactive, timeout));
-            } catch (RuntimeException e) {
-                try {
-                    LettuceResult.toBlocking(conn.unwatch(), timeout);
-                } catch (RuntimeException e2) {
-                    e.addSuppressed(e2);
-                }
+            } catch (RuntimeException | Error e) {
+                undo(conn, conn::unwatch, e);
                 throw e;
             }
-            LettuceResult.toBlocking(conn.multi(), timeout);
+            multi(conn);
             runTxBlock(conn, source, () -> tx.accept(input, source));
             if (source.discarded()) {
                 return OptimisticLockingTransactionResultImpl.discarded(input);
@@ -234,10 +229,10 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
      * of {@link LettuceConnection#TRANSACTIONS_NOT_SUPPORTED_ON_CLUSTER}.
      */
     private LettuceConnection acquire() {
-        if (reactive.getConnection().isCluster()) {
+        if (reactive.isCluster()) {
             throw new UnsupportedOperationException(LettuceConnection.TRANSACTIONS_NOT_SUPPORTED_ON_CLUSTER);
         }
-        return pinned ? reactive.getConnection() : reactive.acquireConnection(timeout);
+        return pinned ? reactive.pinnedConnection() : reactive.acquireConnection(timeout);
     }
 
     /**
@@ -291,23 +286,61 @@ public class LettuceBlockingRedisDataSourceImpl implements RedisDataSource {
     }
 
     /**
-     * Runs the user transaction block. On failure, issues {@code DISCARD} (unless the user already
-     * discarded) and re-throws the original exception, attaching any {@code DISCARD} failure as
+     * Issues {@code WATCH}. A failed {@code WATCH} is undone with {@code UNWATCH}: the server may have registered the
+     * watch although the reply did not arrive.
+     */
+    private void watch(LettuceConnection conn, String[] watchedKeys) {
+        try {
+            LettuceResult.toBlocking(conn.watch(LettuceReactiveRedisDataSourceImpl.encodeKeys(watchedKeys)), timeout);
+        } catch (RuntimeException | Error e) {
+            undo(conn, conn::unwatch, e);
+            throw e;
+        }
+    }
+
+    /**
+     * Opens the transaction. A failed {@code MULTI} is undone with {@code DISCARD}: the server may have entered the
+     * transaction although the reply did not arrive (a timeout, for instance), and every later command on the
+     * connection would then be queued instead of executed.
+     */
+    private void multi(LettuceConnection conn) {
+        try {
+            LettuceResult.toBlocking(conn.multi(), timeout);
+        } catch (RuntimeException | Error e) {
+            undo(conn, conn::discard, e);
+            throw e;
+        }
+    }
+
+    /**
+     * Runs the user transaction block. On failure, an {@link Error} included, issues {@code DISCARD} (unless the
+     * user already discarded) and re-throws the original exception, attaching any {@code DISCARD} failure as
      * suppressed. Mirrors the Vert.x backend's abort path.
      */
     private void runTxBlock(LettuceConnection conn,
             BlockingTransactionalRedisDataSourceImpl source, Runnable block) {
         try {
             block.run();
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             if (!source.discarded()) {
-                try {
-                    LettuceResult.toBlocking(conn.discard(), timeout);
-                } catch (RuntimeException e2) {
-                    e.addSuppressed(e2);
-                }
+                undo(conn, conn::discard, e);
             }
             throw e;
+        }
+    }
+
+    /**
+     * Undoes a transaction step after {@code failure}, with {@code DISCARD} (which also unwatches) or
+     * {@code UNWATCH}: best effort, the failure of the undo is attached to {@code failure} as suppressed and the
+     * connection is marked broken, so that the pool closes it instead of handing it to the next borrower in an
+     * unknown state.
+     */
+    private void undo(LettuceConnection conn, Supplier<RedisFuture<String>> command, Throwable failure) {
+        try {
+            LettuceResult.toBlocking(command.get(), timeout);
+        } catch (RuntimeException | Error e) {
+            failure.addSuppressed(e);
+            conn.markBroken();
         }
     }
 

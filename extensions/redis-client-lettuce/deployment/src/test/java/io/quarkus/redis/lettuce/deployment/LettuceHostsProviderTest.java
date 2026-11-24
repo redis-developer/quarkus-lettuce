@@ -26,9 +26,9 @@ import io.vertx.redis.client.Command;
  * the URI the {@link RedisHostsProvider} bean of that name returns, as the Vert.x client does: the data source and
  * the Lettuce beans of the client work, on the database of the provided URI.
  * <p>
- * The provider of a data source client is also called by the Vert.x client still created for it, from a
- * {@code Phase.DATA} service that runs before the synthetic beans initialized at runtime are usable, so it must not
- * inject such beans. {@link LettuceHostsProviderInitOrderTest} covers the call order of the Lettuce backend alone.
+ * Both backends call the provider from a {@code Phase.DATA} service that runs before the synthetic beans initialized
+ * at runtime are usable, so it must not inject such beans. {@link LettuceHostsProviderInjectionTest} covers a
+ * provider with dependencies, called by the Lettuce backend alone.
  */
 @QuarkusTestResource(RedisTestResource.class)
 public class LettuceHostsProviderTest {

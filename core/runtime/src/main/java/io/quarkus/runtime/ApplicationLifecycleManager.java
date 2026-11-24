@@ -22,13 +22,9 @@ import org.wildfly.common.lock.Locks;
 import io.quarkus.bootstrap.logging.InitialConfigurator;
 import io.quarkus.bootstrap.runner.RunnerClassLoader;
 import io.quarkus.runtime.configuration.ConfigurationException;
-import io.quarkus.runtime.graal.DiagnosticPrinter;
-import io.quarkus.runtime.graal.GraalVM;
 import io.quarkus.runtime.util.ExceptionUtil;
 import io.quarkus.runtime.util.StringUtil;
 import io.smallrye.config.ConfigValidationException;
-import sun.misc.Signal;
-import sun.misc.SignalHandler;
 
 /**
  * Manages the lifecycle of a Quarkus application.
@@ -65,14 +61,17 @@ public class ApplicationLifecycleManager {
         public void accept(Boolean t) {
         }
     };
+    private static final BiConsumer<Integer, Throwable> NOOP_EXIT_CODE_HANDLER = new BiConsumer<>() {
+        @Override
+        public void accept(Integer exitCode, Throwable cause) {
+        }
+    };
     private static volatile BiConsumer<Integer, Throwable> defaultExitCodeHandler = MAIN_EXIT_CODE_HANDLER;
 
     private ApplicationLifecycleManager() {
 
     }
     // WARNING: do not inject a logger here, it's too early: the log manager has not been properly set up yet
-
-    private static final String DISABLE_SIGNAL_HANDLERS = "DISABLE_SIGNAL_HANDLERS";
 
     //guard for all state
     private static final Lock stateLock = Locks.reentrantLock();
@@ -88,14 +87,6 @@ public class ApplicationLifecycleManager {
 
     private static final boolean IS_WINDOWS = System.getProperty("os.name").toLowerCase(Locale.ENGLISH).contains("windows");
     private static final boolean IS_MAC = System.getProperty("os.name").toLowerCase(Locale.ENGLISH).contains("mac");
-    /*
-     * After GraalVM/Mandrel 24.2, JCMD becomes available. The Quarkus thread dumper handles SIGQUIT which
-     * interferes with JCMD. To avoid this problem, Quarkus must disable its signal handler and instead use the thread
-     * dumper built into GraalVM for versions beyond 24.2.
-     */
-    private static final boolean shouldRegisterHandler = ImageMode.current() == ImageMode.NATIVE_BUILD
-            && GraalVM.Version.getCurrent().compareTo(GraalVM.Version.VERSION_24_2_0) < 0;
-
     public static final String QUARKUS_APPCDS_GENERATE_PROP = "quarkus.appcds.generate";
 
     public static void run(Application application, String... args) {
@@ -112,7 +103,7 @@ public class ApplicationLifecycleManager {
             alreadyStarted = application.isStarted();
             alreadyStartedCallback.accept(alreadyStarted);
             if (shutdownHookThread == null) {
-                registerHooks(exitCodeHandler == null ? defaultExitCodeHandler : exitCodeHandler);
+                registerHooks();
             }
             if (currentApplication != null && !shutdownRequested) {
                 throw new IllegalStateException("Quarkus already running");
@@ -287,29 +278,13 @@ public class ApplicationLifecycleManager {
         }
     }
 
-    private static void registerHooks(final BiConsumer<Integer, Throwable> exitCodeHandler) {
-        if (shouldRegisterHandler && ImageMode.current() == ImageMode.NATIVE_RUN
-                && System.getenv(DISABLE_SIGNAL_HANDLERS) == null) {
-            registerSignalHandlers(exitCodeHandler);
-        }
+    private static void registerHooks() {
+        /*
+         * After GraalVM/Mandrel 24.2, JCMD becomes available. The Quarkus thread dumper handles SIGQUIT which
+         * interferes with JCMD. Use the thread dumper built into GraalVM instead of registering a signal handler.
+         */
         shutdownHookThread = new ShutdownHookThread();
         Runtime.getRuntime().addShutdownHook(shutdownHookThread);
-    }
-
-    private static void registerSignalHandlers(final BiConsumer<Integer, Throwable> exitCodeHandler) {
-        final SignalHandler diagnosticsHandler = new SignalHandler() {
-            @Override
-            public void handle(Signal signal) {
-                DiagnosticPrinter.printDiagnostics(System.out);
-            }
-        };
-        // the HUP and QUIT signals are not defined for the Windows OpenJDK implementation:
-        // https://hg.openjdk.java.net/jdk8u/jdk8u-dev/hotspot/file/7d5c800dae75/src/os/windows/vm/jvm_windows.cpp
-        if (IS_WINDOWS) {
-            handleSignal("BREAK", diagnosticsHandler);
-        } else {
-            handleSignal("QUIT", diagnosticsHandler);
-        }
     }
 
     public static Application getCurrentApplication() {
@@ -376,6 +351,20 @@ public class ApplicationLifecycleManager {
         BiConsumer<Integer, Throwable> biConsumer = defaultExitCodeHandler == null ? null
                 : (exitCode, cause) -> defaultExitCodeHandler.accept(exitCode);
         setDefaultExitCodeHandler(biConsumer);
+    }
+
+    /**
+     * Replaces the default exit code handler with one that ignores the exit code.
+     * <p>
+     * Dev mode calls this method (by reflection, on the copy of this class loaded by the runtime class loader) once it
+     * has stopped the application, to release the handler it had installed. The handler is replaced with one that does
+     * nothing rather than with the default {@code System.exit} one because the main thread invokes the handler after
+     * the application is stopped, which can be after dev mode has released its own handler.
+     */
+    @SuppressWarnings("unused")
+    // Used by IsolatedDevModeMain via reflection
+    public static void setNoopDefaultExitCodeHandler() {
+        defaultExitCodeHandler = NOOP_EXIT_CODE_HANDLER;
     }
 
     @SuppressWarnings("unused")
@@ -478,14 +467,6 @@ public class ApplicationLifecycleManager {
         @Override
         public String toString() {
             return getName();
-        }
-    }
-
-    private static void handleSignal(final String signal, final SignalHandler handler) {
-        try {
-            Signal.handle(new Signal(signal), handler);
-        } catch (IllegalArgumentException ignored) {
-            // Do nothing
         }
     }
 

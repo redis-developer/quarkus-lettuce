@@ -84,7 +84,8 @@ public interface ResolvedDependency extends Dependency {
         }
         if (paths.isSinglePath()) {
             final Path p = paths.getSinglePath();
-            return isJar() ? PathTree.ofDirectoryOrArchive(p, pathFilter) : PathTree.ofDirectoryOrFile(p, pathFilter);
+            return isClasspathArchive() ? PathTree.ofDirectoryOrArchive(p, pathFilter)
+                    : PathTree.ofDirectoryOrFile(p, pathFilter);
         }
         final PathTree[] trees = new PathTree[paths.size()];
         int i = 0;
@@ -129,29 +130,9 @@ public interface ResolvedDependency extends Dependency {
                 case "quarkus-qute" -> "io.quarkus.qute.runtime";
                 default -> null;
             };
-            case "io.smallrye.config" -> switch (artifactId) {
-                case "smallrye-config-core" -> "io.smallrye.config";
-                case "smallrye-config" -> "io.smallrye.config.inject";
-                default -> null;
-            };
-            case "io.smallrye.certs" -> switch (artifactId) {
-                // https://github.com/smallrye/smallrye-certificate-generator/issues/41
-                case "smallrye-private-key-pem-parser" -> "io.smallrye.certs.pem.private_keys";
-                default -> null;
-            };
-            case "org.jboss.logging" -> switch (artifactId) {
-                // https://github.com/jboss-logging/commons-logging-jboss-logging/issues/20
-                case "commons-logging-jboss-logging" -> "org.apache.commons.logging";
-                default -> null;
-            };
             case "org.jboss.slf4j" -> switch (artifactId) {
                 // https://github.com/jboss-logging/slf4j-jboss-logmanager/issues/69
                 case "slf4j-jboss-logmanager" -> "org.jboss.logmanager.slf4j";
-                default -> null;
-            };
-            case "org.eclipse.microprofile.config" -> switch (artifactId) {
-                // https://github.com/microprofile/microprofile-config/issues/768
-                case "microprofile-config-api" -> "org.eclipse.microprofile.config";
                 default -> null;
             };
             case "org.eclipse.microprofile.rest.client" -> switch (artifactId) {
@@ -199,10 +180,10 @@ public interface ResolvedDependency extends Dependency {
             moduleName = finalNameBuilder.toString();
         }
         if (classifier != null && !classifier.isEmpty()) {
-            LogHolder.log.warnf("Artifact %s:%s:%s does not have a defined module name; using computed name %s", groupId,
+            LogHolder.log.infof("Artifact %s:%s:%s does not have a defined module name; using computed name %s", groupId,
                     artifactId, classifier, moduleName);
         } else {
-            LogHolder.log.warnf("Artifact %s:%s does not have a defined module name; using computed name %s", groupId,
+            LogHolder.log.infof("Artifact %s:%s does not have a defined module name; using computed name %s", groupId,
                     artifactId, moduleName);
         }
         return moduleName;

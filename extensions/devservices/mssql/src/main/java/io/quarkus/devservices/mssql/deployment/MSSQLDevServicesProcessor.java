@@ -20,6 +20,7 @@ import io.quarkus.deployment.builditem.DevServicesSharedNetworkBuildItem;
 import io.quarkus.deployment.dev.devservices.DevServicesConfig;
 import io.quarkus.devservices.common.ComposeLocator;
 import io.quarkus.devservices.common.ConfigureUtil;
+import io.quarkus.devservices.common.ContainerLocator;
 import io.quarkus.devservices.common.DevServicesHostUtil;
 import io.quarkus.devservices.common.JBossLoggingConsumer;
 import io.quarkus.devservices.common.Labels;
@@ -40,7 +41,11 @@ public class MSSQLDevServicesProcessor {
      */
     private static final String DEFAULT_USERNAME = "sa";
 
+    static final String DEV_SERVICE_LABEL = "quarkus-dev-service-mssql";
+
     private static final MSSQLDatasourceServiceConfigurator configurator = new MSSQLDatasourceServiceConfigurator();
+    private static final ContainerLocator mssqlContainerLocator = ContainerLocator
+            .locateContainerWithLabels(MS_SQL_SERVER_PORT, true, DEV_SERVICE_LABEL);
 
     @BuildStep
     DevServicesDatasourceProviderBuildItem setupMSSQL(
@@ -63,7 +68,11 @@ public class MSSQLDevServicesProcessor {
                         containerConfig.getFixedExposedPort(),
                         composeProjectBuildItem.getDefaultNetworkId(),
                         !devServicesSharedNetworkBuildItem.isEmpty());
-                startupTimeout.ifPresent(container::withStartupTimeout);
+                startupTimeout.ifPresent(timeout -> {
+                    container.withStartupTimeout(timeout);
+                    // JdbcDatabaseContainer waits for a JDBC connection with its own timeout, not the wait strategy's
+                    container.withStartupTimeoutSeconds((int) timeout.toSeconds());
+                });
 
                 // Workaround for https://github.com/microsoft/mssql-docker/issues/954
                 // SQL Server 2025 crashes when the visible CPU count is not a power of 2.
@@ -78,6 +87,8 @@ public class MSSQLDevServicesProcessor {
                 container.withPassword(effectivePassword)
                         .withReuse(containerConfig.isReuse());
                 Labels.addDataSourceLabel(container, datasourceName);
+                ConfigureUtil.configureSharedServiceLabel(container, launchMode, DEV_SERVICE_LABEL,
+                        containerConfig.getServiceName());
                 Volumes.addVolumes(container, containerConfig.getVolumes());
 
                 container.withEnv(containerConfig.getContainerEnv());
@@ -97,6 +108,14 @@ public class MSSQLDevServicesProcessor {
                 }
 
                 return new DatasourceStartableContainer<>(container);
+            }
+
+            @Override
+            public Optional<DevServicesDatasourceProvider.RunningDevServicesDatasource> findRunningSharedDatasource(
+                    LaunchMode launchMode, DevServicesDatasourceContainerConfig containerConfig) {
+                return mssqlContainerLocator
+                        .locateContainer(containerConfig.getServiceName(), containerConfig.isShared(), launchMode)
+                        .map(containerAddress -> configurator.composeRunningService(containerAddress, containerConfig));
             }
 
             @Override

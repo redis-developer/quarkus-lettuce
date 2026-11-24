@@ -26,6 +26,7 @@ import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
 import jakarta.validation.valueextraction.ValueExtractor;
 
+import org.hibernate.accessor.AccessorFactory;
 import org.hibernate.validator.HibernateValidatorFactory;
 import org.hibernate.validator.PredefinedScopeHibernateValidator;
 import org.hibernate.validator.PredefinedScopeHibernateValidatorConfiguration;
@@ -43,6 +44,7 @@ import io.quarkus.hibernate.validator.runtime.clockprovider.RuntimeReinitialized
 import io.quarkus.hibernate.validator.runtime.jaxrs.ResteasyConfigSupport;
 import io.quarkus.hibernate.validator.runtime.locale.LocaleResolversWrapper;
 import io.quarkus.runtime.LocalesBuildTimeConfig;
+import io.quarkus.runtime.RuntimeValue;
 import io.quarkus.runtime.ShutdownContext;
 import io.quarkus.runtime.annotations.Recorder;
 
@@ -89,7 +91,8 @@ public class HibernateValidatorRecorder {
             boolean hasXmlConfiguration,
             Optional<BiPredicate<Object, String>> attributeLoadedPredicate,
             LocalesBuildTimeConfig localesBuildTimeConfig,
-            HibernateValidatorBuildTimeConfig hibernateValidatorBuildTimeConfig) {
+            HibernateValidatorBuildTimeConfig hibernateValidatorBuildTimeConfig,
+            RuntimeValue<AccessorFactory> accessorFactory) {
         return new Function<>() {
             @Override
             public HibernateValidatorFactory apply(SyntheticCreationalContext<HibernateValidatorFactory> context) {
@@ -109,11 +112,7 @@ public class HibernateValidatorRecorder {
                     configuration.localeResolver(localeResolver);
                 }
 
-                // Filter out classes with incomplete hierarchy
-                filterIncompleteClasses(classesToBeValidated);
-
                 configuration.builtinConstraints(detectedBuiltinConstraints)
-                        .initializeBeanMetaData(classesToBeValidated)
                         // Locales, Locale ROOT means all locales in this setting.
                         .locales(localesBuildTimeConfig.locales().contains(Locale.ROOT) ? Set.of(Locale.getAvailableLocales())
                                 : localesBuildTimeConfig.locales())
@@ -210,14 +209,18 @@ public class HibernateValidatorRecorder {
                     configuration.addValueExtractor(valueExtractor);
                 }
 
+                configuration.accessorFactory(accessorFactory.getValue());
+                configuration.beanProvider(new ArcBeanProvider(Arc.container()));
+
                 Instance<ValidatorFactoryCustomizer> validatorFactoryCustomizers = context
                         .getInjectedReference(INSTANCE_VALIDATOR_FACTORY_CUSTOMER_TYPE_LITERAL);
                 for (ValidatorFactoryCustomizer validatorFactoryCustomizer : validatorFactoryCustomizers) {
                     validatorFactoryCustomizer.customize(configuration);
                 }
-
+                // Filter out classes with incomplete hierarchy
+                filterIncompleteClasses(classesToBeValidated);
+                configuration.initializeBeanMetaData(classesToBeValidated);
                 ValidatorFactory validatorFactory = configuration.buildValidatorFactory();
-
                 return validatorFactory.unwrap(HibernateValidatorFactory.class);
             }
 

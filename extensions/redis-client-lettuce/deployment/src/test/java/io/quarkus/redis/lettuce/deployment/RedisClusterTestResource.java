@@ -8,7 +8,6 @@ import java.util.stream.Collectors;
 
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
@@ -48,7 +47,7 @@ public class RedisClusterTestResource implements QuarkusTestResourceLifecycleMan
     private static final class RedisClusterContainer extends GenericContainer<RedisClusterContainer> {
 
         RedisClusterContainer(List<Integer> ports) {
-            super(DockerImageName.parse(System.getProperty("redis.base.image", "redis:8-alpine")));
+            super(RedisImage.name());
             for (int port : ports) {
                 addFixedExposedPort(port, port);
             }

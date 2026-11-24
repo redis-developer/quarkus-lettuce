@@ -3,7 +3,6 @@ package io.quarkus.redis.lettuce.deployment;
 import java.util.Map;
 
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 
@@ -16,10 +15,8 @@ public class RedisPasswordTestResource implements QuarkusTestResourceLifecycleMa
 
     public static final String PASSWORD = "s3cr3t-p4ss";
 
-    static GenericContainer<?> server = new GenericContainer<>(
-            DockerImageName.parse("redis:8-alpine"))
-            .withCommand("redis-server", "--requirepass", PASSWORD)
-            .withExposedPorts(6379);
+    static GenericContainer<?> server = RedisImage.plainServer()
+            .withCommand("redis-server", "--requirepass", PASSWORD);
 
     @Override
     public Map<String, String> start() {

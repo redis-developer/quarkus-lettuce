@@ -30,6 +30,7 @@ public interface RedisClientConfig {
      * 1 element.
      * <p>
      * The URI provided uses the following schema `redis://[username:password@][host][:port][/database]`
+     * (or `rediss://...`, `valkey://...`, `valkeys://...`, `unix://...`).
      * Use `quarkus.redis.hosts-provider-name` to provide the hosts programmatically.
      * <p>
      *
@@ -53,6 +54,15 @@ public interface RedisClientConfig {
      */
     @WithDefault("10s")
     Duration timeout();
+
+    /**
+     * The maximum delay to wait for the Redis server to confirm a pub/sub subscription ({@code SUBSCRIBE} or
+     * {@code PSUBSCRIBE}).
+     * If the confirmation is not received in time, the subscription fails and its connection is closed.
+     * Set to {@code 0} to disable the timeout.
+     */
+    @WithDefault("10s")
+    Duration subscribeTimeout();
 
     /**
      * The Redis client type.

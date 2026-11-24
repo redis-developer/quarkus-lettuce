@@ -12,7 +12,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
@@ -38,6 +37,7 @@ import io.quarkus.redis.runtime.client.RedisClientRecorder;
 import io.quarkus.redis.runtime.client.config.RedisConfig;
 import io.quarkus.redis.runtime.datasource.BlockingRedisDataSourceImpl;
 import io.quarkus.redis.runtime.datasource.ReactiveRedisDataSourceImpl;
+import io.smallrye.config.Config;
 import io.vertx.core.Vertx;
 
 public class RedisDatasourceProcessor {
@@ -69,10 +69,10 @@ public class RedisDatasourceProcessor {
                 .filter(i -> SUPPORTED_INJECTION_TYPE.contains(i.getRequiredType().name()))
                 .filter(InjectionPointInfo::isProgrammaticLookup)
                 .findAny()
-                .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, ConfigProvider.getConfig())));
+                .ifPresent(x -> names.addAll(configuredClientNames(buildTimeConfig, Config.get())));
 
         for (String name : names) {
-            request.produce(new RequestedRedisClientBuildItem(name));
+            request.produce(RequestedRedisClientBuildItem.dataSource(name));
         }
     }
 
@@ -112,8 +112,8 @@ public class RedisDatasourceProcessor {
                 });
 
         if (dataSourceProvider.isPresent()) {
-            // Another backend provides the data source services and beans; the codecs service above and the Vert.x
-            // client services and beans (see RedisClientProcessor) are kept.
+            // Another backend provides the data source services and beans; the codecs service above is kept, and
+            // the Vert.x client is only created for the clients using it (see RedisClientProcessor).
             return;
         }
 
@@ -126,10 +126,11 @@ public class RedisDatasourceProcessor {
                     .after("io.quarkus.redis.codecs")
                     .request(RedisClientConnection.class, name)
                     .require(Vertx.class)
+                    .require(RedisConfig.class)
                     .optional()
-                    .onStart((ctx, connOpt, vertx) -> connOpt.map(conn -> new ReactiveRedisDataSourceImpl(
+                    .onStart((ctx, connOpt, vertx, config) -> connOpt.map(conn -> new ReactiveRedisDataSourceImpl(
                             io.vertx.mutiny.core.Vertx.newInstance(vertx),
-                            conn.redis(), conn.api())));
+                            conn.redis(), conn.api(), config.clients().get(name).subscribeTimeout())));
 
             // Blocking data source service
             reg.forService(RedisDataSource.class, name)

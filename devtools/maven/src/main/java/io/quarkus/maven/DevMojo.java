@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -289,6 +290,13 @@ public class DevMojo extends AbstractMojo {
     @Parameter(defaultValue = "TRUE")
     private boolean deleteDevJar;
 
+    /**
+     * Whether to skip the check that the Maven version is supported by Quarkus.
+     * Using an unsupported Maven version is at your own risk.
+     */
+    @Parameter(defaultValue = "false", property = "skipMavenVersionCheck")
+    boolean skipMavenVersionCheck;
+
     @Component
     private MavenVersionEnforcer mavenVersionEnforcer;
 
@@ -500,7 +508,7 @@ public class DevMojo extends AbstractMojo {
             return;
         }
 
-        mavenVersionEnforcer.ensureMavenVersion(getLog(), session);
+        mavenVersionEnforcer.ensureMavenVersion(getLog(), session, skipMavenVersionCheck);
 
         initToolchain();
 
@@ -758,16 +766,18 @@ public class DevMojo extends AbstractMojo {
                         if (goal.equals(QUARKUS_GENERATE_CODE_GOAL) && p.getId().equals(quarkusPluginId)) {
                             var clone = e.clone();
                             clone.setGoals(List.of(QUARKUS_GENERATE_CODE_GOAL));
-                            // this will schedule it before the compile phase goals
+                            // the lowest priority sorts it before the compile phase goals
+                            clone.setPriority(Integer.MIN_VALUE);
                             phaseExecutions.computeIfAbsent("compile", k -> new ArrayList<>())
-                                    .add(0, new PluginExec(p, goalPrefix, clone));
+                                    .add(new PluginExec(p, goalPrefix, clone));
                             bootstrapId = e.getId();
                         } else if (goal.equals(QUARKUS_GENERATE_CODE_TESTS_GOAL) && p.getId().equals(quarkusPluginId)) {
                             var clone = e.clone();
                             clone.setGoals(List.of(QUARKUS_GENERATE_CODE_TESTS_GOAL));
-                            // this will schedule it before the test-compile phase goals
+                            // the lowest priority sorts it before the test-compile phase goals
+                            clone.setPriority(Integer.MIN_VALUE);
                             phaseExecutions.computeIfAbsent("test-compile", k -> new ArrayList<>())
-                                    .add(0, new PluginExec(p, goalPrefix, clone));
+                                    .add(new PluginExec(p, goalPrefix, clone));
                         } else {
                             var mojoDescr = getMojoDescriptor(p, goal);
                             if (mojoDescr.getPhase() != null) {
@@ -781,6 +791,7 @@ public class DevMojo extends AbstractMojo {
                 }
             }
         }
+        phaseExecutions.values().forEach(DevMojo::sortByPriority);
 
         // Map<pluginId, List<goals>>
         final Map<String, List<String>> executedPluginGoals = new HashMap<>();
@@ -1167,7 +1178,7 @@ public class DevMojo extends AbstractMojo {
     }
 
     private void addProject(DevModeCommandLineBuilder builder, ResolvedDependency module, boolean root) throws Exception {
-        if (!module.isJar()) {
+        if (!module.isClasspathArchive()) {
             return;
         }
 
@@ -1825,7 +1836,6 @@ public class DevMojo extends AbstractMojo {
 
         getLog().debug("Maven compiler plugin found, looking for annotation processors");
 
-        List<String> options = new ArrayList<>();
         Xpp3Dom compilerPluginConfiguration = (Xpp3Dom) compilerMavenPlugin.getConfiguration();
         try {
             Set<File> processorPaths = this.readAnnotationProcessorPaths(compilerPluginConfiguration);
@@ -1841,7 +1851,6 @@ public class DevMojo extends AbstractMojo {
         if (!processors.isEmpty()) {
             builder.annotationProcessors(processors);
         }
-        builder.compilerPluginOptions(options);
     }
 
     protected void modifyDevModeContext(DevModeCommandLineBuilder builder) {
@@ -1862,7 +1871,18 @@ public class DevMojo extends AbstractMojo {
         return p;
     }
 
-    private static final class PluginExec {
+    /**
+     * Orders executions bound to the same phase the way Maven does: by their priority, keeping the declaration order
+     * of executions with the same priority. Lifecycle mappings, such as the one of the {@code quarkus} packaging,
+     * rely on it to run {@code resources:resources} before {@code quarkus:generate-code}.
+     *
+     * @param executions executions bound to the same phase
+     */
+    static void sortByPriority(List<PluginExec> executions) {
+        executions.sort(Comparator.comparingInt(pe -> pe.execution.getPriority()));
+    }
+
+    static final class PluginExec {
         final Plugin plugin;
         final String prefix;
         final PluginExecution execution;

@@ -17,8 +17,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import org.eclipse.microprofile.config.Config;
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import io.quarkus.arc.CurrentContextFactory;
@@ -31,6 +29,7 @@ import io.quarkus.vertx.LocalEventBusCodec;
 import io.quarkus.virtual.threads.VirtualThreadsRecorder;
 import io.smallrye.common.expression.Expression;
 import io.smallrye.common.expression.ResolveContext;
+import io.smallrye.config.Config;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
@@ -65,6 +64,8 @@ public class VertxEventBusConsumerRecorder {
                 @Override
                 public void run() {
                     unregisterMessageConsumers();
+                    // the Vert.x instance is set again on restart: do not retain the closed one in the meantime
+                    destroy();
                 }
             });
         } else {
@@ -129,7 +130,7 @@ public class VertxEventBusConsumerRecorder {
                                                 } catch (Exception e) {
                                                     if (m.replyAddress() == null) {
                                                         // No reply handler
-                                                        throw wrapIfNecessary(e);
+                                                        context.reportException(wrapIfNecessary(e));
                                                     } else {
                                                         m.fail(ConsumeEvent.FAILURE_CODE, e.toString());
                                                     }
@@ -161,7 +162,7 @@ public class VertxEventBusConsumerRecorder {
                                     } catch (Exception e) {
                                         if (m.replyAddress() == null) {
                                             // No reply handler
-                                            throw wrapIfNecessary(e);
+                                            context.reportException(wrapIfNecessary(e));
                                         } else {
                                             m.fail(ConsumeEvent.FAILURE_CODE, e.toString());
                                         }
@@ -291,7 +292,7 @@ public class VertxEventBusConsumerRecorder {
      * Adapted from {@link io.smallrye.config.ExpressionConfigSourceInterceptor}
      */
     private static String resolvePropertyExpression(String expr) {
-        final Config config = ConfigProvider.getConfig();
+        final Config config = Config.get();
         final Expression expression = Expression.compile(expr, LENIENT_SYNTAX, NO_TRIM);
         final String expanded = expression.evaluate(new BiConsumer<ResolveContext<RuntimeException>, StringBuilder>() {
             @Override

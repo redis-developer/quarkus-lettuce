@@ -26,6 +26,8 @@ import io.quarkus.devservices.crossclassloader.runtime.DevServiceOwner;
 import io.quarkus.devservices.crossclassloader.runtime.RunningDevServicesRegistry;
 import io.quarkus.devservices.crossclassloader.runtime.RunningService;
 import io.quarkus.runtime.LaunchMode;
+import io.smallrye.config.Config;
+import io.smallrye.config.SmallRyeConfigProviderResolver;
 
 /**
  * This is a wrapper around the RunningDevServicesRegistry, so the registry can be loaded with the system classloader
@@ -35,7 +37,7 @@ import io.quarkus.runtime.LaunchMode;
  */
 public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
 
-    public record DevServicesStartResult(Map<String, String> configs, Map<String, String> overrideConfigs) {
+    public record DevServicesStartResult(Map<String, String> configs) {
     }
 
     private static final Logger log = Logger.getLogger(DevServicesRegistryBuildItem.class);
@@ -43,11 +45,14 @@ public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
     private final UUID uuid;
     private final DevServicesConfig globalConfig;
     private final LaunchMode launchMode;
+    private final Config buildTimeConfig;
 
-    public DevServicesRegistryBuildItem(UUID uuid, DevServicesConfig devServicesConfig, LaunchMode launchMode) {
+    public DevServicesRegistryBuildItem(UUID uuid, DevServicesConfig devServicesConfig, LaunchMode launchMode,
+            Config buildTimeConfig) {
         this.launchMode = launchMode;
         this.uuid = uuid;
         this.globalConfig = devServicesConfig;
+        this.buildTimeConfig = buildTimeConfig;
     }
 
     public RunningService getRunningServices(String featureName, String configName, Object identifyingConfig) {
@@ -84,52 +89,58 @@ public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
         RunningDevServicesRegistry.INSTANCE.closeRemainingRunningServices(uuid, launchMode.name(), ownersToKeep);
     }
 
-    public Map<String, String> getConfigForAllRunningServices() {
-        Map<String, String> config = new HashMap<>();
-        for (RunningService service : RunningDevServicesRegistry.INSTANCE.getAllRunningServices(launchMode.name())) {
-            config.putAll(service.configs());
-        }
-        return config;
-    }
-
     public DevServicesStartResult startAll(Collection<DevServicesResultBuildItem> services,
             List<DevServicesCustomizerBuildItem> customizers,
             List<DevServicesAdditionalConfigBuildItem> additionalConfigBuildItems,
             ClassLoader deploymentClassLoader) {
-        closeRemainingRunningServices(services);
-        Map<String, String> config = new ConcurrentHashMap<>();
-        Map<String, String> overrideConfig = new ConcurrentHashMap<>();
-        startSelectedServices(services, customizers, additionalConfigBuildItems, deploymentClassLoader,
-                dr -> !dr.hasDependencies(), config, overrideConfig);
+        // The services are started with the deployment classloader, after the augmentation released the build time
+        // configuration registered for it, so register it again while they start. It has to be the configuration
+        // captured when this build item was created: several applications may be augmented before any of them
+        // starts, and by now QuarkusConfigFactory only holds the configuration of the last one.
+        // Integration tests start the services without a deployment classloader, see NativeDevServicesHandler,
+        // and there is nothing to register the configuration for in that case
+        if (deploymentClassLoader != null) {
+            SmallRyeConfigProviderResolver.instance().registerConfig(buildTimeConfig, deploymentClassLoader);
+        }
+        try {
+            closeRemainingRunningServices(services);
+            Map<String, String> config = new ConcurrentHashMap<>();
+            startSelectedServices(services, customizers, additionalConfigBuildItems, deploymentClassLoader,
+                    dr -> !dr.hasDependencies(), config);
 
-        // Now start everything with a dependency, one wave at a time, so that chains of dependencies
-        // (a service depending on a service which itself depends on another, and so on) are resolved
-        // regardless of how deep the chain is. Each wave starts the services whose required dependency
-        // config is already available; that may unblock further services for the next wave.
-        List<DevServicesResultBuildItem> pending = services.stream()
-                .filter(DevServicesResultBuildItem::isStartable)
-                .filter(DevServicesResultBuildItem::hasDependencies)
-                .collect(Collectors.toCollection(ArrayList::new));
-        while (!pending.isEmpty()) {
-            List<DevServicesResultBuildItem> ready = pending.stream()
-                    .filter(dr -> requiredDependenciesAvailable(dr, config))
-                    .toList();
+            // Now start everything with a dependency, one wave at a time, so that chains of dependencies
+            // (a service depending on a service which itself depends on another, and so on) are resolved
+            // regardless of how deep the chain is. Each wave starts the services whose required dependency
+            // config is already available; that may unblock further services for the next wave.
+            List<DevServicesResultBuildItem> pending = services.stream()
+                    .filter(DevServicesResultBuildItem::isStartable)
+                    .filter(DevServicesResultBuildItem::hasDependencies)
+                    .collect(Collectors.toCollection(ArrayList::new));
+            while (!pending.isEmpty()) {
+                List<DevServicesResultBuildItem> ready = pending.stream()
+                        .filter(dr -> requiredDependenciesAvailable(dr, config))
+                        .toList();
 
-            if (ready.isEmpty()) {
-                // None of the remaining services are ready: their dependencies are missing or circular.
-                // Start them anyway so they go through the existing "did not become available" handling.
-                startSelectedServices(pending, customizers, additionalConfigBuildItems, deploymentClassLoader,
-                        dr -> true, config, overrideConfig);
-                break;
+                if (ready.isEmpty()) {
+                    // None of the remaining services are ready: their dependencies are missing or circular.
+                    // Start them anyway so they go through the existing "did not become available" handling.
+                    startSelectedServices(pending, customizers, additionalConfigBuildItems, deploymentClassLoader,
+                            dr -> true, config);
+                    break;
+                }
+
+                startSelectedServices(ready, customizers, additionalConfigBuildItems, deploymentClassLoader,
+                        dr -> true, config);
+                pending.removeAll(ready);
             }
 
-            startSelectedServices(ready, customizers, additionalConfigBuildItems, deploymentClassLoader,
-                    dr -> true, config, overrideConfig);
-            pending.removeAll(ready);
+            return new DevServicesStartResult(Collections.unmodifiableMap(config));
+        } finally {
+            if (deploymentClassLoader != null) {
+                ((SmallRyeConfigProviderResolver) SmallRyeConfigProviderResolver.instance())
+                        .releaseConfig(deploymentClassLoader);
+            }
         }
-
-        return new DevServicesStartResult(Collections.unmodifiableMap(config),
-                Collections.unmodifiableMap(overrideConfig));
     }
 
     private static boolean requiredDependenciesAvailable(DevServicesResultBuildItem dr, Map<String, String> config) {
@@ -145,11 +156,13 @@ public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
         return true;
     }
 
-    private void startSelectedServices(Collection<DevServicesResultBuildItem> services,
+    private void startSelectedServices(
+            Collection<DevServicesResultBuildItem> services,
             List<DevServicesCustomizerBuildItem> customizers,
             List<DevServicesAdditionalConfigBuildItem> additionalConfigBuildItems,
             ClassLoader deploymentClassLoader, Predicate<? super DevServicesResultBuildItem> filter,
-            Map<String, String> config, Map<String, String> overrideConfig) {
+            Map<String, String> config) {
+
         CompletableFuture.allOf(services.stream()
                 .filter(DevServicesResultBuildItem::isStartable)
                 .filter(filter)
@@ -162,7 +175,7 @@ public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
                         Thread.currentThread().setContextClassLoader(serv.getClass().getClassLoader());
                     }
                     try {
-                        this.start(serv, customizers, additionalConfigBuildItems, config, overrideConfig);
+                        this.start(serv, customizers, additionalConfigBuildItems, config);
                     } finally {
                         // Err on the side of caution and reset the TCCL to avoid leaks
                         Thread.currentThread().setContextClassLoader(orig);
@@ -171,9 +184,12 @@ public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
                 .toArray(CompletableFuture[]::new)).join();
     }
 
-    public void start(DevServicesResultBuildItem request, List<DevServicesCustomizerBuildItem> customizers,
-            List<DevServicesAdditionalConfigBuildItem> additionalConfigBuildItems, Map<String, String> config,
-            Map<String, String> overrideConfig) {
+    public void start(
+            DevServicesResultBuildItem request,
+            List<DevServicesCustomizerBuildItem> customizers,
+            List<DevServicesAdditionalConfigBuildItem> additionalConfigBuildItems,
+            Map<String, String> config) {
+
         // RunningService class is loaded on parent classloader
         RunningService matchedDevService = this.getRunningServices(request.getName(), request.getServiceName(),
                 request.getServiceConfig());
@@ -181,7 +197,7 @@ public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
         if (matchedDevService == null) {
             closeAllRunningServices(request.getName(), request.getServiceName());
 
-            reallyStart(request, customizers, additionalConfigBuildItems, config, overrideConfig);
+            reallyStart(request, customizers, additionalConfigBuildItems, config);
         } else {
             Map<String, String> reusedConfig = new HashMap<>(matchedDevService.configs());
 
@@ -199,7 +215,6 @@ public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
             }
 
             config.putAll(reusedConfig);
-            overrideConfig.putAll(matchedDevService.overrideConfigs());
         }
     }
 
@@ -244,9 +259,11 @@ public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
         return false;
     }
 
-    private void reallyStart(DevServicesResultBuildItem request, List<DevServicesCustomizerBuildItem> customizers,
-            List<DevServicesAdditionalConfigBuildItem> additionalConfigBuildItems, Map<String, String> allDevServicesConfig,
-            Map<String, String> allDevServicesOverrideConfigs) {
+    private void reallyStart(
+            DevServicesResultBuildItem request,
+            List<DevServicesCustomizerBuildItem> customizers,
+            List<DevServicesAdditionalConfigBuildItem> additionalConfigBuildItems,
+            Map<String, String> allDevServicesConfig) {
         StartupLogCompressor compressor = new StartupLogCompressor("Dev Services Startup", null, null);
         try {
             Supplier<Startable> startableSupplier = request.getStartableSupplier();
@@ -261,7 +278,7 @@ public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
 
             String missingDependency = null;
 
-            // The config from the new sources isn't easily available via ConfigProvider.getConfig(), so directly inject it into services which depend on it
+            // The config from the new sources isn't easily available via Config.get(), so directly inject it into services which depend on it
             var dependencies = request.getDependencies();
             if (dependencies != null && !dependencies.isEmpty()) {
                 for (DevServicesResultBuildItem.DevServiceConfigDependency<? extends Startable> dependency : dependencies) {
@@ -289,19 +306,15 @@ public final class DevServicesRegistryBuildItem extends SimpleBuildItem {
                 startWithStaleConnectionRetry(request, startable);
 
                 Map<String, String> config = request.getConfig(startable);
-                Map<String, String> overrideConfig = request.getOverrideConfig(startable);
 
                 // Track this service's own config separately from the shared map,
                 // so that each RunningService only exposes its own keys.
                 // The shared map is used for inter-service dependency resolution
                 // and DevServicesAdditionalConfigBuildItem evaluation.
-                Map<String, String> currentDevServiceConfig = new HashMap<>();
-                currentDevServiceConfig.putAll(config);
-                currentDevServiceConfig.putAll(overrideConfig);
-                allDevServicesOverrideConfigs.putAll(overrideConfig);
+                Map<String, String> currentDevServiceConfig = new HashMap<>(config);
 
                 RunningService service = new RunningService(request.getName(), request.getDescription(),
-                        new HashMap<>(currentDevServiceConfig), overrideConfig, startable.getContainerId(), startable,
+                        new HashMap<>(currentDevServiceConfig), startable.getContainerId(), startable,
                         startable.isReusable());
 
                 for (DevServicesAdditionalConfigBuildItem additionalConfigBuildItem : additionalConfigBuildItems) {

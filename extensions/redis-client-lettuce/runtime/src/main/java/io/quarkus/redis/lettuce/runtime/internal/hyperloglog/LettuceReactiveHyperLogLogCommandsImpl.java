@@ -10,24 +10,16 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.hyperloglog.ReactiveHyperLogLogCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
 public class LettuceReactiveHyperLogLogCommandsImpl<K, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveHyperLogLogCommands<K, V> {
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveHyperLogLogCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType, Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, valueType));
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+            LettuceConnectionSource source, Type keyType, Type valueType) {
+        super(dataSource, source, keyType, valueType, new Marshaller(keyType, valueType));
     }
 
     @SafeVarargs
@@ -41,7 +33,7 @@ public class LettuceReactiveHyperLogLogCommandsImpl<K, V> extends AbstractLettuc
         nonNull(key, "key");
         notNullOrEmpty(values, "values");
         doesNotContainNull(values, "values");
-        return LettuceCommand.of(() -> async.pfadd(marshaller.encode(key), marshaller.encodeAsArray(values)),
+        return command(async -> async.pfadd(marshaller.encode(key), marshaller.encodeAsArray(values)),
                 AbstractLettuceCommands::toBoolean);
     }
 
@@ -56,7 +48,7 @@ public class LettuceReactiveHyperLogLogCommandsImpl<K, V> extends AbstractLettuc
         nonNull(destkey, "destination");
         notNullOrEmpty(sourcekeys, "sources");
         doesNotContainNull(sourcekeys, "sources");
-        return LettuceCommand.discarding(() -> async.pfmerge(marshaller.encode(destkey), marshaller.encodeAsArray(sourcekeys)));
+        return discarding(async -> async.pfmerge(marshaller.encode(destkey), marshaller.encodeAsArray(sourcekeys)));
     }
 
     @SafeVarargs
@@ -69,7 +61,7 @@ public class LettuceReactiveHyperLogLogCommandsImpl<K, V> extends AbstractLettuc
     final LettuceCommand<Long, Long> _pfcount(K... keys) {
         notNullOrEmpty(keys, "keys");
         doesNotContainNull(keys, "keys");
-        return LettuceCommand.of(() -> async.pfcount(marshaller.encodeAsArray(keys)));
+        return command(async -> async.pfcount(marshaller.encodeAsArray(keys)));
     }
 
 }

@@ -139,6 +139,9 @@ public class ArchivePathTree extends PathTreeWithManifest implements PathTree {
 
     @Override
     protected <T> T apply(String resourceName, Function<PathVisit, T> func, boolean manifestEnabled) {
+        if (resourceName.isEmpty()) {
+            return func.apply(null);
+        }
         ensureResourcePath(resourceName);
         if (!PathFilter.isVisible(pathFilter, resourceName)) {
             return func.apply(null);
@@ -152,6 +155,10 @@ public class ArchivePathTree extends PathTreeWithManifest implements PathTree {
 
     @Override
     public void accept(String resourceName, Consumer<PathVisit> consumer) {
+        if (resourceName.isEmpty()) {
+            consumer.accept(null);
+            return;
+        }
         ensureResourcePath(resourceName);
         if (!PathFilter.isVisible(pathFilter, resourceName)) {
             consumer.accept(null);
@@ -166,6 +173,9 @@ public class ArchivePathTree extends PathTreeWithManifest implements PathTree {
 
     @Override
     public boolean contains(String resourceName) {
+        if (resourceName.isEmpty()) {
+            return false;
+        }
         ensureResourcePath(resourceName);
         if (!PathFilter.isVisible(pathFilter, resourceName)) {
             return false;
@@ -183,10 +193,22 @@ public class ArchivePathTree extends PathTreeWithManifest implements PathTree {
 
     @Override
     public OpenPathTree open() {
+        final ReadOnlyZipFileSystem fs;
         try {
-            return new OpenArchivePathTree(openFs());
+            fs = openFs();
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw new UncheckedIOException("Failed to read " + archive, e);
+        }
+        try {
+            return new OpenArchivePathTree(fs);
+        } catch (RuntimeException | Error e) {
+            // the tree could not be created for the file system, make sure it is not leaked
+            try {
+                fs.close();
+            } catch (IOException suppressed) {
+                e.addSuppressed(suppressed);
+            }
+            throw e;
         }
     }
 
@@ -262,20 +284,22 @@ public class ArchivePathTree extends PathTreeWithManifest implements PathTree {
             return lock.writeLock();
         }
 
+        /**
+         * Returns the number of read locks held by the current thread on this open tree.
+         * A thread that holds a read lock can never acquire the write lock, since
+         * {@link ReentrantReadWriteLock} does not support lock upgrades.
+         *
+         * @return the number of read locks held by the current thread
+         */
+        protected int readHoldCount() {
+            return lock.getReadHoldCount();
+        }
+
         @Override
         protected void initManifest(Manifest m) {
             super.initManifest(m);
-            ArchivePathTree.this.manifestReadLock().lock();
-            try {
-                if (!ArchivePathTree.this.manifestInitialized) {
-                    ArchivePathTree.this.manifestReadLock().unlock();
-                    ArchivePathTree.this.manifestWriteLock().lock();
-                    ArchivePathTree.this.initManifest(m);
-                    ArchivePathTree.this.manifestReadLock().lock();
-                    ArchivePathTree.this.manifestWriteLock().unlock();
-                }
-            } finally {
-                ArchivePathTree.this.manifestReadLock().unlock();
+            if (!ArchivePathTree.this.isManifestInitialized()) {
+                ArchivePathTree.this.initManifest(m);
             }
         }
 
@@ -303,6 +327,9 @@ public class ArchivePathTree extends PathTreeWithManifest implements PathTree {
          * Must be called under the read lock.
          */
         private String resolveEntryName(String resourceName) {
+            if (resourceName.isEmpty()) {
+                return null;
+            }
             PathTreeVisit.ensureResourcePath(fs, resourceName);
             if (!PathFilter.isVisible(pathFilter, resourceName)) {
                 return null;
@@ -381,7 +408,7 @@ public class ArchivePathTree extends PathTreeWithManifest implements PathTree {
 
         @Override
         public Set<String> getResourceNames() {
-            return resourceNames == null ? resourceNames = super.getResourceNames() : resourceNames;
+            return ArchivePathTree.this.getResourceNames();
         }
 
         @Override
@@ -423,16 +450,19 @@ public class ArchivePathTree extends PathTreeWithManifest implements PathTree {
         public void close() throws IOException {
             lock.writeLock().lock();
             try {
+                if (!open) {
+                    // Closeable.close() is required to be a no-op once the resource is closed
+                    return;
+                }
                 open = false;
                 rootPath = null;
-                fs.close();
-            } catch (IOException e) {
-                throw e;
-            } finally {
                 // even when we close the fs, everything is kept as is in the fs instance
                 // and typically the cen, which is quite large
                 // let's make sure the fs is nullified for it to be garbage collected
-                fs = null;
+                final ReadOnlyZipFileSystem fs = this.fs;
+                this.fs = null;
+                fs.close();
+            } finally {
                 lock.writeLock().unlock();
             }
         }

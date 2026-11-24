@@ -15,6 +15,7 @@ import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.output.StatusOutput;
 import io.lettuce.core.protocol.CommandArgs;
 import io.lettuce.core.protocol.CommandType;
+import io.smallrye.mutiny.Uni;
 
 /**
  * A byte-array connection to a standalone Redis server or to a Redis cluster, as opened by
@@ -35,7 +36,7 @@ import io.lettuce.core.protocol.CommandType;
  * the Vert.x client does, and the pool skips the database reset for cluster connections.</li>
  * </ul>
  */
-public final class LettuceConnection implements AutoCloseable {
+public final class LettuceConnection implements LettuceConnectionSource, AutoCloseable {
 
     /**
      * The message of the failure {@code withTransaction} and the transaction commands raise on a cluster.
@@ -49,6 +50,8 @@ public final class LettuceConnection implements AutoCloseable {
     private final RedisClusterAsyncCommands<byte[], byte[]> async;
     /** The standalone command surface, carrying the transaction and database commands; {@code null} on a cluster. */
     private final RedisAsyncCommands<byte[], byte[]> standalone;
+    /** Whether the state of the connection on the server is unknown, see {@link #markBroken()}. */
+    private volatile boolean broken;
 
     private LettuceConnection(StatefulConnection<byte[], byte[]> connection, RedisClusterAsyncCommands<byte[], byte[]> async,
             RedisAsyncCommands<byte[], byte[]> standalone) {
@@ -81,11 +84,49 @@ public final class LettuceConnection implements AutoCloseable {
         return async;
     }
 
+    @Override
+    public Uni<LettuceConnection> connect() {
+        return Uni.createFrom().item(this);
+    }
+
+    @Override
+    public LettuceConnection established() {
+        return this;
+    }
+
     /**
      * Whether this connection is to a cluster, where transactions and database selection are not available.
      */
+    @Override
     public boolean isCluster() {
         return standalone == null;
+    }
+
+    /**
+     * Whether a transaction is open on this connection ({@code MULTI} sent, neither {@code EXEC} nor {@code DISCARD}
+     * yet), as far as Lettuce knows; never on a cluster connection, which has no transactions. The pool closes such a
+     * connection instead of handing it to the next borrower.
+     */
+    public boolean isMulti() {
+        return standalone != null && standalone.getStatefulConnection().isMulti();
+    }
+
+    /**
+     * Records that the state of this connection on the server is unknown, so that the pool closes it when it is
+     * released instead of handing it to the next borrower. Called by a transaction whose {@code DISCARD} or
+     * {@code UNWATCH} failed, and by one that was cancelled on a connection it does not own: the server may still hold
+     * the transaction or the watch, and a connection in that state would hand a borrower {@code QUEUED} replies or a
+     * spurious abort. The mark stays for the life of the connection.
+     */
+    public void markBroken() {
+        broken = true;
+    }
+
+    /**
+     * Whether {@link #markBroken()} was called on this connection.
+     */
+    public boolean isBroken() {
+        return broken;
     }
 
     /**

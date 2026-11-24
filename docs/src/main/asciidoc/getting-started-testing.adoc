@@ -175,6 +175,20 @@ You can override this setting with the `quarkus.http.test-timeout` property:
 quarkus.http.test-timeout=10s
 ----
 
+=== Logging of the request and the response when a validation fails
+
+Quarkus configures REST Assured to log the request and the response when a validation fails.
+To log the response, REST Assured reads the complete response body, also when all the validations pass.
+
+A response that never ends, such as a stream of server-sent events, therefore blocks the test.
+The `quarkus.http.test-timeout` timeout stops the test only when the server sends no data for that time.
+To test such an endpoint with REST Assured, disable the logging:
+
+[source,properties]
+----
+quarkus.test.rest-assured.enable-logging-on-failure=false
+----
+
 === Injecting a URI
 
 It is also possible to directly inject the URL into the test which can make is easy to use a different client. This is
@@ -478,6 +492,42 @@ it fallbacks to JUnit default behaviour which does not set a `ClassOrderer` at a
 
 The Quarkus orderer can also be disabled entirely by
 setting another `ClassOrderer` using the JUnit configuration. This is only permitted in cases where all Quarkus tests would run on the same application (that is, the use of test profiles and test resources is limited).
+
+[NOTE]
+====
+This only affects version 3.6.0 of `maven-surefire-plugin` and `maven-failsafe-plugin`, which has a bug (https://github.com/apache/maven-surefire/issues/3529[apache/maven-surefire#3529]) fixed in 3.6.1 (https://github.com/apache/maven-surefire/pull/3530[apache/maven-surefire#3530]). In 3.6.0, the `runOrder` option (`alphabetical`, `random` or `reversealphabetical`) is translated into a JUnit `ClassOrderer` which is passed explicitly to JUnit. This replaces the Quarkus orderer, so tests which use different test profiles or test resources fail with an error explaining that the Quarkus JUnit configuration has been overridden.
+The simplest fix is to upgrade to 3.6.1 or later. If you must stay on 3.6.0, either do not set `runOrder` and use `quarkus.test.class-orderer` instead to choose the order of the tests within each group, or keep `runOrder` and set the Quarkus orderer in the plugin configuration, which takes precedence over `runOrder`:
+
+[source,xml]
+----
+<configuration>
+    <runOrder>alphabetical</runOrder>
+    <properties>
+        <configurationParameters>
+            junit.jupiter.testclass.order.default=io.quarkus.test.junit.util.QuarkusTestProfileAwareClassOrderer
+        </configurationParameters>
+    </properties>
+</configuration>
+----
+
+`runOrder` also sets the order of test methods within each class, through `junit.jupiter.testmethod.order.default`. `quarkus.test.class-orderer` only orders classes, so if you drop `runOrder`, you can keep both orders by combining the two settings. For example, for a random order:
+
+[source,xml]
+----
+<configuration>
+    <properties>
+        <configurationParameters>
+            junit.jupiter.testmethod.order.default=org.junit.jupiter.api.MethodOrderer$Random
+        </configurationParameters>
+    </properties>
+</configuration>
+----
+
+[source,properties]
+----
+quarkus.test.class-orderer=org.junit.jupiter.api.ClassOrderer$Random
+----
+====
 
 === Writing a Profile
 
@@ -1213,7 +1263,7 @@ but it is common to create custom implementations to address specific applicatio
 Common cases include starting docker containers using https://www.testcontainers.org/[Testcontainers] (an example of which can be found https://github.com/quarkusio/quarkus/blob/main/test-framework/keycloak-server/src/main/java/io/quarkus/test/keycloak/server/KeycloakTestResourceLifecycleManager.java[here]),
 or starting a mock HTTP server using https://wiremock.org/[Wiremock] (an example of which can be found https://github.com/geoand/quarkus-test-demo/blob/main/src/test/java/org/acme/getting/started/country/WiremockCountries.java[here]).
 
-NOTE: As `QuarkusTestResourceLifecycleManager` is not a CDI Bean, classes that implement it can't have fields injected with `@Inject`. You can use `String propertyName = ConfigProvider.getConfig().getValue("quarkus.my-config-group.myconfig", String.class);`
+NOTE: As `QuarkusTestResourceLifecycleManager` is not a CDI Bean, classes that implement it can't have fields injected with `@Inject`. You can use `String propertyName = Config.get().getValue("quarkus.my-config-group.myconfig", String.class);`
 
 
 === Altering the test class

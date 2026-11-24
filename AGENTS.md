@@ -98,6 +98,9 @@ need for a separate step. Let the build fix formatting for you.
 - Naming: `<Feature>Processor.java`, `<Feature>Recorder.java`,
   `<Description>BuildItem.java`, `<Feature>Config.java`
 - Package root: `io.quarkus.<extension-name>` (hyphens become underscores)
+- Generate bytecode with Gizmo 2, read it with the ClassFile API backport
+  (`io.smallrye.classfile`); never use ASM in new code. See the `coding-style`
+  skill.
 - Use `@ConfigMapping` interfaces — legacy `@ConfigRoot` classes with
   `@ConfigItem` are removed. New `quarkus.*` properties must always be
   registered in a `@ConfigMapping`, even if read programmatically. See the
@@ -117,6 +120,7 @@ Consult the relevant skill when you are about to do that type of work:
 | `creating-extensions` | Creating a new extension or understanding the full module layout                      |
 | `coding-style` | Code formatting, visibility, naming conventions, and logging                          |
 | `building-and-testing` | Maven build commands, flags, incremental builds, and build rules                      |
+| `updating-hibernate` | Hibernate dependency upgrades, compatibility checks, and migration guide updates       |
 | `pull-requests` | PR title/description conventions, commit hygiene, labels, and contribution rules      |
 | `writing-extension-devui` | Writing a Dev UI for a Quarkus extension                                              |
 | `building-docs` | Building, previewing, or testing documentation changes locally                        |

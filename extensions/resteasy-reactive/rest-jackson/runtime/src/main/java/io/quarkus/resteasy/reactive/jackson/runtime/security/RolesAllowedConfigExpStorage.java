@@ -1,17 +1,16 @@
 package io.quarkus.resteasy.reactive.jackson.runtime.security;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 public class RolesAllowedConfigExpStorage {
 
     private final Map<String, Supplier<String[]>> configExpToAllowedRoles;
-    private final Map<String, String[]> rolesAllowedExpCache;
+    private final Map<String, String[]> rolesAllowedExpCache = new ConcurrentHashMap<>();
 
     public RolesAllowedConfigExpStorage(Map<String, Supplier<String[]>> configExpToAllowedRoles) {
         this.configExpToAllowedRoles = Map.copyOf(configExpToAllowedRoles);
-        this.rolesAllowedExpCache = new HashMap<>();
     }
 
     /**

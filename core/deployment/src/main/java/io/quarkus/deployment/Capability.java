@@ -120,6 +120,7 @@ public interface Capability {
     String CONTAINER_IMAGE_PODMAN = QUARKUS_PREFIX + ".container.image.podman";
     String CONTAINER_IMAGE_OPENSHIFT = QUARKUS_PREFIX + ".container.image.openshift";
     String CONTAINER_IMAGE_BUILDPACK = QUARKUS_PREFIX + ".container.image.buildpack";
+    String HIBERNATE_ACCESSOR = QUARKUS_PREFIX + ".hibernate.accessor";
     String HIBERNATE_ORM = QUARKUS_PREFIX + ".hibernate.orm";
     String HIBERNATE_ORM_PANACHE = HIBERNATE_ORM + ".panache";
     String HIBERNATE_ORM_PANACHE_KOTLIN = HIBERNATE_ORM_PANACHE + ".kotlin";
@@ -142,6 +143,7 @@ public interface Capability {
     String OIDC_CLIENT_REGISTRATION = QUARKUS_PREFIX + ".oidc-client-registration";
 
     String KEYCLOAK_AUTHORIZATION = QUARKUS_PREFIX + ".keycloak.authorization";
+    String KEYCLOAK_ADMIN_CLIENT = QUARKUS_PREFIX + ".keycloak.admin-client";
 
     String SCHEDULER = QUARKUS_PREFIX + ".scheduler";
 

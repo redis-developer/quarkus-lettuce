@@ -4,9 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.MalformedURLException;
 import java.net.URI;
-import java.net.URL;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,7 +69,6 @@ import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.HttpClosedException;
 import io.vertx.core.http.HttpMethod;
-import io.vertx.core.http.HttpVersion;
 import io.vertx.core.http.RequestOptions;
 import io.vertx.core.internal.buffer.BufferInternal;
 import io.vertx.core.internal.http.HttpClientInternal;
@@ -131,9 +128,6 @@ public class ClientSendRequestHandler implements ClientRestHandler {
                 }
 
                 customizeRequest(httpClientRequest, requestContext);
-
-                // adapt headers to HTTP/2 depending on the underlying HTTP connection
-                ClientSendRequestHandler.this.adaptRequest(httpClientRequest);
 
                 if (requestContext.isMultipart()) {
                     Promise<HttpClientRequest> requestPromise = Promise.promise();
@@ -416,7 +410,10 @@ public class ClientSendRequestHandler implements ClientRestHandler {
                                 }
 
                                 if (loggingScope != LoggingScope.NONE) {
-                                    clientLogger.logResponse(clientResponse, false);
+                                    // never call `logResponse` while an `endHandler` is registered, Vert.x replays
+                                    // the end event on an ended response, causing stack overflow
+                                    clientResponse.endHandler(null);
+                                    clientLogger.logResponse(clientResponse, combined, false);
                                 }
 
                                 requestContext.resume();
@@ -491,10 +488,10 @@ public class ClientSendRequestHandler implements ClientRestHandler {
                         } else {
                             clientResponse.body().onComplete(ar -> {
                                 if (ar.succeeded()) {
-                                    if (loggingScope != LoggingScope.NONE) {
-                                        clientLogger.logResponse(clientResponse, false);
-                                    }
                                     Buffer buffer = ar.result();
+                                    if (loggingScope != LoggingScope.NONE) {
+                                        clientLogger.logResponse(clientResponse, buffer, false);
+                                    }
                                     try {
                                         if (buffer.length() > 0) {
                                             requestContext.setResponseEntityStream(
@@ -566,19 +563,13 @@ public class ClientSendRequestHandler implements ClientRestHandler {
         Object clientRequestOptions = state.getClientFilterProperties().get(QuarkusRestClientProperties.REQUEST_OPTIONS);
         Uni<RequestOptions> requestOptions;
         state.setMultipartResponsesData(multipartResponseDataMap);
-        if (uri.getScheme() == null) { // invalid URI
+        // Validate without java.net.URL: the Vert.x transport does not need JDK URL protocol handlers.
+        // Stork resolves service URIs to HTTP(S) before this handler is invoked.
+        boolean isHttps = "https".equalsIgnoreCase(uri.getScheme());
+        if ((!isHttps && !"http".equalsIgnoreCase(uri.getScheme())) || uri.getHost() == null) { // invalid URI
             return Uni.createFrom()
                     .failure(new IllegalArgumentException("Invalid REST Client URL used: '" + uri + "'"));
         }
-        try {
-            URL ignored = uri.toURL();
-        } catch (MalformedURLException mue) {
-            log.error("Invalid REST Client URL used: '" + uri + "'");
-            return Uni.createFrom()
-                    .failure(new IllegalArgumentException("Invalid REST Client URL used: '" + uri + "'"));
-        }
-
-        boolean isHttps = "https".equals(uri.getScheme());
         int port = getPort(isHttps, uri.getPort());
         requestOptions = Uni.createFrom().item(new RequestOptions().setHost(uri.getHost())
                 .setPort(port).setSsl(isHttps));
@@ -759,25 +750,6 @@ public class ClientSendRequestHandler implements ClientRestHandler {
     private boolean hasWriterInterceptors(RestClientRequestContext context) {
         WriterInterceptor[] interceptors = getWriterInterceptors(context);
         return interceptors != null && interceptors.length > 0;
-    }
-
-    private void adaptRequest(HttpClientRequest request) {
-        if (request.version() == HttpVersion.HTTP_2) {
-            // When using the protocol HTTP/2, Netty which is internally used by Vert.x will validate the headers and reject
-            // the requests with invalid metadata.
-            // When we start a new connection, the Vert.x client will automatically upgrade the first request we make to be
-            // valid in HTTP/2.
-            // The problem is that in next requests, the Vert.x client reuses the same connection within the same window time
-            // and hence does not upgrade the following requests. Therefore, even though the first request works fine, the
-            // next requests won't work.
-            // This has been reported in https://github.com/eclipse-vertx/vert.x/issues/4618.
-            // To workaround this issue, we need to "upgrade" the next requests by ourselves when the version is already set
-            // to HTTP/2:
-            if (request.path() == null || request.path().length() == 0) {
-                // HTTP/2 does not allow empty paths
-                request.setURI(request.getURI() + "/");
-            }
-        }
     }
 
     private void updateRequestHeadersFromConfig(RestClientRequestContext state, MultivaluedMap<String, String> headerMap) {

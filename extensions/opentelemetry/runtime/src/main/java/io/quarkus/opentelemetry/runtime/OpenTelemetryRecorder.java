@@ -15,7 +15,6 @@ import java.util.regex.Pattern;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.eclipse.microprofile.config.spi.Converter;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
@@ -32,8 +31,8 @@ import io.quarkus.runtime.annotations.Recorder;
 import io.quarkus.runtime.annotations.RuntimeInit;
 import io.quarkus.runtime.annotations.StaticInit;
 import io.quarkus.runtime.configuration.DurationConverter;
+import io.smallrye.config.Config;
 import io.smallrye.config.ConfigValue;
-import io.smallrye.config.SmallRyeConfig;
 import io.vertx.core.Vertx;
 
 @Recorder
@@ -100,6 +99,7 @@ public class OpenTelemetryRecorder {
     @RuntimeInit
     public Function<SyntheticCreationalContext<OpenTelemetry>, OpenTelemetry> opentelemetryBean() {
         return new Function<>() {
+            @SuppressWarnings("removal")
             @Override
             public OpenTelemetry apply(SyntheticCreationalContext<OpenTelemetry> context) {
                 Instance<AutoConfiguredOpenTelemetrySdkBuilderCustomizer> builderCustomizers = context
@@ -131,7 +131,7 @@ public class OpenTelemetryRecorder {
 
             private Map<String, String> getOtelConfigs() {
                 Map<String, String> oTelConfigs = new HashMap<>();
-                SmallRyeConfig config = ConfigProvider.getConfig().unwrap(SmallRyeConfig.class);
+                Config config = Config.get();
 
                 // instruct OTel that we are using the AutoConfiguredOpenTelemetrySdk
                 oTelConfigs.put("otel.java.global-autoconfigure.enabled", "true");

@@ -1,12 +1,13 @@
 package io.quarkus.scheduler.deployment;
 
-import static io.quarkus.deployment.annotations.ExecutionTime.RUNTIME_INIT;
 import static org.jboss.jandex.AnnotationTarget.Kind.METHOD;
 import static org.jboss.jandex.AnnotationValue.createBooleanValue;
 import static org.jboss.jandex.AnnotationValue.createStringValue;
 import static org.jboss.jandex.gizmo2.Jandex2Gizmo.classDescOf;
 import static org.jboss.jandex.gizmo2.Jandex2Gizmo.methodDescOf;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.reflect.Modifier;
 import java.time.Duration;
 import java.time.ZoneId;
@@ -21,20 +22,26 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import jakarta.inject.Singleton;
+
 import org.jboss.jandex.AnnotationInstance;
+import org.jboss.jandex.AnnotationTarget;
 import org.jboss.jandex.AnnotationTransformation;
 import org.jboss.jandex.AnnotationValue;
 import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
+import org.jboss.jandex.Index;
 import org.jboss.jandex.IndexView;
 import org.jboss.jandex.MethodInfo;
 import org.jboss.jandex.Type;
 import org.jboss.jandex.Type.Kind;
 import org.jboss.logging.Logger;
 
+import com.cronutils.model.CronType;
 import com.cronutils.model.definition.CronDefinitionBuilder;
 import com.cronutils.parser.CronParser;
 
@@ -59,14 +66,13 @@ import io.quarkus.arc.processor.BeanInfo;
 import io.quarkus.arc.processor.BuiltinScope;
 import io.quarkus.arc.processor.DotNames;
 import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
+import io.quarkus.core.deployment.service.ServiceRegistrar;
 import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.Feature;
 import io.quarkus.deployment.GeneratedClassGizmo2Adaptor;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
-import io.quarkus.deployment.annotations.Record;
-import io.quarkus.deployment.builditem.AnnotationProxyBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.GeneratedClassBuildItem;
 import io.quarkus.deployment.builditem.GeneratedResourceBuildItem;
@@ -88,7 +94,9 @@ import io.quarkus.runtime.util.HashUtil;
 import io.quarkus.scheduler.Scheduled;
 import io.quarkus.scheduler.ScheduledExecution;
 import io.quarkus.scheduler.common.runtime.DefaultInvoker;
-import io.quarkus.scheduler.common.runtime.MutableScheduledMethod;
+import io.quarkus.scheduler.common.runtime.ImmutableScheduledMethod;
+import io.quarkus.scheduler.common.runtime.ScheduledMetadata;
+import io.quarkus.scheduler.common.runtime.ScheduledMethod;
 import io.quarkus.scheduler.common.runtime.SchedulerContext;
 import io.quarkus.scheduler.common.runtime.util.SchedulerUtils;
 import io.quarkus.scheduler.kotlin.runtime.AbstractCoroutineInvoker;
@@ -178,8 +186,23 @@ public class SchedulerProcessor {
                 .reason("Found non-static scheduled business methods").build();
     }
 
+    /**
+     * Annotations on the method take precedence; the declaring class is only considered
+     * if the method does not declare any execution model annotation.
+     */
+    private static AnnotationTarget executionModelTarget(TransformedAnnotationsBuildItem transformedAnnotations,
+            MethodInfo method) {
+        if (transformedAnnotations.hasAnnotation(method, SchedulerDotNames.BLOCKING)
+                || transformedAnnotations.hasAnnotation(method, SchedulerDotNames.NON_BLOCKING)
+                || transformedAnnotations.hasAnnotation(method, SchedulerDotNames.RUN_ON_VIRTUAL_THREAD)) {
+            return method;
+        }
+        return method.declaringClass();
+    }
+
     @BuildStep
-    void collectScheduledMethods(BeanArchiveIndexBuildItem beanArchives, BeanDiscoveryFinishedBuildItem beanDiscovery,
+    void collectScheduledMethods(SchedulerConfig config, BeanArchiveIndexBuildItem beanArchives,
+            BeanDiscoveryFinishedBuildItem beanDiscovery,
             TransformedAnnotationsBuildItem transformedAnnotations,
             BuildProducer<ScheduledBusinessMethodItem> scheduledBusinessMethods) {
 
@@ -218,21 +241,25 @@ public class SchedulerProcessor {
 
         for (Entry<MethodInfo, List<AnnotationInstance>> e : staticScheduledMethods.entrySet()) {
             MethodInfo method = e.getKey();
+            AnnotationTarget executionModelTarget = executionModelTarget(transformedAnnotations, method);
             scheduledBusinessMethods.produce(new ScheduledBusinessMethodItem(null, method, e.getValue(),
-                    transformedAnnotations.hasAnnotation(method, SchedulerDotNames.NON_BLOCKING),
-                    transformedAnnotations.hasAnnotation(method, SchedulerDotNames.RUN_ON_VIRTUAL_THREAD)));
+                    transformedAnnotations.hasAnnotation(executionModelTarget, SchedulerDotNames.NON_BLOCKING),
+                    transformedAnnotations.hasAnnotation(executionModelTarget, SchedulerDotNames.RUN_ON_VIRTUAL_THREAD),
+                    transformedAnnotations.hasAnnotation(executionModelTarget, SchedulerDotNames.BLOCKING),
+                    config.blockingSignaturesExecutionMode().isVirtualThread()));
             LOGGER.debugf("Found scheduled static method %s declared on %s", method, method.declaringClass().name());
         }
 
         // Then collect all business methods annotated with @Scheduled
         for (BeanInfo bean : beanDiscovery.beanStream().classBeans()) {
-            collectScheduledMethods(beanArchives.getIndex(), transformedAnnotations, bean,
+            collectScheduledMethods(config, beanArchives.getIndex(), transformedAnnotations, bean,
                     bean.getTarget().get().asClass(),
                     scheduledBusinessMethods);
         }
     }
 
-    private void collectScheduledMethods(IndexView index, TransformedAnnotationsBuildItem transformedAnnotations, BeanInfo bean,
+    private void collectScheduledMethods(SchedulerConfig config, IndexView index,
+            TransformedAnnotationsBuildItem transformedAnnotations, BeanInfo bean,
             ClassInfo beanClass, BuildProducer<ScheduledBusinessMethodItem> scheduledBusinessMethods) {
 
         for (MethodInfo method : beanClass.methods()) {
@@ -258,9 +285,12 @@ public class SchedulerProcessor {
                 }
             }
             if (schedules != null) {
+                AnnotationTarget executionModelTarget = executionModelTarget(transformedAnnotations, method);
                 scheduledBusinessMethods.produce(new ScheduledBusinessMethodItem(bean, method, schedules,
-                        transformedAnnotations.hasAnnotation(method, SchedulerDotNames.NON_BLOCKING),
-                        transformedAnnotations.hasAnnotation(method, SchedulerDotNames.RUN_ON_VIRTUAL_THREAD)));
+                        transformedAnnotations.hasAnnotation(executionModelTarget, SchedulerDotNames.NON_BLOCKING),
+                        transformedAnnotations.hasAnnotation(executionModelTarget, SchedulerDotNames.RUN_ON_VIRTUAL_THREAD),
+                        transformedAnnotations.hasAnnotation(executionModelTarget, SchedulerDotNames.BLOCKING),
+                        config.blockingSignaturesExecutionMode().isVirtualThread()));
                 LOGGER.debugf("Found scheduled business method %s declared on %s", method, bean);
             }
         }
@@ -369,9 +399,9 @@ public class SchedulerProcessor {
     }
 
     @BuildStep
-    @Record(RUNTIME_INIT)
     public void build(
-            SchedulerRecorder recorder,
+            ServiceRegistrar serviceRegistrar,
+            SchedulerConfig schedulerConfig,
             BuildProducer<SyntheticBeanBuildItem> syntheticBeans,
             List<ScheduledBusinessMethodItem> scheduledMethods,
             BuildProducer<GeneratedClassBuildItem> generatedClasses,
@@ -379,11 +409,11 @@ public class SchedulerProcessor {
             BuildProducer<GeneratedServiceProviderBuildItem> generatedServiceProviders,
             BuildProducer<ConstantBootstrapBuildItem> constantBootstraps,
             BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
-            AnnotationProxyBuildItem annotationProxy,
             List<ForceStartSchedulerBuildItem> schedulerForcedStartItems,
             DiscoveredImplementationsBuildItem discoveredImplementations) {
 
-        List<MutableScheduledMethod> scheduledMetadata = new ArrayList<>();
+        IndexView scheduledIndex = scheduledIndex();
+        List<ScheduledMethod> scheduledMetadata = new ArrayList<>();
         Function<String, String> generatedToBaseNameFun = new Function<String, String>() {
             @Override
             public String apply(String name) {
@@ -400,7 +430,7 @@ public class SchedulerProcessor {
         };
 
         // Make sure Scheduled.Never is always registered for reflection
-        // although it's not instantiated at runtime - the class is loaded by AnnotationProxyProvider
+        // although it's not instantiated at runtime - the class is referenced by the scheduled method metadata
         reflectiveClass.produce(ReflectiveClassBuildItem.builder(Scheduled.Never.class)
                 .constructors(false)
                 .build());
@@ -412,27 +442,67 @@ public class SchedulerProcessor {
                 .withParameters(false);
 
         for (ScheduledBusinessMethodItem scheduledMethod : scheduledMethods) {
-            MutableScheduledMethod metadata = new MutableScheduledMethod();
             String invokerClass = generateInvoker(scheduledMethod, gizmo);
             reflectiveClass.produce(ReflectiveClassBuildItem.builder(invokerClass).constructors().methods().fields().build());
-            metadata.setInvokerClassName(invokerClass);
             List<Scheduled> schedules = new ArrayList<>();
             for (AnnotationInstance scheduled : scheduledMethod.getSchedules()) {
-                schedules.add(annotationProxy.builder(scheduled, Scheduled.class).build(classOutput));
+                schedules.add(toMetadata(scheduled, scheduledIndex));
             }
             if (!schedules.isEmpty()) {
                 reflectiveClass.produce(ReflectiveClassBuildItem.builder(Scheduled.Never.class).constructors(false).build());
             }
-            metadata.setSchedules(schedules);
-            metadata.setDeclaringClassName(scheduledMethod.getMethod().declaringClass().toString());
-            metadata.setMethodName(scheduledMethod.getMethod().name());
-            scheduledMetadata.add(metadata);
+            scheduledMetadata.add(new ImmutableScheduledMethod(invokerClass,
+                    scheduledMethod.getMethod().declaringClass().toString(), scheduledMethod.getMethod().name(),
+                    schedules));
         }
 
-        syntheticBeans.produce(SyntheticBeanBuildItem.configure(SchedulerContext.class).setRuntimeInit()
-                .supplier(recorder.createContext(scheduledMetadata, !schedulerForcedStartItems.isEmpty(),
-                        discoveredImplementations.getAutoImplementation()))
+        CronType cronType = schedulerConfig.cronType();
+        boolean forceStart = !schedulerForcedStartItems.isEmpty();
+        String autoImplementation = discoveredImplementations.getAutoImplementation();
+        List<ScheduledMethod> metadata = List.copyOf(scheduledMetadata);
+        serviceRegistrar.forService(SchedulerContext.class)
+                .onStart(ctx -> SchedulerRecorder.createContext(cronType, metadata, forceStart, autoImplementation));
+
+        syntheticBeans.produce(SyntheticBeanBuildItem.configure(SchedulerContext.class)
+                .scope(Singleton.class)
+                .setRuntimeInit()
+                .serviceValue(SchedulerContext.class)
                 .done());
+    }
+
+    private static IndexView scheduledIndex() {
+        try {
+            return Index.of(Scheduled.class);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static ScheduledMetadata toMetadata(AnnotationInstance scheduled, IndexView index) {
+        return new ScheduledMetadata(
+                scheduled.valueWithDefault(index, "identity").asString(),
+                scheduled.valueWithDefault(index, "cron").asString(),
+                scheduled.valueWithDefault(index, "every").asString(),
+                scheduled.valueWithDefault(index, "delay").asLong(),
+                TimeUnit.valueOf(scheduled.valueWithDefault(index, "delayUnit").asEnum()),
+                scheduled.valueWithDefault(index, "delayed").asString(),
+                scheduled.valueWithDefault(index, "overdueGracePeriod").asString(),
+                Scheduled.ConcurrentExecution.valueOf(scheduled.valueWithDefault(index, "concurrentExecution").asEnum()),
+                skipPredicateClass(scheduled, index),
+                scheduled.valueWithDefault(index, "timeZone").asString(),
+                scheduled.valueWithDefault(index, "executeWith").asString(),
+                scheduled.valueWithDefault(index, "executionMaxDelay").asString(),
+                scheduled.valueWithDefault(index, "description").asString());
+    }
+
+    private static Class<? extends Scheduled.SkipPredicate> skipPredicateClass(AnnotationInstance scheduled, IndexView index) {
+        String className = scheduled.valueWithDefault(index, "skipExecutionIf").asClass().name().toString();
+        try {
+            return Class.forName(className, false, Thread.currentThread().getContextClassLoader())
+                    .asSubclass(Scheduled.SkipPredicate.class);
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException("Skip predicate class not found: " + className, e);
+        }
     }
 
     @BuildStep

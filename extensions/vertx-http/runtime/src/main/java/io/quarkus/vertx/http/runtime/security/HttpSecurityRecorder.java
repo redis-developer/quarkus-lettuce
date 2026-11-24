@@ -27,11 +27,8 @@ import jakarta.enterprise.inject.spi.CDI;
 
 import org.jboss.logging.Logger;
 
-import io.quarkus.arc.Arc;
-import io.quarkus.arc.runtime.BeanContainer;
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.RuntimeValue;
-import io.quarkus.runtime.ShutdownContext;
 import io.quarkus.runtime.annotations.Recorder;
 import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.security.AuthenticationCompletionException;
@@ -41,10 +38,8 @@ import io.quarkus.security.AuthenticationRedirectException;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.quarkus.security.identity.request.AnonymousAuthenticationRequest;
 import io.quarkus.security.spi.runtime.MethodDescription;
-import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
 import io.quarkus.vertx.http.runtime.VertxHttpBuildTimeConfig;
 import io.quarkus.vertx.http.runtime.VertxHttpConfig;
-import io.quarkus.vertx.http.runtime.cors.CORSConfig;
 import io.quarkus.vertx.http.security.MTLS;
 import io.smallrye.common.vertx.ContextLocals;
 import io.smallrye.common.vertx.VertxContext;
@@ -64,20 +59,6 @@ import io.vertx.ext.web.RoutingContext;
 @Recorder
 public class HttpSecurityRecorder {
     private static final Logger log = Logger.getLogger(HttpSecurityRecorder.class);
-
-    private final RuntimeValue<VertxHttpConfig> httpConfig;
-    private final VertxHttpBuildTimeConfig httpBuildTimeConfig;
-
-    public HttpSecurityRecorder(final RuntimeValue<VertxHttpConfig> httpConfig, VertxHttpBuildTimeConfig httpBuildTimeConfig) {
-        this.httpConfig = httpConfig;
-        this.httpBuildTimeConfig = httpBuildTimeConfig;
-    }
-
-    public void initializeHttpAuthenticatorHandler(RuntimeValue<AuthenticationHandler> handlerRuntimeValue,
-            BeanContainer beanContainer) {
-        handlerRuntimeValue.getValue().init(beanContainer.beanInstance(PathMatchingHttpSecurityPolicy.class),
-                HttpSecurityConfiguration.get().rolesMapping());
-    }
 
     public static Handler<RoutingContext> permissionCheckHandler() {
         return new Handler<RoutingContext>() {
@@ -153,44 +134,11 @@ public class HttpSecurityRecorder {
         };
     }
 
-    public Supplier<Map<String, Object>> createAdditionalSecEventPropsSupplier() {
-        return new Supplier<Map<String, Object>>() {
-            @Override
-            public Map<String, Object> get() {
-                if (Arc.container().requestContext().isActive()) {
-
-                    // if present, add RoutingContext from CDI request to the SecurityEvents produced in Security extension
-                    // it's done this way as Security extension is not Vert.x based, but users find RoutingContext useful
-                    var event = Arc.container().instance(CurrentVertxRequest.class).get().getCurrent();
-                    if (event != null) {
-
-                        if (event.user() instanceof QuarkusHttpUser user) {
-                            return Map.of(RoutingContext.class.getName(), event, SecurityIdentity.class.getName(),
-                                    user.getSecurityIdentity());
-                        }
-
-                        return Map.of(RoutingContext.class.getName(), event);
-                    }
-                }
-                return Map.of();
-            }
-        };
-    }
-
-    public RuntimeValue<CORSConfig> prepareHttpSecurityConfiguration(ShutdownContext shutdownContext) {
+    public static HttpSecurityConfiguration prepareHttpSecurityConfiguration(VertxHttpConfig httpConfig,
+            VertxHttpBuildTimeConfig httpBuildTimeConfig, Consumer<Runnable> onStop) {
         // this is done so that we prepare and validate HTTP Security config before the first incoming request
-        var config = HttpSecurityConfiguration.get(httpConfig.getValue(), httpBuildTimeConfig);
-        shutdownContext.addShutdownTask(HttpSecurityConfiguration::clear);
-        return new RuntimeValue<>(config.getCorsConfig());
-    }
-
-    /**
-     * Get the form authentication mechanism instance.
-     *
-     * @return the form authentication mechanism
-     */
-    public static FormAuthenticationMechanism getFormAuthMechanism() {
-        return HttpSecurityConfiguration.get().getFormAuthenticationMechanism();
+        onStop.accept(HttpSecurityConfiguration::clear);
+        return HttpSecurityConfiguration.get(httpConfig, httpBuildTimeConfig);
     }
 
     public static abstract class DefaultAuthFailureHandler implements BiConsumer<RoutingContext, Throwable> {
@@ -464,9 +412,11 @@ public class HttpSecurityRecorder {
      * Configure MTLS certificate role properties.
      *
      * @param httpConfig the HTTP runtime configuration
+     * @param httpSecurityConfiguration the HTTP Security configuration
      */
-    public static void setMtlsCertificateRoleProperties(VertxHttpConfig httpConfig) {
-        MtlsAuthenticationMechanism mTLS = HttpSecurityConfiguration.get().getMtlsAuthenticationMechanism();
+    public static void setMtlsCertificateRoleProperties(VertxHttpConfig httpConfig,
+            HttpSecurityConfiguration httpSecurityConfiguration) {
+        MtlsAuthenticationMechanism mTLS = httpSecurityConfiguration.getMtlsAuthenticationMechanism();
         if (mTLS != null) {
             if (httpConfig.auth().certificateRoleProperties().isPresent()) {
                 if (mTLS.isCertificateToRolesMapperSet()) {
@@ -519,23 +469,6 @@ public class HttpSecurityRecorder {
         return new RuntimeValue<>(new MethodDescription(className, methodName, paramTypes));
     }
 
-    public Function<String, Consumer<RoutingContext>> authMechanismSelectionInterceptorCreator() {
-        return new Function<String, Consumer<RoutingContext>>() {
-            @Override
-            public Consumer<RoutingContext> apply(String authMechanismName) {
-                // when endpoint is annotated with @HttpAuthenticationMechanism("my-mechanism"), we add this mechanism
-                // to the event so that when request is being authenticated, the HTTP authenticator will know
-                // what mechanism should be used
-                return new Consumer<RoutingContext>() {
-                    @Override
-                    public void accept(RoutingContext routingContext) {
-                        HttpAuthenticator.selectAuthMechanism(routingContext, authMechanismName);
-                    }
-                };
-            }
-        };
-    }
-
     public Consumer<RoutingContext> createEagerSecurityInterceptor(
             Function<String, Consumer<RoutingContext>> interceptorCreator, String annotationValue) {
         return interceptorCreator.apply(annotationValue);
@@ -552,7 +485,7 @@ public class HttpSecurityRecorder {
         };
     }
 
-    public void selectAuthMechanismViaAnnotation() {
+    public static void selectAuthMechanismViaAnnotation() {
         HttpAuthenticator.selectAuthMechanismWithAnnotation();
     }
 
@@ -562,15 +495,6 @@ public class HttpSecurityRecorder {
             roles.add(s.trim());
         }
         return Set.copyOf(roles);
-    }
-
-    /**
-     * Get the basic authentication mechanism instance.
-     *
-     * @return the basic authentication mechanism
-     */
-    public static BasicAuthenticationMechanism getBasicAuthMechanism() {
-        return HttpSecurityConfiguration.get().getBasicAuthenticationMechanism();
     }
 
 }

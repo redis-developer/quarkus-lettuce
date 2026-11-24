@@ -16,11 +16,14 @@ import org.testcontainers.utility.DockerImageName;
 
 import io.quarkus.datasource.common.runtime.DataSourceUtil;
 import io.quarkus.datasource.common.runtime.DatabaseKind;
+import io.quarkus.deployment.Capabilities;
+import io.quarkus.deployment.Capability;
 import io.quarkus.deployment.Feature;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.builditem.DevServicesComposeProjectBuildItem;
 import io.quarkus.devservices.common.ComposeLocator;
 import io.quarkus.devservices.common.ConfigureUtil;
+import io.quarkus.devservices.common.ContainerLocator;
 import io.quarkus.devservices.common.DevServicesHostUtil;
 import io.quarkus.devservices.common.JBossLoggingConsumer;
 import io.quarkus.devservices.common.Labels;
@@ -38,11 +41,17 @@ public class MySQLDevServicesProcessor {
 
     public static final String MY_CNF_CONFIG_OVERRIDE_PARAM_NAME = "TC_MY_CNF";
 
+    static final String DEV_SERVICE_LABEL = "quarkus-dev-service-mysql";
+
     private static final MySQLDatasourceServiceConfigurator configurator = new MySQLDatasourceServiceConfigurator();
+    private static final ContainerLocator mysqlContainerLocator = ContainerLocator
+            .locateContainerWithLabels(MYSQL_PORT, true, DEV_SERVICE_LABEL);
 
     @BuildStep
     DevServicesDatasourceProviderBuildItem setupMysql(
-            DevServicesComposeProjectBuildItem composeProjectBuildItem) {
+            DevServicesComposeProjectBuildItem composeProjectBuildItem,
+            Capabilities capabilities) {
+        boolean openTelemetryPresent = capabilities.isPresent(Capability.OPENTELEMETRY_TRACER);
         return new DevServicesDatasourceProviderBuildItem(DatabaseKind.MYSQL, new DevServicesDatasourceProvider() {
             @Override
             public String getFeature() {
@@ -63,13 +72,19 @@ public class MySQLDevServicesProcessor {
                         containerConfig.getFixedExposedPort(),
                         composeProjectBuildItem.getDefaultNetworkId(),
                         useSharedNetwork);
-                startupTimeout.ifPresent(container::withStartupTimeout);
+                startupTimeout.ifPresent(timeout -> {
+                    container.withStartupTimeout(timeout);
+                    // JdbcDatabaseContainer waits for a JDBC connection with its own timeout, not the wait strategy's
+                    container.withStartupTimeoutSeconds((int) timeout.toSeconds());
+                });
 
                 container.withUsername(effectiveUsername)
                         .withPassword(effectivePassword)
                         .withDatabaseName(effectiveDbName)
                         .withReuse(containerConfig.isReuse());
                 Labels.addDataSourceLabel(container, datasourceName);
+                ConfigureUtil.configureSharedServiceLabel(container, launchMode, DEV_SERVICE_LABEL,
+                        containerConfig.getServiceName());
                 Volumes.addVolumes(container, containerConfig.getVolumes());
 
                 container.withEnv(containerConfig.getContainerEnv());
@@ -79,6 +94,11 @@ public class MySQLDevServicesProcessor {
                             containerConfig.getContainerProperties().get(MY_CNF_CONFIG_OVERRIDE_PARAM_NAME));
                 }
 
+                // Testcontainers opens a JDBC connection as its startup check, before Agroal can apply JDBC properties.
+                // Prevent Connector/J from initializing a global OpenTelemetry instance from that connection.
+                if (openTelemetryPresent) {
+                    container.withUrlParam("openTelemetry", "DISABLED");
+                }
                 containerConfig.getAdditionalJdbcUrlProperties().forEach(container::withUrlParam);
                 containerConfig.getCommand().ifPresent(container::setCommand);
                 containerConfig.getInitScriptPath().ifPresent(container::withInitScripts);
@@ -88,6 +108,14 @@ public class MySQLDevServicesProcessor {
 
                 return new DatasourceStartableContainer<>(container);
 
+            }
+
+            @Override
+            public Optional<DevServicesDatasourceProvider.RunningDevServicesDatasource> findRunningSharedDatasource(
+                    LaunchMode launchMode, DevServicesDatasourceContainerConfig containerConfig) {
+                return mysqlContainerLocator
+                        .locateContainer(containerConfig.getServiceName(), containerConfig.isShared(), launchMode)
+                        .map(containerAddress -> configurator.composeRunningService(containerAddress, containerConfig));
             }
 
             @Override

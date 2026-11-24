@@ -59,7 +59,6 @@ import jakarta.ws.rs.ext.Providers;
 import jakarta.ws.rs.ext.ReaderInterceptor;
 import jakarta.ws.rs.ext.WriterInterceptor;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationTarget;
 import org.jboss.jandex.AnnotationTransformation;
@@ -89,6 +88,7 @@ import org.jboss.resteasy.reactive.common.model.ResourceWriter;
 import org.jboss.resteasy.reactive.common.processor.AdditionalReaderWriter;
 import org.jboss.resteasy.reactive.common.processor.AdditionalReaders;
 import org.jboss.resteasy.reactive.common.processor.AdditionalWriters;
+import org.jboss.resteasy.reactive.common.processor.BlockingDefault;
 import org.jboss.resteasy.reactive.common.processor.DefaultProducesHandler;
 import org.jboss.resteasy.reactive.common.processor.EndpointIndexer;
 import org.jboss.resteasy.reactive.common.processor.ResteasyReactiveDotNames;
@@ -154,8 +154,8 @@ import io.quarkus.arc.deployment.BeanContainerBuildItem;
 import io.quarkus.arc.deployment.BeanDiscoveryFinishedBuildItem;
 import io.quarkus.arc.deployment.GeneratedBeanBuildItem;
 import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
+import io.quarkus.arc.deployment.ValidationPhaseBuildItem;
 import io.quarkus.arc.processor.KotlinUtils;
-import io.quarkus.arc.runtime.BeanContainer;
 import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
 import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
@@ -261,6 +261,7 @@ import io.quarkus.vertx.http.runtime.RouteConstants;
 import io.quarkus.vertx.http.runtime.VertxHttpBuildTimeConfig;
 import io.quarkus.vertx.http.runtime.security.JaxRsPathMatchingHttpSecurityPolicy;
 import io.quarkus.vertx.http.runtime.security.SecurityHandlerPriorities;
+import io.smallrye.config.Config;
 import io.vertx.core.Handler;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
@@ -538,7 +539,9 @@ public class ResteasyReactiveProcessor {
     public void setupEndpoints(ApplicationIndexBuildItem applicationIndexBuildItem,
             BeanArchiveIndexBuildItem beanArchiveIndexBuildItem,
             BeanContainerBuildItem beanContainerBuildItem,
+            ValidationPhaseBuildItem validationPhase,
             ResteasyReactiveConfig config,
+            ResteasyReactiveServerConfig serverConfig,
             Optional<ResourceScanningResultBuildItem> resourceScanningResultBuildItem,
             BuildProducer<GeneratedClassBuildItem> generatedClassBuildItemBuildProducer,
             BuildProducer<GeneratedResourceBuildItem> generatedResourcesBuildProducer,
@@ -591,7 +594,7 @@ public class ResteasyReactiveProcessor {
 
         ParamConverterProviders paramConverterProviders = paramConverterProvidersBuildItem.getParamConverterProviders();
         Function<String, BeanFactory<?>> factoryFunction = s -> FactoryUtils.factory(s, singletonClasses, recorder,
-                beanContainerBuildItem);
+                beanContainerBuildItem, validationPhase);
         paramConverterProviders.initializeDefaultFactories(factoryFunction);
         paramConverterProviders.sort();
 
@@ -619,6 +622,18 @@ public class ResteasyReactiveProcessor {
             final boolean filtersAccessResourceMethod = filtersAccessResourceMethod(
                     resourceInterceptorsBuildItem.getResourceInterceptors());
 
+            boolean defaultRunOnVirtualThread = false;
+            if (serverConfig.blockingSignaturesExecutionMode().isVirtualThread()) {
+                if (appResult.getBlockingDefault() == BlockingDefault.AUTOMATIC) {
+                    defaultRunOnVirtualThread = true;
+                } else {
+                    log.warnf(
+                            "The 'quarkus.rest.blocking.signatures.execution.mode' property is ignored because an annotation on the"
+                                    + " 'Application' class already set the execution model to '%s'",
+                            appResult.getBlockingDefault());
+                }
+            }
+
             BiConsumer<String, BiFunction<String, ClassVisitor, ClassVisitor>> transformationConsumer = (name,
                     function) -> bytecodeTransformerBuildItemBuildProducer
                             .produce(new BytecodeTransformerBuildItem(name, function));
@@ -643,6 +658,7 @@ public class ResteasyReactiveProcessor {
                     .setInjectableBeans(injectableBeans)
                     .setAdditionalWriters(additionalWriters)
                     .setDefaultBlocking(appResult.getBlockingDefault())
+                    .setDefaultRunOnVirtualThread(defaultRunOnVirtualThread)
                     .setRemovesTrailingSlash(config.removesTrailingSlash())
                     .setApplicationScanningResult(appResult)
                     .setMultipartReturnTypeIndexerExtension(
@@ -1390,6 +1406,7 @@ public class ResteasyReactiveProcessor {
     @Record(value = ExecutionTime.STATIC_INIT, useIdentityComparisonForParameters = false)
     public void serverSerializers(ResteasyReactiveRecorder recorder,
             BeanContainerBuildItem beanContainerBuildItem,
+            ValidationPhaseBuildItem validationPhase,
             ApplicationResultBuildItem applicationResultBuildItem,
             List<MessageBodyReaderBuildItem> additionalMessageBodyReaders,
             List<MessageBodyWriterBuildItem> additionalMessageBodyWriters,
@@ -1402,13 +1419,13 @@ public class ResteasyReactiveProcessor {
         ServerSerialisers serialisers = recorder.createServerSerialisers();
         SerializersUtil.setupSerializers(recorder, reflectiveClass, additionalMessageBodyReaders,
                 additionalMessageBodyWriters, messageBodyReaderOverrideBuildItems, messageBodyWriterOverrideBuildItems,
-                beanContainerBuildItem, applicationResultBuildItem, serialisers,
+                beanContainerBuildItem, validationPhase, applicationResultBuildItem, serialisers,
                 RuntimeType.SERVER);
 
         // built-ins
         for (Serialisers.BuiltinWriter builtinWriter : ServerSerialisers.BUILTIN_WRITERS) {
             registerWriter(recorder, serialisers, builtinWriter.entityClass.getName(), builtinWriter.writerClass.getName(),
-                    beanContainerBuildItem.getValue(),
+                    beanContainerBuildItem, validationPhase,
                     builtinWriter.mediaType);
             reflectiveClass.produce(ReflectiveClassBuildItem.builder(builtinWriter.writerClass.getName())
                     .build());
@@ -1420,7 +1437,7 @@ public class ResteasyReactiveProcessor {
                 effectiveReaderClassName = builtInReaderOverrides.get(effectiveReaderClassName);
             }
             registerReader(recorder, serialisers, builtinReader.entityClass.getName(), effectiveReaderClassName,
-                    beanContainerBuildItem.getValue(),
+                    beanContainerBuildItem, validationPhase,
                     builtinReader.mediaType, builtinReader.constraint);
             reflectiveClass.produce(ReflectiveClassBuildItem.builder(effectiveReaderClassName)
                     .build());
@@ -1650,6 +1667,7 @@ public class ResteasyReactiveProcessor {
     @BuildStep
     @Record(value = ExecutionTime.STATIC_INIT, useIdentityComparisonForParameters = false)
     public void setupDeployment(BeanContainerBuildItem beanContainerBuildItem,
+            ValidationPhaseBuildItem validationPhase,
             Capabilities capabilities,
             ResteasyReactiveConfig config,
             Optional<ResourceScanningResultBuildItem> resourceScanningResultBuildItem,
@@ -1703,7 +1721,7 @@ public class ResteasyReactiveProcessor {
         ContextResolvers contextResolvers = contextResolversBuildItem.getContextResolvers();
         ParamConverterProviders paramConverterProviders = paramConverterProvidersBuildItem.getParamConverterProviders();
         Function<String, BeanFactory<?>> factoryFunction = s -> FactoryUtils.factory(s, singletonClasses, recorder,
-                beanContainerBuildItem);
+                beanContainerBuildItem, validationPhase);
         interceptors.initializeDefaultFactories(factoryFunction);
         contextResolvers.initializeDefaultFactories(factoryFunction);
         exceptionMapping.initializeDefaultFactories(factoryFunction);
@@ -1720,7 +1738,7 @@ public class ResteasyReactiveProcessor {
             resourceFeature
                     .setFactory(
                             FactoryUtils.factory(feature.getClassName(), singletonClasses, recorder,
-                                    beanContainerBuildItem));
+                                    beanContainerBuildItem, validationPhase));
             feats.addFeature(resourceFeature);
         }
 
@@ -1728,7 +1746,8 @@ public class ResteasyReactiveProcessor {
         for (DynamicFeatureBuildItem additionalDynamicFeature : dynamicFeatures) {
             ResourceDynamicFeature resourceFeature = new ResourceDynamicFeature();
             resourceFeature.setFactory(
-                    recorder.factory(additionalDynamicFeature.getClassName(), beanContainerBuildItem.getValue()));
+                    FactoryUtils.factory(additionalDynamicFeature.getClassName(), recorder, beanContainerBuildItem,
+                            validationPhase));
             dynamicFeats.addFeature(resourceFeature);
         }
 
@@ -1737,7 +1756,8 @@ public class ResteasyReactiveProcessor {
         for (AdditionalReaderWriter.Entry additionalReader : additionalReaders.get()) {
             String readerClass = additionalReader.getHandlerClass();
             registerReader(recorder, serialisers, additionalReader.getEntityClass(), readerClass,
-                    beanContainerBuildItem.getValue(), additionalReader.getMediaType(), additionalReader.getConstraint());
+                    beanContainerBuildItem, validationPhase, additionalReader.getMediaType(),
+                    additionalReader.getConstraint());
             reflectiveClass.produce(
                     ReflectiveClassBuildItem.builder(readerClass).build());
         }
@@ -1745,13 +1765,13 @@ public class ResteasyReactiveProcessor {
         for (AdditionalReaderWriter.Entry entry : additionalWriters.get()) {
             String writerClass = entry.getHandlerClass();
             registerWriter(recorder, serialisers, entry.getEntityClass(), writerClass,
-                    beanContainerBuildItem.getValue(), entry.getMediaType());
+                    beanContainerBuildItem, validationPhase, entry.getMediaType());
             reflectiveClass.produce(
                     ReflectiveClassBuildItem.builder(writerClass).build());
         }
 
-        BeanFactory<ResteasyReactiveInitialiser> initClassFactory = recorder.factory(QUARKUS_INIT_CLASS,
-                beanContainerBuildItem.getValue());
+        BeanFactory<ResteasyReactiveInitialiser> initClassFactory = FactoryUtils.factory(QUARKUS_INIT_CLASS, recorder,
+                beanContainerBuildItem, validationPhase);
         // the generated dispatcher is instantiated reflectively by the recorder
         reflectiveClass.produce(ReflectiveClassBuildItem.builder(HANDLER_DISPATCHER_CLASS).build());
 
@@ -2262,7 +2282,7 @@ public class ResteasyReactiveProcessor {
     }
 
     private Optional<String> getAppPath(Optional<String> newPropertyValue) {
-        Optional<String> legacyProperty = ConfigProvider.getConfig().getOptionalValue("quarkus.rest.path", String.class);
+        Optional<String> legacyProperty = Config.get().getOptionalValue("quarkus.rest.path", String.class);
         if (legacyProperty.isPresent()) {
             return legacyProperty;
         }
@@ -2304,19 +2324,19 @@ public class ResteasyReactiveProcessor {
     }
 
     private void registerWriter(ResteasyReactiveRecorder recorder, ServerSerialisers serialisers, String entityClass,
-            String writerClass, BeanContainer beanContainer,
+            String writerClass, BeanContainerBuildItem beanContainer, ValidationPhaseBuildItem validationPhase,
             String mediaType) {
         ResourceWriter writer = new ResourceWriter();
-        writer.setFactory(recorder.factory(writerClass, beanContainer));
+        writer.setFactory(FactoryUtils.factory(writerClass, recorder, beanContainer, validationPhase));
         writer.setMediaTypeStrings(Collections.singletonList(mediaType));
         recorder.registerWriter(serialisers, entityClass, writer);
     }
 
     private void registerReader(ResteasyReactiveRecorder recorder, ServerSerialisers serialisers, String entityClass,
-            String readerClass, BeanContainer beanContainer, String mediaType,
-            RuntimeType constraint) {
+            String readerClass, BeanContainerBuildItem beanContainer, ValidationPhaseBuildItem validationPhase,
+            String mediaType, RuntimeType constraint) {
         ResourceReader reader = new ResourceReader();
-        reader.setFactory(recorder.factory(readerClass, beanContainer));
+        reader.setFactory(FactoryUtils.factory(readerClass, recorder, beanContainer, validationPhase));
         reader.setMediaTypeStrings(Collections.singletonList(mediaType));
         reader.setConstraint(constraint);
         recorder.registerReader(serialisers, entityClass, reader);

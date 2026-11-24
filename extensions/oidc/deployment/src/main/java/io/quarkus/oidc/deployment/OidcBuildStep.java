@@ -87,12 +87,13 @@ import io.quarkus.oidc.UserInfo;
 import io.quarkus.oidc.UserInfoCache;
 import io.quarkus.oidc.common.OidcRequestFilter;
 import io.quarkus.oidc.common.OidcResponseFilter;
+import io.quarkus.oidc.runtime.AttestationJwksHandler;
+import io.quarkus.oidc.runtime.AttestationKeyRegistry;
 import io.quarkus.oidc.runtime.BackChannelLogoutHandler;
 import io.quarkus.oidc.runtime.ClientIdMetadataHandler;
 import io.quarkus.oidc.runtime.DefaultTenantConfigResolver;
 import io.quarkus.oidc.runtime.DefaultTokenIntrospectionUserInfoCache;
 import io.quarkus.oidc.runtime.DefaultTokenStateManager;
-import io.quarkus.oidc.runtime.Jose4jRecorder;
 import io.quarkus.oidc.runtime.OidcAuthenticationMechanism;
 import io.quarkus.oidc.runtime.OidcConfigurationAndProviderProducer;
 import io.quarkus.oidc.runtime.OidcIdentityProvider;
@@ -222,7 +223,8 @@ public class OidcBuildStep {
                 .addBeanClass(DefaultTenantConfigResolver.class)
                 .addBeanClass(DefaultTokenStateManager.class)
                 .addBeanClass(OidcSessionImpl.class)
-                .addBeanClass(AzureAccessTokenCustomizer.class);
+                .addBeanClass(AzureAccessTokenCustomizer.class)
+                .addBeanClass(AttestationKeyRegistry.class);
         additionalBeans.produce(builder.build());
 
         if (isRouteAllowed(buildTimeConfig, OidcRoute.BACKCHANNEL_LOGOUT)) {
@@ -234,12 +236,9 @@ public class OidcBuildStep {
         if (isRouteAllowed(buildTimeConfig, OidcRoute.CLIENT_ID_METADATA)) {
             additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(ClientIdMetadataHandler.class));
         }
-    }
-
-    @BuildStep
-    @Record(ExecutionTime.STATIC_INIT)
-    public void initJose4J(Jose4jRecorder recorder) {
-        recorder.initialize();
+        if (isRouteAllowed(buildTimeConfig, OidcRoute.CLIENT_ATTESTATION)) {
+            additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(AttestationJwksHandler.class));
+        }
     }
 
     @BuildStep(onlyIf = IsCacheEnabled.class)
@@ -568,6 +567,17 @@ public class OidcBuildStep {
         }
         Handler<RoutingContext> handler = recorder.getClientIdMetadataHandler(beanContainerBuildItem.getValue());
         return new FilterBuildItem(handler, SecurityHandlerPriorities.AUTHENTICATION + 1);
+    }
+
+    @Record(ExecutionTime.STATIC_INIT)
+    @BuildStep
+    FilterBuildItem registerAttestationJwksHandler(OidcBuildTimeConfig buildTimeConfig,
+            BeanContainerBuildItem beanContainerBuildItem, OidcRecorder recorder) {
+        if (!isRouteAllowed(buildTimeConfig, OidcRoute.CLIENT_ATTESTATION)) {
+            return null;
+        }
+        Handler<RoutingContext> handler = recorder.getAttestationJwksHandler(beanContainerBuildItem.getValue());
+        return new FilterBuildItem(handler, SecurityHandlerPriorities.AUTHORIZATION - 50);
     }
 
     private static boolean areEagerSecInterceptorsSupported(Capabilities capabilities,

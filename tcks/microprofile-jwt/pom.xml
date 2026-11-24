@@ -13,7 +13,7 @@
     <name>Quarkus - TCK - MicroProfile JWT</name>
 
     <properties>
-        <microprofile-jwt-auth-tck.version>2.1</microprofile-jwt-auth-tck.version>
+        <microprofile-jwt-auth-tck.version>2.2.1</microprofile-jwt-auth-tck.version>
     </properties>
 
     <build>
@@ -99,10 +99,6 @@
                     <groupId>org.osgi</groupId>
                     <artifactId>org.osgi.annotation.versioning</artifactId>
                 </exclusion>
-                <exclusion>
-                    <groupId>org.bitbucket.b_c</groupId>
-                    <artifactId>jose4j</artifactId>
-                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -118,10 +114,6 @@
                 <exclusion>
                     <groupId>org.osgi</groupId>
                     <artifactId>org.osgi.annotation.versioning</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.bitbucket.b_c</groupId>
-                    <artifactId>jose4j</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>

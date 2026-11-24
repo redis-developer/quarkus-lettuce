@@ -21,7 +21,6 @@ import java.util.stream.Collectors;
 
 import jakarta.enterprise.event.Event;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import io.netty.handler.codec.http.HttpHeaderNames;
@@ -36,6 +35,7 @@ import io.quarkus.security.identity.request.TrustedAuthenticationRequest;
 import io.quarkus.security.identity.request.UsernamePasswordAuthenticationRequest;
 import io.quarkus.security.spi.runtime.SecurityEventHelper;
 import io.quarkus.vertx.http.runtime.FormAuthConfig;
+import io.smallrye.config.Config;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.UniEmitter;
 import io.vertx.core.Handler;
@@ -43,13 +43,11 @@ import io.vertx.core.MultiMap;
 import io.vertx.core.http.Cookie;
 import io.vertx.core.http.CookieSameSite;
 import io.vertx.core.http.HttpMethod;
-import io.vertx.core.http.impl.CookieImpl;
 import io.vertx.ext.web.RoutingContext;
 
 public class FormAuthenticationMechanism implements HttpAuthenticationMechanism {
     private static final String FORM = "form";
-    private static final String COOKIE_NAME = "io.quarkus.vertx.http.runtime.security.form.cookie-name";
-    private static final String COOKIE_PATH = "io.quarkus.vertx.http.runtime.security.form.cookie-path";
+    private static final String LOGIN_MANAGER = "io.quarkus.vertx.http.runtime.security.form.login-manager";
     private static final Logger log = Logger.getLogger(FormAuthenticationMechanism.class);
 
     private final String loginPage;
@@ -110,7 +108,7 @@ public class FormAuthenticationMechanism implements HttpAuthenticationMechanism 
         this.cookieSameSite = CookieSameSite.valueOf(runtimeForm.cookieSameSite().name());
         this.isFormAuthEventObserver = SecurityEventHelper.isEventObserved(createLoginEvent(null),
                 Arc.container().beanManager(),
-                ConfigProvider.getConfig().getValue("quarkus.security.events.enabled", Boolean.class));
+                Config.get().getValue("quarkus.security.events.enabled", Boolean.class));
         this.formAuthEvent = this.isFormAuthEventObserver
                 ? Arc.container().beanManager().getEvent().select(FormAuthenticationEvent.class)
                 : null;
@@ -193,6 +191,10 @@ public class FormAuthenticationMechanism implements HttpAuthenticationMechanism 
             verifyRedirectBackLocation(exchange.request().absoluteURI(), redirect.getValue());
             redirect.setSecure(exchange.request().isSSL());
             redirect.setSameSite(cookieSameSite);
+            redirect.setPath(cookiePath);
+            if (cookieDomain != null) {
+                redirect.setDomain(cookieDomain);
+            }
             location = redirect.getValue();
             exchange.response().addCookie(redirect.setMaxAge(0));
         } else {
@@ -280,8 +282,7 @@ public class FormAuthenticationMechanism implements HttpAuthenticationMechanism 
                         @Override
                         public SecurityIdentity apply(SecurityIdentity identity) {
                             // used for logout
-                            context.put(COOKIE_NAME, loginManager.getCookieName());
-                            context.put(COOKIE_PATH, cookiePath);
+                            context.put(LOGIN_MANAGER, loginManager);
                             return addRoutingCtxToIdentityIfMissing(identity, context);
                         }
                     });
@@ -301,8 +302,7 @@ public class FormAuthenticationMechanism implements HttpAuthenticationMechanism 
                     @Override
                     public SecurityIdentity apply(SecurityIdentity identity) {
                         // used for logout
-                        context.put(COOKIE_NAME, loginManager.getCookieName());
-                        context.put(COOKIE_PATH, cookiePath);
+                        context.put(LOGIN_MANAGER, loginManager);
                         return addRoutingCtxToIdentityIfMissing(identity, context);
                     }
                 });
@@ -358,12 +358,8 @@ public class FormAuthenticationMechanism implements HttpAuthenticationMechanism 
 
     public static void logout(RoutingContext routingContext) {
         Objects.requireNonNull(routingContext);
-        String cookieName = Objects.requireNonNull(routingContext.get(COOKIE_NAME));
-        String cookiePath = Objects.requireNonNull(routingContext.get(COOKIE_PATH));
-        Cookie cookie = new CookieImpl(cookieName, "");
-        cookie.setMaxAge(0);
-        cookie.setPath(cookiePath);
-        routingContext.response().addCookie(cookie);
+        PersistentLoginManager loginManager = Objects.requireNonNull(routingContext.get(LOGIN_MANAGER));
+        loginManager.clear(routingContext);
     }
 
     private static String startWithSlash(String page) {

@@ -23,8 +23,6 @@ import java.util.Set;
 import java.util.logging.Formatter;
 import java.util.stream.Collectors;
 
-import org.eclipse.microprofile.config.Config;
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 import org.jboss.logmanager.PropertyValues;
 import org.jboss.logmanager.formatters.StructuredFormatter;
@@ -36,6 +34,7 @@ import io.quarkus.runtime.ApplicationConfig;
 import io.quarkus.runtime.RuntimeValue;
 import io.quarkus.runtime.annotations.Recorder;
 import io.quarkus.runtime.logging.NamedHandlerType;
+import io.smallrye.config.Config;
 
 @Recorder
 public class LoggingJsonRecorder {
@@ -52,29 +51,22 @@ public class LoggingJsonRecorder {
         this.applicationConfig = applicationConfig;
     }
 
-    public RuntimeValue<Optional<Formatter>> initializeConsoleJsonLogging() {
-        return getFormatter(runtimeConfig.getValue().consoleJson(), jsonProviders);
-    }
-
-    public RuntimeValue<Optional<Formatter>> initializeFileJsonLogging() {
-        return getFormatter(runtimeConfig.getValue().fileJson(), jsonProviders);
-    }
-
-    public RuntimeValue<Optional<Formatter>> initializeSyslogJsonLogging() {
-        return getFormatter(runtimeConfig.getValue().syslogJson(), jsonProviders);
-    }
-
-    public RuntimeValue<Optional<Formatter>> initializeSocketJsonLogging() {
-        return getFormatter(runtimeConfig.getValue().socketJson(), jsonProviders);
+    public static Optional<Formatter> createFormatter(JsonConfig config, List<String> providerClassNames,
+            ApplicationConfig applicationConfig) {
+        return getFormatter(config, instantiateProviders(providerClassNames), applicationConfig);
     }
 
     public RuntimeValue<Map<NamedHandlerType, Map<String, Optional<Formatter>>>> initializeNamedJsonLogging() {
         JsonLogConfig config = runtimeConfig.getValue();
         Map<NamedHandlerType, Map<String, Optional<Formatter>>> result = new EnumMap<>(NamedHandlerType.class);
-        result.put(NamedHandlerType.CONSOLE, collectFormatters(config.jsonConsoleHandlers(), jsonProviders));
-        result.put(NamedHandlerType.FILE, collectFormatters(config.jsonFileHandlers(), jsonProviders));
-        result.put(NamedHandlerType.SYSLOG, collectFormatters(config.jsonSyslogHandlers(), jsonProviders));
-        result.put(NamedHandlerType.SOCKET, collectFormatters(config.jsonSocketHandlers(), jsonProviders));
+        result.put(NamedHandlerType.CONSOLE,
+                collectFormatters(config.jsonConsoleHandlers(), jsonProviders, applicationConfig.getValue()));
+        result.put(NamedHandlerType.FILE,
+                collectFormatters(config.jsonFileHandlers(), jsonProviders, applicationConfig.getValue()));
+        result.put(NamedHandlerType.SYSLOG,
+                collectFormatters(config.jsonSyslogHandlers(), jsonProviders, applicationConfig.getValue()));
+        result.put(NamedHandlerType.SOCKET,
+                collectFormatters(config.jsonSocketHandlers(), jsonProviders, applicationConfig.getValue()));
         return new RuntimeValue<>(result);
     }
 
@@ -82,7 +74,7 @@ public class LoggingJsonRecorder {
         jsonProviders = instantiateProviders(classNames);
     }
 
-    private List<JsonProvider> instantiateProviders(List<String> classNames) {
+    private static List<JsonProvider> instantiateProviders(List<String> classNames) {
         List<JsonProvider> providers = new ArrayList<>(classNames.size());
         for (String className : classNames) {
             try {
@@ -95,18 +87,20 @@ public class LoggingJsonRecorder {
         return providers;
     }
 
-    private Map<String, Optional<Formatter>> collectFormatters(
-            Map<String, ? extends JsonLogConfig.JsonHandlerConfig> handlers, List<JsonProvider> providers) {
+    private static Map<String, Optional<Formatter>> collectFormatters(
+            Map<String, ? extends JsonLogConfig.JsonHandlerConfig> handlers, List<JsonProvider> providers,
+            ApplicationConfig applicationConfig) {
         Map<String, Optional<Formatter>> formatters = new HashMap<>();
         handlers.forEach((name, config) -> {
             if (config.json().enabled().isPresent()) {
-                formatters.put(name, getFormatter(config.json(), providers).getValue());
+                formatters.put(name, getFormatter(config.json(), providers, applicationConfig));
             }
         });
         return formatters;
     }
 
-    private RuntimeValue<Optional<Formatter>> getFormatter(JsonConfig config, List<JsonProvider> providers) {
+    private static Optional<Formatter> getFormatter(JsonConfig config, List<JsonProvider> providers,
+            ApplicationConfig applicationConfig) {
         String keyOverrides = config.keyOverrides().orElse(null);
         Set<String> excludedKeys = config.excludedKeys().orElse(Set.of());
         Map<String, AdditionalField> additionalFields = config.additionalField().entrySet().stream()
@@ -119,15 +113,17 @@ public class LoggingJsonRecorder {
             overridableJsonConfig = addEcsFieldOverrides(overridableJsonConfig);
         } else if (config.logFormat() == JsonConfig.LogFormat.GCP) {
             overridableJsonConfig = addGCPFieldOverrides(overridableJsonConfig);
+        } else if (config.logFormat() == JsonConfig.LogFormat.LOGSTASH) {
+            overridableJsonConfig = addLogstashFieldOverrides(overridableJsonConfig);
         }
 
-        return getDefaultFormatter(config, overridableJsonConfig, providers);
+        return getDefaultFormatter(config, overridableJsonConfig, providers, applicationConfig);
     }
 
-    private RuntimeValue<Optional<Formatter>> getDefaultFormatter(JsonConfig config,
-            OverridableJsonConfig overridableJsonConfig, List<JsonProvider> providers) {
+    private static Optional<Formatter> getDefaultFormatter(JsonConfig config,
+            OverridableJsonConfig overridableJsonConfig, List<JsonProvider> providers, ApplicationConfig applicationConfig) {
         if (!config.enabled().orElse(true)) {
-            return new RuntimeValue<>(Optional.empty());
+            return Optional.empty();
         }
 
         final JsonFormatter formatter;
@@ -138,9 +134,9 @@ public class LoggingJsonRecorder {
         }
         formatter.setLogFormat(config.logFormat());
         if (JsonConfig.LogFormat.GCP == config.logFormat()) {
-            formatter.setTracePrefix("projects/" + applicationConfig.getValue().name().orElse("") + "/traces/");
+            formatter.setTracePrefix("projects/" + applicationConfig.name().orElse("") + "/traces/");
         }
-        formatter.setFlatMdc(config.mdcFlatFields());
+        formatter.setFlatMdc(config.mdcFlatFields() || config.logFormat() == JsonConfig.LogFormat.LOGSTASH);
         formatter.setMdcKeyOverrides(config.mdcKeyOverrides());
         formatter.setStructuredAccessLog(config.structuredAccessLog());
         formatter.setExcludedKeys(overridableJsonConfig.excludedKeys());
@@ -161,6 +157,12 @@ public class LoggingJsonRecorder {
                                 ? StructuredFormatter.ExceptionOutputType.DETAILED_AND_FORMATTED
                                 : config.exceptionOutputType());
                 break;
+            case LOGSTASH:
+                formatter.setExceptionOutputType(
+                        config.exceptionOutputType() == StructuredFormatter.ExceptionOutputType.DETAILED
+                                ? StructuredFormatter.ExceptionOutputType.FORMATTED
+                                : config.exceptionOutputType());
+                break;
             default:
                 formatter.setExceptionOutputType(config.exceptionOutputType());
                 break;
@@ -171,10 +173,10 @@ public class LoggingJsonRecorder {
         if (!zoneId.equals("default")) {
             formatter.setZoneId(zoneId);
         }
-        return new RuntimeValue<>(Optional.of(formatter));
+        return Optional.of(formatter);
     }
 
-    private OverridableJsonConfig addEcsFieldOverrides(OverridableJsonConfig overridableJsonConfig) {
+    private static OverridableJsonConfig addEcsFieldOverrides(OverridableJsonConfig overridableJsonConfig) {
         EnumMap<Key, String> keyOverrides = PropertyValues.stringToEnumMap(Key.class, overridableJsonConfig.keyOverrides());
         keyOverrides.putIfAbsent(Key.TIMESTAMP, "@timestamp");
         keyOverrides.putIfAbsent(Key.LOGGER_NAME, "log.logger");
@@ -201,7 +203,7 @@ public class LoggingJsonRecorder {
         additionalFields.computeIfAbsent(ECS_VERSION.getKey(), k -> new AdditionalField("1.12.2", Type.STRING));
         additionalFields.computeIfAbsent(DATA_STREAM_TYPE.getKey(), k -> new AdditionalField("logs", Type.STRING));
 
-        Config quarkusConfig = ConfigProvider.getConfig();
+        Config quarkusConfig = Config.get();
         quarkusConfig.getOptionalValue("quarkus.application.name", String.class).ifPresent(
                 s -> additionalFields.computeIfAbsent(SERVICE_NAME.getKey(), k -> new AdditionalField(s, Type.STRING)));
         quarkusConfig.getOptionalValue("quarkus.application.version", String.class).ifPresent(
@@ -212,7 +214,7 @@ public class LoggingJsonRecorder {
         return new OverridableJsonConfig(PropertyValues.mapToString(keyOverrides), excludedKeys, additionalFields);
     }
 
-    private OverridableJsonConfig addGCPFieldOverrides(OverridableJsonConfig overridableJsonConfig) {
+    private static OverridableJsonConfig addGCPFieldOverrides(OverridableJsonConfig overridableJsonConfig) {
         EnumMap<Key, String> keyOverrides = PropertyValues.stringToEnumMap(Key.class, overridableJsonConfig.keyOverrides());
         keyOverrides.putIfAbsent(Key.LEVEL, "severity");
         keyOverrides.putIfAbsent(Key.STACK_TRACE, "stack_trace");
@@ -223,6 +225,33 @@ public class LoggingJsonRecorder {
         additionalFields.computeIfAbsent(TRACE.getKey(), k -> new AdditionalField("", Type.STRING));
         additionalFields.computeIfAbsent(SPAN_ID.getKey(), k -> new AdditionalField("", Type.STRING));
         additionalFields.computeIfAbsent(TRACE_SAMPLED.getKey(), k -> new AdditionalField("", Type.STRING));
+
+        return new OverridableJsonConfig(PropertyValues.mapToString(keyOverrides), excludedKeys, additionalFields);
+    }
+
+    /**
+     * Field conventions of the logstash-logback-encoder, so records from Quarkus services can be
+     * ingested by the same Logstash or ELK pipelines as Logback-based services.
+     */
+    private static OverridableJsonConfig addLogstashFieldOverrides(OverridableJsonConfig overridableJsonConfig) {
+        EnumMap<Key, String> keyOverrides = PropertyValues.stringToEnumMap(Key.class, overridableJsonConfig.keyOverrides());
+        keyOverrides.putIfAbsent(Key.TIMESTAMP, "@timestamp");
+        keyOverrides.putIfAbsent(Key.LOGGER_NAME, "logger_name");
+        keyOverrides.putIfAbsent(Key.THREAD_NAME, "thread_name");
+        keyOverrides.putIfAbsent(Key.STACK_TRACE, "stack_trace");
+
+        Set<String> excludedKeys = new HashSet<>(overridableJsonConfig.excludedKeys());
+        excludedKeys.add(Key.SEQUENCE.getKey());
+        excludedKeys.add(Key.LOGGER_CLASS_NAME.getKey());
+        excludedKeys.add(Key.HOST_NAME.getKey());
+        excludedKeys.add(Key.PROCESS_ID.getKey());
+        excludedKeys.add(Key.PROCESS_NAME.getKey());
+        excludedKeys.add(Key.THREAD_ID.getKey());
+        excludedKeys.add(Key.RECORD.getKey());
+        excludedKeys.add(Key.NDC.getKey());
+
+        Map<String, AdditionalField> additionalFields = new LinkedHashMap<>(overridableJsonConfig.additionalFields());
+        additionalFields.computeIfAbsent("@version", k -> new AdditionalField("1", Type.STRING));
 
         return new OverridableJsonConfig(PropertyValues.mapToString(keyOverrides), excludedKeys, additionalFields);
     }

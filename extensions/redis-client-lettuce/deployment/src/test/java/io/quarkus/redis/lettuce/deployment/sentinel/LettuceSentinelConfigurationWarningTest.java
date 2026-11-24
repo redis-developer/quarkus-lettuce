@@ -14,7 +14,7 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import io.quarkus.redis.client.RedisClientName;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.lettuce.deployment.RedisSentinelTestResource;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceRecorder;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceClientSetup;
 import io.quarkus.test.QuarkusExtensionTest;
 import io.quarkus.test.common.QuarkusTestResource;
 
@@ -49,7 +49,7 @@ public class LettuceSentinelConfigurationWarningTest {
             .overrideConfigKey("quarkus.redis.reader.master-name", "${redis.sentinel.master-name}")
             .overrideConfigKey("quarkus.redis.reader.role", "replica")
             .overrideConfigKey("quarkus.redis.reader.replicas", "never")
-            .setLogRecordPredicate(record -> LettuceRecorder.class.getName().equals(record.getLoggerName())
+            .setLogRecordPredicate(record -> LettuceClientSetup.class.getName().equals(record.getLoggerName())
                     && record.getLevel().intValue() >= Level.WARNING.intValue())
             .assertLogRecords(records -> {
                 assertThat(records).extracting(LettuceSentinelConfigurationWarningTest::message)

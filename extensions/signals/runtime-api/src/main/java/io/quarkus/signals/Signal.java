@@ -8,7 +8,6 @@ import jakarta.enterprise.util.TypeLiteral;
 import io.quarkus.arc.Arc;
 import io.quarkus.signals.spi.Signals;
 import io.smallrye.common.annotation.CheckReturnValue;
-import io.smallrye.common.annotation.Experimental;
 import io.smallrye.mutiny.Uni;
 
 /**
@@ -53,7 +52,7 @@ import io.smallrye.mutiny.Uni;
  * <p>
  * When a signal is emitted, the container resolves the set of matching receivers using the signal type, qualifiers, and
  * &mdash; for request emissions &mdash; the response type. The resolution rules are inspired by the
- * <a href="https://jakarta.ee/specifications/cdi/4.1/jakarta-cdi-spec-4.1#observer_resolution">CDI observer resolution</a>
+ * <a href="https://jakarta.ee/specifications/cdi/5.0/jakarta-cdi-spec-5.0.html#observer_resolution">CDI observer resolution</a>
  * rules:
  * <ul>
  * <li>A receiver matches if the signal type is assignable to the received signal type.</li>
@@ -66,7 +65,6 @@ import io.smallrye.mutiny.Uni;
  * @param <T> the type of the signal object
  * @see Receives
  */
-@Experimental("This API is experimental and may change in the future")
 public interface Signal<T> {
 
     /**

@@ -17,26 +17,19 @@ import io.quarkus.redis.datasource.hash.ReactiveHashScanCursor;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommonConverters;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
 public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCommands<K, V>
         implements ReactiveHashCommands<K, F, V> {
 
-    private final ReactiveRedisDataSource dataSource;
     private final Type fieldType;
 
     public LettuceReactiveHashCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType, Type fieldType, Type valueType) {
-        super(connection, keyType, valueType, new Marshaller(keyType, fieldType, valueType));
-        this.dataSource = dataSource;
+            LettuceConnectionSource source, Type keyType, Type fieldType, Type valueType) {
+        super(dataSource, source, keyType, valueType, new Marshaller(keyType, fieldType, valueType));
         this.fieldType = fieldType;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
     }
 
     @SafeVarargs
@@ -50,7 +43,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         notNullOrEmpty(fields, "fields");
         doesNotContainNull(fields, "fields");
-        return LettuceCommand.of(() -> async.hdel(marshaller.encode(key), marshaller.encodeAsArray(fields)),
+        return command(async -> async.hdel(marshaller.encode(key), marshaller.encodeAsArray(fields)),
                 AbstractLettuceCommands::toInteger);
     }
 
@@ -62,7 +55,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     LettuceCommand<Boolean, Boolean> _hexists(K key, F field) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return LettuceCommand.of(() -> async.hexists(marshaller.encode(key), marshaller.encode(field)));
+        return command(async -> async.hexists(marshaller.encode(key), marshaller.encode(field)));
     }
 
     @Override
@@ -73,7 +66,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     LettuceCommand<byte[], V> _hget(K key, F field) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return LettuceCommand.of(() -> async.hget(marshaller.encode(key), marshaller.encode(field)), this::decodeValue);
+        return command(async -> async.hget(marshaller.encode(key), marshaller.encode(field)), this::decodeValue);
     }
 
     @Override
@@ -84,7 +77,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     LettuceCommand<Long, Long> _hincrby(K key, F field, long amount) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return LettuceCommand.of(() -> async.hincrby(marshaller.encode(key), marshaller.encode(field), amount));
+        return command(async -> async.hincrby(marshaller.encode(key), marshaller.encode(field), amount));
     }
 
     @Override
@@ -95,7 +88,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     LettuceCommand<Double, Double> _hincrbyfloat(K key, F field, double amount) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return LettuceCommand.of(() -> async.hincrbyfloat(marshaller.encode(key), marshaller.encode(field), amount));
+        return command(async -> async.hincrbyfloat(marshaller.encode(key), marshaller.encode(field), amount));
     }
 
     @Override
@@ -105,7 +98,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
 
     LettuceCommand<Map<byte[], byte[]>, Map<F, V>> _hgetall(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.hgetall(marshaller.encode(key)), map -> decodeMap(fieldType, map));
+        return command(async -> async.hgetall(marshaller.encode(key)), map -> decodeMap(fieldType, map));
     }
 
     @Override
@@ -115,7 +108,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
 
     LettuceCommand<List<byte[]>, List<F>> _hkeys(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.hkeys(marshaller.encode(key)), this::decodeListOfField);
+        return command(async -> async.hkeys(marshaller.encode(key)), this::decodeListOfField);
     }
 
     @Override
@@ -125,7 +118,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
 
     LettuceCommand<Long, Long> _hlen(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.hlen(marshaller.encode(key)));
+        return command(async -> async.hlen(marshaller.encode(key)));
     }
 
     @SafeVarargs
@@ -139,10 +132,10 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         doesNotContainNull(fields, "fields");
         if (fields.length == 0) {
-            return LettuceCommand.failing(new IllegalArgumentException("`fields` must not be empty"));
+            return failing(new IllegalArgumentException("`fields` must not be empty"));
         }
         byte[][] encodedFields = marshaller.encodeAsArray(fields);
-        return LettuceCommand.of(() -> async.hmget(marshaller.encode(key), encodedFields),
+        return command(async -> async.hmget(marshaller.encode(key), encodedFields),
                 r -> decodeOrderedMap(fields, r));
     }
 
@@ -156,9 +149,9 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(map, "map");
         if (map.isEmpty()) {
-            return LettuceCommand.failing(new IllegalArgumentException("`map` must not be empty"));
+            return failing(new IllegalArgumentException("`map` must not be empty"));
         }
-        return LettuceCommand.discarding(() -> async.hmset(marshaller.encode(key), encodeMapWithNullableValues(map)));
+        return discarding(async -> async.hmset(marshaller.encode(key), encodeMapWithNullableValues(map)));
     }
 
     @Override
@@ -168,7 +161,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
 
     LettuceCommand<byte[], F> _hrandfield(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.hrandfield(marshaller.encode(key)), this::decodeF);
+        return command(async -> async.hrandfield(marshaller.encode(key)), this::decodeF);
     }
 
     @Override
@@ -179,7 +172,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     LettuceCommand<List<byte[]>, List<F>> _hrandfield(K key, long count) {
         nonNull(key, "key");
         positive(count, "count");
-        return LettuceCommand.of(() -> async.hrandfield(marshaller.encode(key), count), this::decodeListOfField);
+        return command(async -> async.hrandfield(marshaller.encode(key), count), this::decodeListOfField);
     }
 
     @Override
@@ -189,21 +182,21 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
 
     LettuceCommand<List<KeyValue<byte[], byte[]>>, Map<F, V>> _hrandfieldWithValues(K key, long count) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.hrandfieldWithvalues(marshaller.encode(key), count),
+        return command(async -> async.hrandfieldWithvalues(marshaller.encode(key), count),
                 this::decodeFieldWithValueMap);
     }
 
     @Override
     public ReactiveHashScanCursor<F, V> hscan(K key) {
         nonNull(key, "key");
-        return new LettuceReactiveHashScanCursorImpl<>(async, marshaller.encode(key), map -> decodeMap(fieldType, map));
+        return new LettuceReactiveHashScanCursorImpl<>(source, marshaller.encode(key), map -> decodeMap(fieldType, map));
     }
 
     @Override
     public ReactiveHashScanCursor<F, V> hscan(K key, ScanArgs scanArgs) {
         nonNull(key, "key");
         nonNull(scanArgs, "scanArgs");
-        return new LettuceReactiveHashScanCursorImpl<>(async, marshaller.encode(key),
+        return new LettuceReactiveHashScanCursorImpl<>(source, marshaller.encode(key),
                 LettuceCommonConverters.toLettuceScanArgs(scanArgs), map -> decodeMap(fieldType, map));
     }
 
@@ -216,8 +209,8 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(field, "field");
         nonNull(value, "value");
-        return LettuceCommand.of(
-                () -> async.hset(marshaller.encode(key), marshaller.encode(field), marshaller.encode(value)));
+        return command(
+                async -> async.hset(marshaller.encode(key), marshaller.encode(field), marshaller.encode(value)));
     }
 
     @Override
@@ -229,9 +222,9 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(map, "map");
         if (map.isEmpty()) {
-            return LettuceCommand.failing(new IllegalArgumentException("`map` must not be empty"));
+            return failing(new IllegalArgumentException("`map` must not be empty"));
         }
-        return LettuceCommand.of(() -> async.hset(marshaller.encode(key), encodeMap(map)));
+        return command(async -> async.hset(marshaller.encode(key), encodeMap(map)));
     }
 
     @Override
@@ -243,8 +236,8 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(field, "field");
         nonNull(value, "value");
-        return LettuceCommand.of(
-                () -> async.hsetnx(marshaller.encode(key), marshaller.encode(field), marshaller.encode(value)));
+        return command(
+                async -> async.hsetnx(marshaller.encode(key), marshaller.encode(field), marshaller.encode(value)));
     }
 
     @Override
@@ -255,7 +248,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
     LettuceCommand<Long, Long> _hstrlen(K key, F field) {
         nonNull(key, "key");
         nonNull(field, "field");
-        return LettuceCommand.of(() -> async.hstrlen(marshaller.encode(key), marshaller.encode(field)));
+        return command(async -> async.hstrlen(marshaller.encode(key), marshaller.encode(field)));
     }
 
     @Override
@@ -265,7 +258,7 @@ public class LettuceReactiveHashCommandsImpl<K, F, V> extends AbstractLettuceCom
 
     LettuceCommand<List<byte[]>, List<V>> _hvals(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.hvals(marshaller.encode(key)), this::decodeListOfValues);
+        return command(async -> async.hvals(marshaller.encode(key)), this::decodeListOfValues);
     }
 
     private F decodeF(byte[] bytes) {

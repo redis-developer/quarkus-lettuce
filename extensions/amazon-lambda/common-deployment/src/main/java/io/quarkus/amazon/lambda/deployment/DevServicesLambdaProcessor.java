@@ -3,9 +3,7 @@ package io.quarkus.amazon.lambda.deployment;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import io.quarkus.amazon.lambda.runtime.AmazonLambdaApi;
@@ -27,6 +25,7 @@ import io.quarkus.deployment.builditem.LaunchModeBuildItem;
 import io.quarkus.deployment.builditem.ServiceStartBuildItem;
 import io.quarkus.deployment.builditem.Startable;
 import io.quarkus.runtime.LaunchMode;
+import io.smallrye.config.Config;
 
 public class DevServicesLambdaProcessor {
     private static final Logger log = Logger.getLogger(DevServicesLambdaProcessor.class);
@@ -98,7 +97,6 @@ public class DevServicesLambdaProcessor {
                 .serviceName(Feature.AMAZON_LAMBDA.getName())
                 .serviceConfig(config)
                 .startable(() -> new StartableEventServer(server, propName, isTest, overridePort))
-                .highPriorityConfig(Set.of(propName)) // Pass through the external config for the port, so that it can be overridden if it's an ephemeral port
                 .configProvider(s -> Map.of(
                         propName, String.valueOf(s.getExposedPort()),
                         AmazonLambdaApi.QUARKUS_INTERNAL_AWS_LAMBDA_TEST_API, s.getConnectionInfo()))
@@ -132,7 +130,7 @@ public class DevServicesLambdaProcessor {
                 port = isTest ? Integer.parseInt(MockEventServerConfig.TEST_PORT)
                         : Integer.parseInt(MockEventServerConfig.DEV_PORT);
             }
-            int configuredPort = ConfigProvider.getConfig().getOptionalValue(propName, Integer.class)
+            int configuredPort = Config.get().getOptionalValue(propName, Integer.class)
                     .or(() -> Optional.of(port))
                     .get();
 

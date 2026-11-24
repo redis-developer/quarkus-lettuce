@@ -12,24 +12,16 @@ import io.quarkus.redis.datasource.bitmap.BitFieldArgs;
 import io.quarkus.redis.datasource.bitmap.ReactiveBitMapCommands;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
 public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommands<K, K>
         implements ReactiveBitMapCommands<K> {
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveBitMapCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType) {
-        super(connection, keyType, keyType, new Marshaller(keyType));
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+            LettuceConnectionSource source, Type keyType) {
+        super(dataSource, source, keyType, keyType, new Marshaller(keyType));
     }
 
     @Override
@@ -39,7 +31,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<Long, Long> _bitcount(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.bitcount(marshaller.encode(key)));
+        return command(async -> async.bitcount(marshaller.encode(key)));
     }
 
     @Override
@@ -49,7 +41,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<Long, Long> _bitcount(K key, long start, long end) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.bitcount(marshaller.encode(key), start, end));
+        return command(async -> async.bitcount(marshaller.encode(key), start, end));
     }
 
     @Override
@@ -59,7 +51,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
 
     LettuceCommand<Long, Integer> _getbit(K key, long offset) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.getbit(marshaller.encode(key), offset), AbstractLettuceCommands::toInteger);
+        return command(async -> async.getbit(marshaller.encode(key), offset), AbstractLettuceCommands::toInteger);
     }
 
     @Override
@@ -70,7 +62,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<List<Long>, List<Long>> _bitfield(K key, BitFieldArgs bitFieldArgs) {
         nonNull(key, "key");
         nonNull(bitFieldArgs, "bitFieldArgs");
-        return LettuceCommand.of(() -> async.bitfield(marshaller.encode(key),
+        return command(async -> async.bitfield(marshaller.encode(key),
                 LettuceBitMapCommandsConverters.toLettuceBitFieldArgs(bitFieldArgs)), AbstractLettuceCommands::decodeList);
     }
 
@@ -82,7 +74,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<Long, Long> _bitpos(K key, int bit) {
         nonNull(key, "key");
         isBit(bit, "bit");
-        return LettuceCommand.of(() -> async.bitpos(marshaller.encode(key), bitToBoolean(bit)));
+        return command(async -> async.bitpos(marshaller.encode(key), bitToBoolean(bit)));
     }
 
     @Override
@@ -93,7 +85,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<Long, Long> _bitpos(K key, int bit, long start) {
         nonNull(key, "key");
         isBit(bit, "bit");
-        return LettuceCommand.of(() -> async.bitpos(marshaller.encode(key), bitToBoolean(bit), start));
+        return command(async -> async.bitpos(marshaller.encode(key), bitToBoolean(bit), start));
     }
 
     @Override
@@ -104,7 +96,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<Long, Long> _bitpos(K key, int bit, long start, long end) {
         nonNull(key, "key");
         isBit(bit, "bit");
-        return LettuceCommand.of(() -> async.bitpos(marshaller.encode(key), bitToBoolean(bit), start, end));
+        return command(async -> async.bitpos(marshaller.encode(key), bitToBoolean(bit), start, end));
     }
 
     @SafeVarargs
@@ -117,7 +109,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
     final LettuceCommand<Long, Long> _bitopAnd(K destination, K... keys) {
         nonNull(destination, "destination");
         notNullOrEmpty(keys, "keys");
-        return LettuceCommand.of(() -> async.bitopAnd(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
+        return command(async -> async.bitopAnd(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
     }
 
     @Override
@@ -128,7 +120,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<Long, Long> _bitopNot(K destination, K source) {
         nonNull(destination, "destination");
         nonNull(source, "source");
-        return LettuceCommand.of(() -> async.bitopNot(marshaller.encode(destination), marshaller.encode(source)));
+        return command(async -> async.bitopNot(marshaller.encode(destination), marshaller.encode(source)));
     }
 
     @SafeVarargs
@@ -141,7 +133,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
     final LettuceCommand<Long, Long> _bitopOr(K destination, K... keys) {
         nonNull(destination, "destination");
         notNullOrEmpty(keys, "keys");
-        return LettuceCommand.of(() -> async.bitopOr(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
+        return command(async -> async.bitopOr(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
     }
 
     @SafeVarargs
@@ -154,7 +146,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
     final LettuceCommand<Long, Long> _bitopXor(K destination, K... keys) {
         nonNull(destination, "destination");
         notNullOrEmpty(keys, "keys");
-        return LettuceCommand.of(() -> async.bitopXor(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
+        return command(async -> async.bitopXor(marshaller.encode(destination), marshaller.encodeAsArray(keys)));
     }
 
     @Override
@@ -165,7 +157,7 @@ public class LettuceReactiveBitMapCommandsImpl<K> extends AbstractLettuceCommand
     LettuceCommand<Long, Integer> _setbit(K key, long offset, int value) {
         nonNull(key, "key");
         isBit(value, "value");
-        return LettuceCommand.of(() -> async.setbit(marshaller.encode(key), offset, value), AbstractLettuceCommands::toInteger);
+        return command(async -> async.setbit(marshaller.encode(key), offset, value), AbstractLettuceCommands::toInteger);
     }
 
     private boolean bitToBoolean(int value) {

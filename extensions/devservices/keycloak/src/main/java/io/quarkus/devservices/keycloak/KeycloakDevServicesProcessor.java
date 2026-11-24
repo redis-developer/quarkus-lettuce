@@ -40,7 +40,6 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.CredentialRepresentation;
@@ -48,7 +47,6 @@ import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.RolesRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.util.JsonSerialization;
 import org.testcontainers.Testcontainers;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
@@ -77,6 +75,7 @@ import io.quarkus.devui.spi.page.Page;
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.runtime.configuration.MemorySize;
+import io.smallrye.config.Config;
 import io.smallrye.mutiny.TimeoutException;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Vertx;
@@ -224,7 +223,7 @@ public class KeycloakDevServicesProcessor {
     }
 
     private static boolean oidcDevServicesEnabled() {
-        return ConfigProvider.getConfig().getOptionalValue("quarkus.oidc.devservices.enabled", boolean.class).orElse(false);
+        return Config.get().getOptionalValue("quarkus.oidc.devservices.enabled", boolean.class).orElse(false);
     }
 
     private static boolean linuxContainersNotAvailable(DockerStatusBuildItem dockerStatusBuildItem,
@@ -604,6 +603,13 @@ public class KeycloakDevServicesProcessor {
                 });
             }
 
+            if (config.hostAccessiblePorts().isPresent()) {
+                // Exposed ports are accessible from the container via http://host.testcontainers.internal:<port>
+                for (int port : config.hostAccessiblePorts().get()) {
+                    Testcontainers.exposeHostPorts(port);
+                }
+            }
+
             super.withCreateContainerCmdModifier((container) -> Optional.ofNullable(container.getHostConfig())
                     .ifPresent(hostConfig -> {
                         final var limit = containerMemoryLimit.asLongValue();
@@ -661,7 +667,7 @@ public class KeycloakDevServicesProcessor {
         private static Optional<RealmRepresentation> readRealmFile(URL url, String realmPath, List<String> errors) {
             try {
                 try (InputStream is = url.openStream()) {
-                    return Optional.of(JsonSerialization.readValue(is, RealmRepresentation.class));
+                    return Optional.of(KeycloakJson.readRealm(is));
                 }
             } catch (IOException ex) {
                 errors.add(String.format("Realm %s resource can not be opened: %s", realmPath, ex.getMessage()));
@@ -796,7 +802,7 @@ public class KeycloakDevServicesProcessor {
             HttpResponse<Buffer> createRealmResponse = post(client, httpTarget, httpTarget.path("/admin/realms"))
                     .putHeader(HttpHeaders.CONTENT_TYPE.toString(), "application/json")
                     .putHeader(HttpHeaders.AUTHORIZATION.toString(), "Bearer " + token)
-                    .sendBuffer(Buffer.buffer().appendString(JsonSerialization.writeValueAsString(realm)))
+                    .sendBuffer(Buffer.buffer().appendString(KeycloakJson.writeRealm(realm)))
                     .await().atMost(config.webClientTimeout());
 
             if (createRealmResponse.statusCode() > 299) {
@@ -950,13 +956,13 @@ public class KeycloakDevServicesProcessor {
 
     private static String getOidcClientId(KeycloakDevServicesConfig config) {
         // if the application type is web-app or hybrid, OidcRecorder will enforce that the client id and secret are configured
-        return ConfigProvider.getConfig().getOptionalValue(CLIENT_ID_CONFIG_KEY, String.class)
+        return Config.get().getOptionalValue(CLIENT_ID_CONFIG_KEY, String.class)
                 .orElse(config.createClient() ? "quarkus-app" : "");
     }
 
     private static String getOidcClientSecret(KeycloakDevServicesConfig config) {
         // if the application type is web-app or hybrid, OidcRecorder will enforce that the client id and secret are configured
-        return ConfigProvider.getConfig().getOptionalValue(CLIENT_SECRET_CONFIG_KEY, String.class)
+        return Config.get().getOptionalValue(CLIENT_SECRET_CONFIG_KEY, String.class)
                 .orElse(config.createClient() ? "secret" : "");
     }
 

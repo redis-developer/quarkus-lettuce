@@ -13,21 +13,12 @@ import io.quarkus.oidc.OidcTenantConfigBuilder;
 import io.quarkus.oidc.runtime.OidcTenantConfig;
 import io.quarkus.oidc.runtime.OidcTenantConfig.Logout.ClearSiteData;
 import io.quarkus.oidc.runtime.OidcTenantConfig.Logout.LogoutMode;
+import io.smallrye.config.ConfigInstanceBuilder;
 
 /**
  * Builder for the {@link OidcTenantConfig.Logout}.
  */
 public final class LogoutConfigBuilder {
-    private record LogoutImpl(Optional<String> path, Optional<String> postLogoutPath, String postLogoutUriParam,
-            Map<String, String> extraParams, OidcTenantConfig.Backchannel backchannel,
-            OidcTenantConfig.Frontchannel frontchannel,
-            Optional<Set<ClearSiteData>> clearSiteData,
-            LogoutMode logoutMode) implements OidcTenantConfig.Logout {
-    }
-
-    private record FrontchannelImpl(Optional<String> path) implements OidcTenantConfig.Frontchannel {
-    }
-
     private final OidcTenantConfigBuilder builder;
     private final Map<String, String> extraParams = new HashMap<>();
     private Optional<String> path;
@@ -62,7 +53,9 @@ public final class LogoutConfigBuilder {
      * @return this builder
      */
     public LogoutConfigBuilder frontchannelPath(String path) {
-        this.frontchannel = new FrontchannelImpl(Optional.ofNullable(path));
+        this.frontchannel = ConfigInstanceBuilder.forInterface(OidcTenantConfig.Frontchannel.class)
+                .with(OidcTenantConfig.Frontchannel::path, Optional.ofNullable(path))
+                .build();
         return this;
     }
 
@@ -132,7 +125,9 @@ public final class LogoutConfigBuilder {
      */
     public LogoutConfigBuilder clearSiteData(List<ClearSiteData> directives) {
         Objects.requireNonNull(directives);
-        this.clearSiteData.get().addAll(directives);
+        Set<ClearSiteData> clearSiteData = new HashSet<>(this.clearSiteData.orElse(Set.of()));
+        clearSiteData.addAll(directives);
+        this.clearSiteData = Optional.of(Set.copyOf(clearSiteData));
         return this;
     }
 
@@ -180,8 +175,16 @@ public final class LogoutConfigBuilder {
      * @return built {@link OidcTenantConfig.Logout}
      */
     public OidcTenantConfig.Logout build() {
-        return new LogoutImpl(path, postLogoutPath, postLogoutUriParam, Map.copyOf(extraParams), backchannel, frontchannel,
-                clearSiteData, logoutMode);
+        return ConfigInstanceBuilder.forInterface(OidcTenantConfig.Logout.class)
+                .with(OidcTenantConfig.Logout::path, path)
+                .with(OidcTenantConfig.Logout::postLogoutPath, postLogoutPath)
+                .with(OidcTenantConfig.Logout::postLogoutUriParam, postLogoutUriParam)
+                .with(OidcTenantConfig.Logout::extraParams, Map.copyOf(extraParams))
+                .with(OidcTenantConfig.Logout::backchannel, backchannel)
+                .with(OidcTenantConfig.Logout::frontchannel, frontchannel)
+                .with(OidcTenantConfig.Logout::clearSiteData, clearSiteData)
+                .with(OidcTenantConfig.Logout::logoutMode, logoutMode)
+                .build();
     }
 
     /**
@@ -189,16 +192,13 @@ public final class LogoutConfigBuilder {
      */
     public static final class BackchannelBuilder {
 
-        private record BackchannelImpl(Optional<String> path, int tokenCacheSize, Duration tokenCacheTimeToLive,
-                Optional<Duration> cleanUpTimerInterval, String logoutTokenKey) implements OidcTenantConfig.Backchannel {
-        }
-
         private final LogoutConfigBuilder logoutBuilder;
         private Optional<String> path;
         private int tokenCacheSize;
         private Duration tokenCacheTimeToLive;
         private Optional<Duration> cleanUpTimerInterval;
         private String logoutTokenKey;
+        private boolean logoutAllSessions;
 
         public BackchannelBuilder() {
             this(new LogoutConfigBuilder());
@@ -212,6 +212,7 @@ public final class LogoutConfigBuilder {
             this.tokenCacheTimeToLive = backchannel.tokenCacheTimeToLive();
             this.cleanUpTimerInterval = backchannel.cleanUpTimerInterval();
             this.logoutTokenKey = backchannel.logoutTokenKey();
+            this.logoutAllSessions = backchannel.logoutAllSessions();
         }
 
         /**
@@ -229,6 +230,15 @@ public final class LogoutConfigBuilder {
          */
         public BackchannelBuilder logoutTokenKey(String logoutTokenKey) {
             this.logoutTokenKey = Objects.requireNonNull(logoutTokenKey);
+            return this;
+        }
+
+        /**
+         * @param logoutAllSessions {@link OidcTenantConfig.Backchannel#logoutAllSessions()}
+         * @return this builder
+         */
+        public BackchannelBuilder logoutAllSessions(boolean logoutAllSessions) {
+            this.logoutAllSessions = logoutAllSessions;
             return this;
         }
 
@@ -282,7 +292,14 @@ public final class LogoutConfigBuilder {
          * @return built {@link OidcTenantConfig.Backchannel}
          */
         public OidcTenantConfig.Backchannel build() {
-            return new BackchannelImpl(path, tokenCacheSize, tokenCacheTimeToLive, cleanUpTimerInterval, logoutTokenKey);
+            return ConfigInstanceBuilder.forInterface(OidcTenantConfig.Backchannel.class)
+                    .with(OidcTenantConfig.Backchannel::path, path)
+                    .with(OidcTenantConfig.Backchannel::tokenCacheSize, tokenCacheSize)
+                    .with(OidcTenantConfig.Backchannel::tokenCacheTimeToLive, tokenCacheTimeToLive)
+                    .with(OidcTenantConfig.Backchannel::cleanUpTimerInterval, cleanUpTimerInterval)
+                    .with(OidcTenantConfig.Backchannel::logoutTokenKey, logoutTokenKey)
+                    .with(OidcTenantConfig.Backchannel::logoutAllSessions, logoutAllSessions)
+                    .build();
         }
     }
 }

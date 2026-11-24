@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -24,7 +23,6 @@ import java.util.function.Consumer;
 
 import javax.net.ssl.HostnameVerifier;
 
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.eclipse.microprofile.rest.client.ext.QueryParamStyle;
 import org.jboss.resteasy.reactive.client.api.LoggingScope;
 import org.jboss.resteasy.reactive.client.api.QuarkusRestClientProperties;
@@ -37,10 +35,11 @@ import io.quarkus.rest.client.reactive.ParamStyle;
 import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder;
 import io.quarkus.restclient.config.RestClientsConfig;
 import io.quarkus.restclient.config.RestClientsConfig.RestClientConfig;
+import io.quarkus.runtime.AddressResolver;
 import io.quarkus.runtime.configuration.MemorySize;
 import io.quarkus.tls.TlsConfiguration;
 import io.quarkus.tls.TlsConfigurationRegistry;
-import io.smallrye.config.SmallRyeConfig;
+import io.smallrye.config.Config;
 import io.vertx.core.http.HttpClientOptions;
 
 public class RestClientCDIDelegateBuilder<T> {
@@ -63,7 +62,7 @@ public class RestClientCDIDelegateBuilder<T> {
 
     private RestClientCDIDelegateBuilder(Class<T> jaxrsInterface, String baseUriFromAnnotation, String configKey) {
         this(jaxrsInterface, baseUriFromAnnotation, configKey,
-                ConfigProvider.getConfig().unwrap(SmallRyeConfig.class).getConfigMapping(RestClientsConfig.class));
+                Config.get().getConfigMapping(RestClientsConfig.class));
     }
 
     RestClientCDIDelegateBuilder(Class<T> jaxrsInterface, String baseUriFromAnnotation, String configKey,
@@ -445,13 +444,8 @@ public class RestClientCDIDelegateBuilder<T> {
             }
             throw new IllegalArgumentException(message);
         }
-        String baseUrl = propertyOptional.orElse(baseUriFromAnnotation);
 
-        try {
-            builder.baseUri(new URI(baseUrl));
-        } catch (URISyntaxException e) {
-            throw new IllegalArgumentException("The value of URL was invalid " + baseUrl, e);
-        }
+        builder.baseUri(AddressResolver.resolve(propertyOptional.orElse(baseUriFromAnnotation)));
     }
 
     private void configureDomainSocket(QuarkusRestClientBuilder builder) {

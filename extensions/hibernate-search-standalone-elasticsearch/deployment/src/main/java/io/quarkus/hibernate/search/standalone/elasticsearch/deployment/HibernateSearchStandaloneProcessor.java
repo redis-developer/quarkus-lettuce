@@ -23,6 +23,7 @@ import org.hibernate.search.backend.elasticsearch.ElasticsearchVersion;
 import org.hibernate.search.mapper.pojo.standalone.mapping.SearchMapping;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationValue;
+import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
 import org.jboss.jandex.IndexView;
 import org.jboss.logging.Logger;
@@ -47,6 +48,10 @@ import io.quarkus.deployment.recording.RecorderContext;
 import io.quarkus.deployment.util.JandexUtil;
 import io.quarkus.elasticsearch.restclient.common.deployment.DevservicesElasticsearchBuildItem;
 import io.quarkus.elasticsearch.restclient.common.deployment.ElasticsearchCommonBuildTimeConfig.ElasticsearchDevServicesBuildTimeConfig.Distribution;
+import io.quarkus.hibernate.accessor.FieldAccess;
+import io.quarkus.hibernate.accessor.deployment.HibernateAccessorFactoryBuildItem;
+import io.quarkus.hibernate.accessor.deployment.HibernateAccessorRegistrationBuildItem;
+import io.quarkus.hibernate.search.backend.elasticsearch.common.deployment.HibernateSearchAccessorDiscovery;
 import io.quarkus.hibernate.search.backend.elasticsearch.common.deployment.HibernateSearchBackendElasticsearchEnabledBuildItem;
 import io.quarkus.hibernate.search.backend.elasticsearch.common.runtime.ElasticsearchVersionSubstitution;
 import io.quarkus.hibernate.search.standalone.elasticsearch.runtime.HibernateSearchStandaloneBuildTimeConfig;
@@ -95,11 +100,23 @@ class HibernateSearchStandaloneProcessor {
         Map<String, Set<String>> backendAndIndexNamesForSearchExtensions = collectBackendAndIndexNamesForSearchExtensions(
                 index);
 
-        Set<String> rootAnnotationMappedClassNames = collectRootAnnotationMappedClassNames(index);
+        Set<String> rootAnnotationMappedClassNames = collectRootAnnotationMappedClasses(index);
 
         var mapperContext = new HibernateSearchStandaloneElasticsearchMapperContext(backendNamesForIndexedEntities,
                 backendAndIndexNamesForSearchExtensions);
         enabled.produce(new HibernateSearchStandaloneEnabledBuildItem(mapperContext, rootAnnotationMappedClassNames));
+    }
+
+    @BuildStep
+    void registerAccessors(CombinedIndexBuildItem index, Optional<HibernateSearchStandaloneEnabledBuildItem> enabled,
+            BuildProducer<HibernateAccessorRegistrationBuildItem> accessors) {
+        if (enabled.isEmpty()) {
+            return;
+        }
+        for (ClassInfo type : HibernateSearchAccessorDiscovery.collectTypes(index)) {
+            accessors.produce(new HibernateAccessorRegistrationBuildItem.Builder(type)
+                    .source(HibernateSearchStandaloneProcessor.class.getName()).all(type, FieldAccess.READ).build());
+        }
     }
 
     @BuildStep
@@ -129,7 +146,7 @@ class HibernateSearchStandaloneProcessor {
         return result;
     }
 
-    private static Set<String> collectRootAnnotationMappedClassNames(IndexView index) {
+    private static Set<String> collectRootAnnotationMappedClasses(IndexView index) {
         // Look for classes annotated with annotations meta-annotated with @RootMapping:
         // those classes will have their annotations processed.
         // Built-in annotations from Hibernate Search must be added explicitly,
@@ -187,7 +204,8 @@ class HibernateSearchStandaloneProcessor {
     @Consume(BeanContainerBuildItem.class) // Pre-boot needs access to the CDI container
     public void preBoot(Optional<HibernateSearchStandaloneEnabledBuildItem> enabled,
             RecorderContext recorderContext,
-            HibernateSearchStandaloneRecorder recorder) {
+            HibernateSearchStandaloneRecorder recorder,
+            HibernateAccessorFactoryBuildItem hibernateAccessorFactory) {
         if (enabled.isEmpty()) {
             // No pre-boot
             return;
@@ -196,7 +214,8 @@ class HibernateSearchStandaloneProcessor {
         // Make it possible to record the settings as bytecode:
         recorderContext.registerSubstitution(ElasticsearchVersion.class,
                 String.class, ElasticsearchVersionSubstitution.class);
-        recorder.preBoot(enabled.get().mapperContext, enabled.get().getRootAnnotationMappedClassNames());
+        recorder.preBoot(enabled.get().mapperContext, enabled.get().getRootAnnotationMappedClassNames(),
+                hibernateAccessorFactory.accessorFactory());
     }
 
     @BuildStep

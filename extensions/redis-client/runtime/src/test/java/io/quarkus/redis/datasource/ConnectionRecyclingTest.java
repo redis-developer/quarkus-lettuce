@@ -1,6 +1,7 @@
 package io.quarkus.redis.datasource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
@@ -16,10 +17,14 @@ import io.quarkus.redis.runtime.datasource.ReactivePubSubCommandsImpl;
 import io.quarkus.redis.runtime.datasource.ReactiveRedisDataSourceImpl;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.Cancellable;
+import io.vertx.core.Future;
 import io.vertx.mutiny.redis.client.Redis;
 import io.vertx.mutiny.redis.client.RedisAPI;
 import io.vertx.mutiny.redis.client.RedisConnection;
+import io.vertx.redis.client.Command;
 import io.vertx.redis.client.RedisOptions;
+import io.vertx.redis.client.Request;
+import io.vertx.redis.client.Response;
 
 public class ConnectionRecyclingTest extends DatasourceTestBase {
 
@@ -250,6 +255,60 @@ public class ConnectionRecyclingTest extends DatasourceTestBase {
             recycledConnection.closeAndAwait();
         } finally {
             limitedRedis.closeAndAwait();
+        }
+    }
+
+    @Test
+    void verifyThatSubscriptionConnectionIsReleasedWhenUnsubscribeFails() {
+        Redis limitedRedis = createLimitedRedis();
+
+        try {
+            Redis failingUnsubscribeRedis = withFailingUnsubscribe(limitedRedis);
+            ReactiveRedisDataSourceImpl limitedDataSource = new ReactiveRedisDataSourceImpl(vertx, failingUnsubscribeRedis,
+                    RedisAPI.api(failingUnsubscribeRedis));
+            ReactivePubSubCommandsImpl<String> pubsub = new ReactivePubSubCommandsImpl<>(limitedDataSource, String.class);
+
+            ReactivePubSubCommands.ReactiveRedisSubscriber subscriber = pubsub.subscribe("channel", message -> {
+            }).await().atMost(Duration.ofSeconds(10));
+
+            assertThatThrownBy(() -> subscriber.unsubscribe().await().atMost(Duration.ofSeconds(10)))
+                    .hasMessageContaining("UNSUBSCRIBE failed");
+
+            // the failure is reported, but the subscription connection must be released anyway
+            RedisConnection recycledConnection = limitedRedis.connect()
+                    .await().atMost(Duration.ofSeconds(5));
+            recycledConnection.closeAndAwait();
+        } finally {
+            limitedRedis.closeAndAwait();
+        }
+    }
+
+    private static Redis withFailingUnsubscribe(Redis redis) {
+        return new Redis(redis.getDelegate()) {
+            @Override
+            public Uni<RedisConnection> connect() {
+                // the subscriber sends UNSUBSCRIBE through RedisAPI.api(connection), which uses the Vert.x connection
+                return super.connect().map(conn -> new RedisConnection(new FailingUnsubscribeConnection(conn.getDelegate())));
+            }
+        };
+    }
+
+    /**
+     * Makes UNSUBSCRIBE fail, as it does with a cluster client when a node has restarted or gone away: the command is
+     * sent to the master of every slot range and fails if one of them is unreachable.
+     */
+    private static class FailingUnsubscribeConnection extends DelegatingRedisConnection {
+
+        FailingUnsubscribeConnection(io.vertx.redis.client.RedisConnection delegate) {
+            super(delegate);
+        }
+
+        @Override
+        public Future<Response> send(Request command) {
+            if (command.command().equals(Command.UNSUBSCRIBE)) {
+                return Future.failedFuture(new IllegalStateException("UNSUBSCRIBE failed"));
+            }
+            return super.send(command);
         }
     }
 

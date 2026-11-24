@@ -24,6 +24,10 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-redis-client-lettuce</artifactId>
         </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-health</artifactId>
+        </dependency>
 
         <!-- test dependencies -->
         <dependency>
@@ -34,6 +38,16 @@
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -64,6 +78,19 @@
                 </exclusion>
             </exclusions>
         </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-health-deployment</artifactId>
+            <version>${project.version}</version>
+            <type>pom</type>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
     </dependencies>
 
     <build>
@@ -74,6 +101,28 @@
             </resource>
         </resources>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>ban-reactor</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>io.projectreactor</exclude>
+                                    </excludes>
+                                    <message>This module tests the Lettuce backend without Project Reactor</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Self-signed server certificate (CN localhost) for the TLS-only Redis server of the docker-redis profile,
                  written to target/certificates in the generate-resources phase, i.e. before the containers are started
                  in the compile phase -->
@@ -168,7 +217,7 @@
                         <configuration>
                             <images>
                                 <image>
-                                    <name>redis:8-alpine</name>
+                                    <name>${redis.image}</name>
                                     <alias>quarkus-test-redis</alias>
                                     <run>
                                         <ports>
@@ -188,7 +237,7 @@
                                     </run>
                                 </image>
                                 <image>
-                                    <name>redis:8-alpine</name>
+                                    <name>${redis.image}</name>
                                     <alias>quarkus-test-redis-tls</alias>
                                     <run>
                                         <ports>
@@ -216,7 +265,7 @@
                                      src/test/resources/redis/start-cluster.sh): the nodes announce 127.0.0.1 and
                                      their own port, so every port is published on the same host port -->
                                 <image>
-                                    <name>redis:8-alpine</name>
+                                    <name>${redis.image}</name>
                                     <alias>quarkus-test-redis-cluster</alias>
                                     <run>
                                         <ports>
@@ -249,7 +298,7 @@
                                      src/test/resources/redis/start-sentinel.sh): every process announces 127.0.0.1
                                      and its own port, so every port is published on the same host port -->
                                 <image>
-                                    <name>redis:8-alpine</name>
+                                    <name>${redis.image}</name>
                                     <alias>quarkus-test-redis-sentinel</alias>
                                     <run>
                                         <ports>

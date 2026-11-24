@@ -2,14 +2,19 @@ package io.quarkus.redis.lettuce.runtime.internal.datasource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 
 import io.lettuce.core.protocol.CommandArgs;
 import io.vertx.redis.client.Command;
-import io.vertx.redis.client.impl.CommandMap;
 
 /**
  * The arguments of a raw {@code execute(...)} command carry their keys, so that a cluster connection routes the
@@ -27,8 +32,57 @@ class LettuceRawCommandArgsTest {
         assertThat(firstKey(LettuceReactiveRedisDataSourceImpl.rawArgs(Command.EVAL, "return 1", "1", "k", "arg")))
                 .isEqualTo("k");
         // a command name resolves to the same table
-        assertThat(firstKey(LettuceReactiveRedisDataSourceImpl.rawArgs(CommandMap.getKnownCommand("get"), "k")))
-                .isEqualTo("k");
+        assertThat(LettuceReactiveRedisDataSourceImpl.vertxCommand("get")).isSameAs(Command.GET);
+        assertThat(firstKey(LettuceReactiveRedisDataSourceImpl.rawArgs(LettuceReactiveRedisDataSourceImpl.vertxCommand("get"),
+                "k"))).isEqualTo("k");
+    }
+
+    @Test
+    void aCommandNameUnknownToTheVertxClientHasNoKey() {
+        Command unknown = LettuceReactiveRedisDataSourceImpl.vertxCommand("MODULE.CMD");
+        assertThat(unknown).isNotNull();
+        assertThat(firstKey(LettuceReactiveRedisDataSourceImpl.rawArgs(unknown, "k", "v"))).isNull();
+    }
+
+    /**
+     * {@code Command} and the {@code CommandMap} behind it initialize each other, and the Vert.x client always enters
+     * through {@code Command}. A class of this module entering through the map can deadlock with a thread entering
+     * through {@code Command}, both in their class initializers: it hung the build of a native image. So no class of
+     * the module refers to the map.
+     */
+    @Test
+    void noClassOfTheModuleRefersToTheVertxCommandMap() throws Exception {
+        Path classes = Path.of(LettuceReactiveRedisDataSourceImpl.class.getProtectionDomain().getCodeSource().getLocation()
+                .toURI());
+        byte[] commandMap = "io/vertx/redis/client/impl/CommandMap".getBytes(StandardCharsets.ISO_8859_1);
+        List<Path> referring;
+        try (Stream<Path> files = Files.walk(classes)) {
+            referring = files.filter(file -> file.toString().endsWith(".class"))
+                    .filter(file -> contains(read(file), commandMap))
+                    .toList();
+        }
+        assertThat(Files.isDirectory(classes)).isTrue();
+        assertThat(referring).isEmpty();
+    }
+
+    private static byte[] read(Path file) {
+        try {
+            return Files.readAllBytes(file);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static boolean contains(byte[] bytes, byte[] sequence) {
+        outer: for (int i = 0; i <= bytes.length - sequence.length; i++) {
+            for (int j = 0; j < sequence.length; j++) {
+                if (bytes[i + j] != sequence[j]) {
+                    continue outer;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     @Test

@@ -5,6 +5,7 @@ import java.util.function.BooleanSupplier;
 import org.jboss.logging.Logger;
 
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
+import io.quarkus.bootstrap.classloading.ClassPathElement;
 import io.quarkus.bootstrap.classloading.QuarkusClassLoader;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
@@ -13,6 +14,7 @@ import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.LaunchModeBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
 import io.quarkus.micrometer.deployment.MicrometerRegistryProviderBuildItem;
 import io.quarkus.micrometer.runtime.MicrometerRecorder;
 import io.quarkus.micrometer.runtime.config.MicrometerConfig;
@@ -24,6 +26,7 @@ import io.quarkus.micrometer.runtime.export.exemplars.OpenTelemetryExemplarConte
 import io.quarkus.micrometer.runtime.export.exemplars.OpenTelemetryExemplarSamplerProvider;
 import io.quarkus.vertx.http.deployment.NonApplicationRootPathBuildItem;
 import io.quarkus.vertx.http.deployment.RouteBuildItem;
+import io.quarkus.vertx.http.deployment.spi.ControlPlanePathBuildItem;
 import io.quarkus.vertx.http.runtime.management.ManagementInterfaceBuildTimeConfig;
 
 /**
@@ -56,6 +59,21 @@ public class PrometheusRegistryProcessor {
         @Override
         public boolean getAsBoolean() {
             return QuarkusClassLoader.isClassPresentAtRuntime("io.quarkus.opentelemetry.runtime.OpenTelemetryUtil");
+        }
+    }
+
+    @BuildStep
+    void initializeShadedProtobufAtRuntime(BuildProducer<RuntimeInitializedClassBuildItem> runtimeInitializedClasses) {
+        // Protobuf caches Unsafe field offsets, which must be computed for the native image layout.
+        // Discover the shaded class because Prometheus includes the protobuf version in its package name.
+        for (ClassPathElement element : QuarkusClassLoader.getElements(
+                "io/prometheus/metrics/expositionformats/internal/PrometheusProtobufWriterImpl.class", false)) {
+            for (String resource : element.getProvidedResources()) {
+                if (resource.startsWith("io/prometheus/metrics/shaded/") && resource.endsWith("/UnsafeUtil.class")) {
+                    runtimeInitializedClasses.produce(new RuntimeInitializedClassBuildItem(
+                            resource.substring(0, resource.length() - ".class".length()).replace('/', '.')));
+                }
+            }
         }
     }
 
@@ -104,6 +122,7 @@ public class PrometheusRegistryProcessor {
     @Record(value = ExecutionTime.STATIC_INIT)
     void createPrometheusRoute(BuildProducer<RouteBuildItem> routes,
             BuildProducer<RegistryBuildItem> registries,
+            BuildProducer<ControlPlanePathBuildItem> exemptPaths,
             MicrometerConfig mConfig,
             NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem,
             ManagementInterfaceBuildTimeConfig managementBuildTimeConfig,
@@ -146,5 +165,10 @@ public class PrometheusRegistryProcessor {
         var path = nonApplicationRootPathBuildItem.resolveManagementPath(pConfig.path(),
                 managementBuildTimeConfig, launchModeBuildItem);
         registries.produce(new RegistryBuildItem("Prometheus", path));
+
+        // scraping must keep working while the application is overloaded, or the overload
+        // becomes invisible exactly when the metrics matter most
+        exemptPaths.produce(new ControlPlanePathBuildItem(path,
+                "metrics scraping must keep working during an overload, or the overload is invisible"));
     }
 }
