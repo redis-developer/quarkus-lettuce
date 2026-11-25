@@ -6,6 +6,9 @@
 # topology (MOVED redirects, CLUSTER SLOTS/NODES) is reachable both from the other nodes, which share the
 # container's loopback, and from a client on the Docker host, provided each port is published on the same host
 # port. The ports must not exceed 55535: the cluster bus of a node listens on its port plus 10000.
+# The cluster bus of the nodes is not behind TLS: since Redis 8.12 a node refuses to start that way unless
+# cluster-bus-port-protected-mode is turned off, which says that only trusted hosts reach the bus (here, the loopback
+# of the container).
 # Prints "CLUSTER READY" once every node reports cluster_state:ok, then keeps the container alive.
 set -e
 
@@ -18,7 +21,8 @@ NODES=""
 for port in "$@"; do
   redis-server --port "$port" --cluster-enabled yes --cluster-config-file "nodes-$port.conf" \
     --cluster-node-timeout 5000 --cluster-announce-ip 127.0.0.1 --appendonly no --save "" \
-    --protected-mode no --dir /tmp --logfile "/tmp/redis-$port.log" --daemonize yes
+    --protected-mode no --cluster-bus-port-protected-mode no --dir /tmp --logfile "/tmp/redis-$port.log" \
+    --daemonize yes
   NODES="$NODES 127.0.0.1:$port"
 done
 
