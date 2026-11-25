@@ -9,6 +9,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 import org.hamcrest.CoreMatchers;
 import org.hamcrest.Matchers;
@@ -55,6 +56,22 @@ class LettuceBackendTest {
                         "checks[0].data", Matchers.hasEntry("sentinel", "PONG"),
                         "checks[0].data", Matchers.hasEntry("replication", "PONG"),
                         "checks[0].data", Matchers.hasEntry("provided", "PONG"));
+    }
+
+    @Test
+    public void commandsAndPoolsAreMeasuredByMicrometer() {
+        RestAssured.given().when().get("/lettuce/provided/ping").then().statusCode(200);
+
+        // the meters the Vert.x client records, for a client that has no Vert.x client; a command is recorded a
+        // moment after it completes
+        Pattern commands = Pattern.compile(
+                "^redis_commands_success_total\\{[^}]*client_name=\"provided\"[^}]*} [1-9]", Pattern.MULTILINE);
+        Pattern pool = Pattern.compile(
+                "^redis_pool_idle\\{[^}]*pool_name=\"provided\"[^}]*} 6", Pattern.MULTILINE);
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            String metrics = RestAssured.given().when().get("/q/metrics").then().statusCode(200).extract().asString();
+            assertThat(metrics).containsPattern(commands).containsPattern(pool);
+        });
     }
 
     @Test

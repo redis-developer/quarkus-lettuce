@@ -20,6 +20,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -30,6 +31,7 @@ import io.lettuce.core.RedisURI;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.Cancellable;
 import io.vertx.core.Context;
+import io.vertx.core.spi.metrics.PoolMetrics;
 
 class LettuceConnectionPoolTest extends CommandsTestBase {
 
@@ -734,6 +736,190 @@ class LettuceConnectionPoolTest extends CommandsTestBase {
         assertThat(sync(second).ping()).isEqualTo("PONG");
         pool.release(second).await().atMost(TIMEOUT);
         assertThat(pool.getIdle()).isEqualTo(1);
+    }
+
+    /**
+     * Counts what a pool tells its metrics, the way the metrics of Vert.x are told by the pool of the Vert.x client:
+     * a request waits from {@code enqueue} to {@code dequeue}, a connection is in use from {@code begin} to
+     * {@code end}.
+     */
+    private static final class RecordingPoolMetrics implements PoolMetrics<Object, Object> {
+
+        final AtomicInteger waiting = new AtomicInteger();
+        final AtomicInteger inUse = new AtomicInteger();
+        final AtomicInteger requests = new AtomicInteger();
+        final AtomicInteger completed = new AtomicInteger();
+        final AtomicBoolean closed = new AtomicBoolean();
+
+        @Override
+        public Object enqueue() {
+            requests.incrementAndGet();
+            waiting.incrementAndGet();
+            return new Object();
+        }
+
+        @Override
+        public void dequeue(Object queued) {
+            waiting.decrementAndGet();
+        }
+
+        @Override
+        public Object begin() {
+            inUse.incrementAndGet();
+            return new Object();
+        }
+
+        @Override
+        public void end(Object usage) {
+            inUse.decrementAndGet();
+            completed.incrementAndGet();
+        }
+
+        @Override
+        public void close() {
+            closed.set(true);
+        }
+    }
+
+    private static LettuceConnectionPool observedPool(int maxPoolSize, int maxWaiting, RecordingPoolMetrics metrics) {
+        return new LettuceConnectionPool(CommandsTestBase::connectAsync, maxPoolSize, maxWaiting, 0, null, null, null,
+                metrics);
+    }
+
+    @Test
+    void metricsFollowAConnectionFromTheRequestToItsRelease() {
+        RecordingPoolMetrics metrics = new RecordingPoolMetrics();
+        LettuceConnectionPool pool = observedPool(1, 1, metrics);
+
+        LettuceConnection connection = pool.acquireBlocking(TIMEOUT);
+        assertThat(metrics.requests).hasValue(1);
+        assertThat(metrics.waiting).hasValue(0);
+        assertThat(metrics.inUse).hasValue(1);
+        assertThat(metrics.completed).hasValue(0);
+
+        pool.release(connection).await().atMost(TIMEOUT);
+        assertThat(metrics.inUse).hasValue(0);
+        assertThat(metrics.completed).hasValue(1);
+
+        // the idle connection is handed out again: in use again
+        connection = pool.acquireBlocking(TIMEOUT);
+        assertThat(metrics.inUse).hasValue(1);
+        pool.release(connection).await().atMost(TIMEOUT);
+        assertThat(metrics.inUse).hasValue(0);
+        assertThat(metrics.completed).hasValue(2);
+
+        pool.close().await().atMost(TIMEOUT);
+        assertThat(metrics.closed).isTrue();
+    }
+
+    @Test
+    void metricsCountARequestAsWaitingUntilItGetsAConnection() {
+        RecordingPoolMetrics metrics = new RecordingPoolMetrics();
+        LettuceConnectionPool pool = observedPool(1, 1, metrics);
+        LettuceConnection held = pool.acquireBlocking(TIMEOUT);
+
+        AtomicBoolean ran = new AtomicBoolean();
+        pool.withPooled(conn -> Uni.createFrom().voidItem()).subscribe().with(x -> ran.set(true), t -> {
+        });
+        assertThat(metrics.waiting).hasValue(1);
+        assertThat(metrics.inUse).hasValue(1);
+
+        pool.release(held).await().atMost(TIMEOUT);
+        await().atMost(TIMEOUT).until(ran::get);
+        await().atMost(TIMEOUT).until(() -> pool.getIdle() == 1);
+        assertThat(metrics.waiting).hasValue(0);
+        assertThat(metrics.inUse).hasValue(0);
+        assertThat(metrics.completed).hasValue(2);
+    }
+
+    @Test
+    void metricsForgetARequestThatIsCancelledOrRejected() {
+        RecordingPoolMetrics metrics = new RecordingPoolMetrics();
+        LettuceConnectionPool pool = observedPool(1, 1, metrics);
+        LettuceConnection held = pool.acquireBlocking(TIMEOUT);
+
+        Cancellable waiter = pool.withPooled(conn -> Uni.createFrom().voidItem()).subscribe().with(x -> {
+        }, t -> {
+        });
+        assertThat(metrics.waiting).hasValue(1);
+        // one request waits already: this one is rejected
+        Cancellable queued = pool.withPooled(conn -> Uni.createFrom().voidItem()).subscribe().with(x -> {
+        }, t -> {
+        });
+        assertThatThrownBy(() -> pool.withPooled(conn -> Uni.createFrom().voidItem()).await().atMost(TIMEOUT))
+                .isInstanceOf(NoSuchElementException.class);
+        assertThat(metrics.waiting).hasValue(1);
+
+        waiter.cancel();
+        queued.cancel();
+        assertThat(metrics.waiting).hasValue(0);
+        assertThat(metrics.inUse).hasValue(1);
+
+        pool.release(held).await().atMost(TIMEOUT);
+        assertThat(metrics.inUse).hasValue(0);
+        assertThat(metrics.completed).hasValue(1);
+    }
+
+    @Test
+    void metricsCountAConnectionThatIsClosedInsteadOfReleasedAsReturned() {
+        RecordingPoolMetrics metrics = new RecordingPoolMetrics();
+        LettuceConnectionPool pool = observedPool(1, 1, metrics);
+
+        // released broken: closed
+        LettuceConnection broken = pool.acquireBlocking(TIMEOUT);
+        broken.markBroken();
+        pool.release(broken).await().atMost(TIMEOUT);
+        assertThat(metrics.inUse).hasValue(0);
+        assertThat(metrics.completed).hasValue(1);
+
+        // the scope is cancelled: closed
+        Cancellable scope = pool.withScoped(conn -> Uni.createFrom().<Void> emitter(e -> {
+            // never completes
+        })).subscribe().with(x -> {
+        }, t -> {
+        });
+        await().atMost(TIMEOUT).untilAsserted(() -> assertThat(metrics.inUse).hasValue(1));
+        scope.cancel();
+        assertThat(metrics.inUse).hasValue(0);
+        assertThat(metrics.completed).hasValue(2);
+        assertThat(metrics.waiting).hasValue(0);
+    }
+
+    @Test
+    void metricsThatKeepNothingPerConnectionAreStillToldOfItsReturn() {
+        // the default methods of the Vert.x interface give null for a request and for a connection in use
+        AtomicInteger ended = new AtomicInteger();
+        PoolMetrics<Object, Object> metrics = new PoolMetrics<>() {
+            @Override
+            public void end(Object usage) {
+                assertThat(usage).isNull();
+                ended.incrementAndGet();
+            }
+        };
+        LettuceConnectionPool pool = new LettuceConnectionPool(CommandsTestBase::connectAsync, 1, 1, 0, null, null, null,
+                metrics);
+
+        pool.release(pool.acquireBlocking(TIMEOUT)).await().atMost(TIMEOUT);
+
+        assertThat(ended).hasValue(1);
+    }
+
+    @Test
+    void metricsDoNotCountAConnectionArrivingForACallerThatGaveUp() {
+        RecordingPoolMetrics metrics = new RecordingPoolMetrics();
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        LettuceConnectionPool pool = new LettuceConnectionPool(() -> gate.thenCompose(v -> connectAsync()), 1, 1, 0,
+                null, null, null, metrics);
+
+        assertThatThrownBy(() -> pool.acquireBlocking(Duration.ofMillis(50)))
+                .isInstanceOf(io.smallrye.mutiny.TimeoutException.class);
+        assertThat(metrics.waiting).hasValue(0);
+
+        // the connection arrives after the caller gave up: it goes to the pool, idle, without having been in use
+        gate.complete(null);
+        await().atMost(TIMEOUT).until(() -> pool.getIdle() == 1);
+        assertThat(metrics.inUse).hasValue(0);
+        assertThat(metrics.completed).hasValue(0);
     }
 
     @Test

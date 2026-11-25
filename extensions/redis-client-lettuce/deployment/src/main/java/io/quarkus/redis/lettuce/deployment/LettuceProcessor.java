@@ -327,6 +327,8 @@ public class LettuceProcessor {
                     }
                     LettuceConnectionFactory factory = LettuceClientSetup.createFactory(name, clientConfig, resources,
                             vertx, tlsRegistry);
+                    LettuceClientSetup.observeCommands(name, clientConfig, factory,
+                            LettuceClientSetup.metrics());
                     ctx.onStop(factory::shutdown);
                     return Optional.of(factory);
                 });
@@ -394,7 +396,8 @@ public class LettuceProcessor {
                 .require(Vertx.class)
                 .optional()
                 .onStart((ctx, factoryOpt, config, vertx) -> factoryOpt.map(factory -> {
-                    LettuceConnectionPool pool = LettuceClientSetup.createPool(config.clients().get(name), factory, vertx);
+                    LettuceConnectionPool pool = LettuceClientSetup.createPool(name, config.clients().get(name),
+                            factory, vertx);
                     ctx.onStop(() -> LettuceClientSetup.closePool(pool));
                     return pool;
                 }));

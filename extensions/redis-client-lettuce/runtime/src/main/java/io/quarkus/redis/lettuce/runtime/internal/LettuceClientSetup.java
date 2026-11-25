@@ -21,7 +21,10 @@ import io.lettuce.core.api.StatefulConnection;
 import io.lettuce.core.cluster.RedisClusterClient;
 import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.resource.ClientResources;
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.InstanceHandle;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionFactory.MasterReplicaMode;
+import io.quarkus.redis.runtime.client.ObservableRedisMetrics;
 import io.quarkus.redis.runtime.client.VertxRedisClientFactory;
 import io.quarkus.redis.runtime.client.config.NetConfig;
 import io.quarkus.redis.runtime.client.config.RedisClientConfig;
@@ -29,6 +32,8 @@ import io.quarkus.runtime.configuration.ConfigurationException;
 import io.quarkus.tls.TlsConfigurationRegistry;
 import io.vertx.core.Vertx;
 import io.vertx.core.internal.VertxInternal;
+import io.vertx.core.spi.metrics.PoolMetrics;
+import io.vertx.core.spi.metrics.VertxMetrics;
 import io.vertx.redis.client.RedisClientType;
 import io.vertx.redis.client.RedisRole;
 import io.vertx.redis.client.RedisTopology;
@@ -58,6 +63,8 @@ public final class LettuceClientSetup {
     private static final Duration DEFAULT_POOL_RECYCLE_TIMEOUT = Duration.ofMinutes(3);
     /** The default of the Vert.x client's pool cleaner interval, applied when {@code pool-cleaner-interval} is unset. */
     private static final Duration DEFAULT_POOL_CLEANER_INTERVAL = Duration.ofSeconds(30);
+    /** The pool type the Vert.x Redis client reports the metrics of its pool under. */
+    private static final String POOL_TYPE = "redis";
     /** Why {@code reconnect-attempts} and {@code tcp.reconnect-attempts} are not applied. */
     private static final String RECONNECT_ATTEMPTS_REASON = " (Lettuce reconnects a lost connection until it succeeds;"
             + " a connection that cannot be opened fails the commands waiting for it, and the next command tries again)";
@@ -147,6 +154,28 @@ public final class LettuceClientSetup {
     }
 
     /**
+     * The bean recording the Redis metrics, which a metrics extension provides when its Redis metrics are enabled
+     * (as the Vert.x client looks it up), or {@code null}.
+     */
+    public static ObservableRedisMetrics metrics() {
+        InstanceHandle<ObservableRedisMetrics> metrics = Arc.container().instance(ObservableRedisMetrics.class);
+        return metrics.isAvailable() ? metrics.get() : null;
+    }
+
+    /**
+     * Reports the commands of a client to the metrics (see {@link LettuceCommandMetrics}). Called before the client
+     * opens a connection: Lettuce gives a connection the listeners its client has when it is opened.
+     *
+     * @param metrics the metrics, {@code null} when there are none: the commands are not observed then
+     */
+    public static void observeCommands(String name, RedisClientConfig config, LettuceConnectionFactory factory,
+            ObservableRedisMetrics metrics) {
+        if (metrics != null) {
+            factory.getClient().addListener(new LettuceCommandMetrics(name, config.clientType(), metrics));
+        }
+    }
+
+    /**
      * The {@link RedisClient} of a standalone, Sentinel or replication client, empty for a cluster client.
      */
     public static Optional<RedisClient> redisClient(LettuceConnectionFactory factory) {
@@ -185,14 +214,28 @@ public final class LettuceClientSetup {
     }
 
     /**
-     * The connection pool of the data sources of a client, sized and recycled as configured.
+     * The connection pool of the data sources of a client, sized and recycled as configured, and observed by the
+     * metrics of Vert.x when there are any (see {@link #poolMetrics}).
      */
-    public static LettuceConnectionPool createPool(RedisClientConfig config, LettuceConnectionFactory factory,
-            Vertx vertx) {
+    public static LettuceConnectionPool createPool(String name, RedisClientConfig config,
+            LettuceConnectionFactory factory, Vertx vertx) {
         return new LettuceConnectionPool(factory::connectAsync, config.maxPoolSize(), config.maxPoolWaiting(),
                 factory.getDatabase(), vertx,
                 config.poolRecycleTimeout().orElse(DEFAULT_POOL_RECYCLE_TIMEOUT),
-                config.poolCleanerInterval().orElse(DEFAULT_POOL_CLEANER_INTERVAL));
+                config.poolCleanerInterval().orElse(DEFAULT_POOL_CLEANER_INTERVAL),
+                poolMetrics(name, config.maxPoolSize(), vertx));
+    }
+
+    /**
+     * The metrics of the connection pool of a client, from the metrics of Vert.x: the ones the Vert.x Redis client
+     * reports for its own pool ({@code redis.pool.*}, with the name of the client), so that the pools are observed
+     * the same way whatever the backend. {@code null} when Vert.x has no metrics.
+     */
+    @SuppressWarnings("unchecked")
+    private static PoolMetrics<Object, Object> poolMetrics(String name, int maxPoolSize, Vertx vertx) {
+        VertxMetrics metrics = ((VertxInternal) vertx).metrics();
+        return metrics == null ? null
+                : (PoolMetrics<Object, Object>) metrics.createPoolMetrics(POOL_TYPE, name, maxPoolSize);
     }
 
     /**
