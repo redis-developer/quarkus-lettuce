@@ -3,6 +3,7 @@ package io.quarkus.redis.lettuce.runtime.internal.stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.function.Consumer;
@@ -10,6 +11,7 @@ import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
 import io.lettuce.core.Range;
+import io.lettuce.core.XReadArgs.StreamOffset;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.protocol.CommandArgs;
@@ -22,7 +24,7 @@ import io.quarkus.redis.datasource.stream.XPendingArgs;
 import io.quarkus.redis.datasource.stream.XReadArgs;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.redis.datasource.stream.XTrimArgs;
-import io.quarkus.redis.lettuce.runtime.internal.BlockingReads;
+import io.quarkus.redis.lettuce.runtime.internal.BlockingCommandArgs;
 
 class LettuceStreamCommandsConvertersTest {
 
@@ -71,38 +73,46 @@ class LettuceStreamCommandsConvertersTest {
     }
 
     @Test
-    void xReadArgsRenderTokens() {
-        XReadArgs plain = new XReadArgs().count(2);
-        assertThat(renderToTokens(LettuceStreamCommandsConverters.toXReadArgs(plain)::build)).containsExactly("COUNT", "2");
+    void xReadCommandArgsRenderOptionsThenStreamsKeysAndOffsets() {
+        CommandArgs<byte[], byte[]> plain = LettuceStreamCommandsConverters.toXReadCommandArgs(new XReadArgs().count(2),
+                offsets("k1", "0-0", "k2", "$"));
+        assertThat(plain.toCommandString().split(" "))
+                .containsExactly("COUNT", "2", "STREAMS", "key<k1>", "key<k2>", "0-0", "$");
+        assertThat(firstKey(plain)).isEqualTo("k1");
 
-        XReadArgs blocking = new XReadArgs().count(2).block(Duration.ofSeconds(1));
-        assertThat(renderToTokens(LettuceStreamCommandsConverters.toXReadArgs(blocking)::build))
-                .containsExactly("COUNT", "2", "BLOCK", "1000");
+        CommandArgs<byte[], byte[]> blocking = LettuceStreamCommandsConverters.toXReadCommandArgs(
+                new XReadArgs().count(2).block(Duration.ofSeconds(1)), offsets("k", "0-0"));
+        assertThat(blocking.toCommandString().split(" "))
+                .containsExactly("COUNT", "2", "BLOCK", "1000", "STREAMS", "key<k>", "0-0");
     }
 
     @Test
-    void xReadArgsMarkTheCommandArgsOnlyWithBlock() {
-        CommandArgs<String, String> plain = new CommandArgs<>(StringCodec.UTF8);
-        LettuceStreamCommandsConverters.toXReadArgs(new XReadArgs().count(2)).build(plain);
-        assertThat(BlockingReads.isMarked(plain)).isFalse();
+    void xReadGroupCommandArgsRenderGroupConsumerOptionsThenStreamsKeysAndOffsets() {
+        CommandArgs<byte[], byte[]> plain = LettuceStreamCommandsConverters.toXReadGroupCommandArgs(bytes("g"), bytes("c"),
+                new XReadGroupArgs().count(2).noack().claim(Duration.ofMillis(5)), offsets("k1", ">", "k2", ">"));
+        // Lettuce renders a plain byte argument in base64: the group and the consumer are names, not keys
+        assertThat(plain.toCommandString().split(" ")).containsExactly("GROUP", "Zw==", "Yw==", "COUNT", "2", "CLAIM", "5",
+                "NOACK", "STREAMS", "key<k1>", "key<k2>", ">", ">");
+        // a cluster connection routes on the first key: the stream, not the group
+        assertThat(firstKey(plain)).isEqualTo("k1");
 
-        CommandArgs<String, String> blocking = new CommandArgs<>(StringCodec.UTF8);
-        LettuceStreamCommandsConverters.toXReadArgs(new XReadArgs().block(Duration.ofSeconds(1))).build(blocking);
-        assertThat(BlockingReads.isMarked(blocking)).isTrue();
-
-        CommandArgs<String, String> group = new CommandArgs<>(StringCodec.UTF8);
-        LettuceStreamCommandsConverters.toXReadArgs(new XReadGroupArgs().block(Duration.ZERO)).build(group);
-        assertThat(BlockingReads.isMarked(group)).isTrue();
+        CommandArgs<byte[], byte[]> blocking = LettuceStreamCommandsConverters.toXReadGroupCommandArgs(bytes("g"),
+                bytes("c"), new XReadGroupArgs().block(Duration.ZERO), offsets("k", ">"));
+        assertThat(blocking.toCommandString().split(" "))
+                .containsExactly("GROUP", "Zw==", "Yw==", "BLOCK", "0", "STREAMS", "key<k>", ">");
     }
 
     @Test
-    void xReadGroupArgsRenderTokens() {
-        XReadGroupArgs plain = new XReadGroupArgs().count(2).noack().claim(Duration.ofMillis(5));
-        assertThat(renderToTokens(LettuceStreamCommandsConverters.toXReadArgs(plain)::build))
-                .containsExactly("COUNT", "2", "CLAIM", "5", "NOACK");
-        assertThat(
-                renderToTokens(LettuceStreamCommandsConverters.toXReadArgs(new XReadGroupArgs().block(Duration.ZERO))::build))
-                .containsExactly("BLOCK", "0");
+    void streamReadCommandArgsAreBlockingOnlyWithBlock() {
+        assertThat(LettuceStreamCommandsConverters.toXReadCommandArgs(new XReadArgs().count(2), offsets("k", "0-0")))
+                .isNotInstanceOf(BlockingCommandArgs.class);
+        assertThat(LettuceStreamCommandsConverters.toXReadCommandArgs(new XReadArgs().block(Duration.ofSeconds(1)),
+                offsets("k", "0-0"))).isInstanceOf(BlockingCommandArgs.class);
+
+        assertThat(LettuceStreamCommandsConverters.toXReadGroupCommandArgs(bytes("g"), bytes("c"),
+                new XReadGroupArgs().noack(), offsets("k", ">"))).isNotInstanceOf(BlockingCommandArgs.class);
+        assertThat(LettuceStreamCommandsConverters.toXReadGroupCommandArgs(bytes("g"), bytes("c"),
+                new XReadGroupArgs().block(Duration.ZERO), offsets("k", ">"))).isInstanceOf(BlockingCommandArgs.class);
     }
 
     @Test
@@ -142,6 +152,20 @@ class LettuceStreamCommandsConvertersTest {
 
     private static byte[] bytes(String s) {
         return s.getBytes(StandardCharsets.UTF_8);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static StreamOffset<byte[]>[] offsets(String... keysAndIds) {
+        StreamOffset<byte[]>[] offsets = new StreamOffset[keysAndIds.length / 2];
+        for (int i = 0; i < offsets.length; i++) {
+            offsets[i] = StreamOffset.from(bytes(keysAndIds[2 * i]), keysAndIds[2 * i + 1]);
+        }
+        return offsets;
+    }
+
+    private static String firstKey(CommandArgs<byte[], byte[]> args) {
+        ByteBuffer key = args.getFirstEncodedKey();
+        return key == null ? null : StandardCharsets.UTF_8.decode(key).toString();
     }
 
     private static String[] render(XClaimArgs args, Duration minIdleTime) {

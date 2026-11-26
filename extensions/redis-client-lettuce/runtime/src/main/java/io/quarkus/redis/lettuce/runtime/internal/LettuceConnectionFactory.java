@@ -626,7 +626,7 @@ public class LettuceConnectionFactory {
             if (BlockingCommands.alwaysBlocks(type)) {
                 return -1; // bounded by its own timeout
             }
-            if (BlockingCommands.blocksWithBlockOption(type) && BlockingReads.isMarked(command.getArgs())) {
+            if (BlockingCommands.blocksWithBlockOption(type) && command.getArgs() instanceof BlockingCommandArgs<?, ?>) {
                 return -1; // bounded by its own BLOCK duration
             }
             return timeoutMillis;

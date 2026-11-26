@@ -46,8 +46,8 @@ import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResu
 import io.quarkus.redis.datasource.transactions.ReactiveTransactionalRedisDataSource;
 import io.quarkus.redis.datasource.transactions.TransactionResult;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
+import io.quarkus.redis.lettuce.runtime.internal.BlockingCommandArgs;
 import io.quarkus.redis.lettuce.runtime.internal.BlockingCommands;
-import io.quarkus.redis.lettuce.runtime.internal.BlockingReads;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionPool;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
@@ -203,7 +203,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     public Uni<Response> execute(String command, String... args) {
         nonNull(command, "command");
         ProtocolKeyword type = resolve(command);
-        return dispatch(type, rawArgs(vertxCommand(command), args), BlockingCommands.blocks(type, args));
+        return dispatch(type, executeArgs(type, vertxCommand(command), args));
     }
 
     /**
@@ -223,7 +223,7 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     public Uni<Response> execute(Command command, String... args) {
         nonNull(command, "command");
         ProtocolKeyword type = resolve(command.toString());
-        return dispatch(type, rawArgs(command, args), BlockingCommands.blocks(type, args));
+        return dispatch(type, executeArgs(type, command, args));
     }
 
     /**
@@ -235,15 +235,12 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * @throws UnsupportedOperationException for a command that takes its connection over, see
      *         {@link #rejectIfItTakesTheConnectionOver}
      */
-    private Uni<Response> dispatch(ProtocolKeyword type, CommandArgs<byte[], byte[]> commandArgs, boolean blocking) {
+    private Uni<Response> dispatch(ProtocolKeyword type, CommandArgs<byte[], byte[]> commandArgs) {
         rejectIfItTakesTheConnectionOver(type);
         if (type == CommandType.SELECT) {
             markDatabaseDirty();
         }
-        if (blocking) {
-            // bounded by its own timeout, not by the command timeout: what the stream arguments do for the typed
-            // XREAD and XREADGROUP (see LettuceConnectionFactory.NonBlockingCommandTimeoutSource)
-            BlockingReads.mark(commandArgs);
+        if (commandArgs instanceof BlockingCommandArgs<?, ?>) {
             LettuceConnectionPool blockingPool = blockingPool();
             if (blockingPool != null) {
                 return blockingPool.withPooled(pooled -> dispatch(pooled, type, commandArgs));
@@ -285,7 +282,18 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
      * @param command the Vert.x command, {@code null} when unknown
      */
     static CommandArgs<byte[], byte[]> rawArgs(Command command, String... args) {
-        CommandArgs<byte[], byte[]> commandArgs = new CommandArgs<>(ByteArrayCodec.INSTANCE);
+        return fill(new CommandArgs<>(ByteArrayCodec.INSTANCE), command, args);
+    }
+
+    static CommandArgs<byte[], byte[]> executeArgs(ProtocolKeyword type, Command command, String... args) {
+        if (BlockingCommands.blocks(type, args)) {
+            return fill(new BlockingCommandArgs<>(ByteArrayCodec.INSTANCE), command, args);
+        }
+        return rawArgs(command, args);
+    }
+
+    private static CommandArgs<byte[], byte[]> fill(CommandArgs<byte[], byte[]> commandArgs, Command command,
+            String... args) {
         if (args == null) {
             return commandArgs;
         }

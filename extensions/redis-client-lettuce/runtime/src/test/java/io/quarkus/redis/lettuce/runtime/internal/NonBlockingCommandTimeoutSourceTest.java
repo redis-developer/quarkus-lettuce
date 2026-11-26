@@ -86,7 +86,7 @@ class NonBlockingCommandTimeoutSourceTest {
     }
 
     @Test
-    void theBlockMarkHoldsForEveryLookupOfTheSameCommand() {
+    void aBlockingReadIsRecognizedOnEveryLookupOfTheSameCommand() {
         // a cluster MOVED/ASK redirect writes the command again, and Lettuce asks for the timeout on each write
         Command<byte[], byte[], String> read = command(CommandType.XREAD, xread(new XReadArgs().block(Duration.ofSeconds(1))));
         assertThat(source.getTimeout(read)).isEqualTo(-1);
@@ -95,29 +95,28 @@ class NonBlockingCommandTimeoutSourceTest {
     }
 
     @Test
-    void aBlockMarkDoesNotLeakOntoOtherCommandTypes() {
+    void blockingArgumentsDoNotExemptOtherCommandTypes() {
         CommandArgs<byte[], byte[]> args = xread(new XReadArgs().block(Duration.ofSeconds(1)));
+        assertThat(args).isInstanceOf(BlockingCommandArgs.class);
         assertThat(source.getTimeout(command(CommandType.XRANGE, args))).isEqualTo(TIMEOUT);
-        assertThat(BlockingReads.isMarked(args)).isTrue();
     }
 
     private static CommandArgs<byte[], byte[]> xread(XReadArgs quarkus) {
-        CommandArgs<byte[], byte[]> args = options(args(), quarkus);
+        CommandArgs<byte[], byte[]> args = options(quarkus, List.of());
         return args.add("STREAMS").addKey(bytes("k")).add("0-0");
     }
 
     private static CommandArgs<byte[], byte[]> xreadgroup(XReadGroupArgs quarkus) {
-        CommandArgs<byte[], byte[]> args = options(args().add("GROUP").add(bytes("g1")).add(bytes("c1")), quarkus);
+        CommandArgs<byte[], byte[]> args = options(quarkus, List.of("GROUP", bytes("g1"), bytes("c1")));
         return args.add("STREAMS").addKey(bytes("k")).add(">");
     }
 
-    private static CommandArgs<byte[], byte[]> options(CommandArgs<byte[], byte[]> args,
-            RedisCommandExtraArguments quarkus) {
+    private static CommandArgs<byte[], byte[]> options(RedisCommandExtraArguments quarkus, List<Object> prefix) {
         List<Object> tokens = quarkus.toArgs();
+        CommandArgs<byte[], byte[]> args = tokens.contains("BLOCK") ? new BlockingCommandArgs<>(ByteArrayCodec.INSTANCE)
+                : args();
+        ArgReplay.replay(prefix, args);
         ArgReplay.replay(tokens, args);
-        if (tokens.contains("BLOCK")) {
-            BlockingReads.mark(args);
-        }
         return args;
     }
 
