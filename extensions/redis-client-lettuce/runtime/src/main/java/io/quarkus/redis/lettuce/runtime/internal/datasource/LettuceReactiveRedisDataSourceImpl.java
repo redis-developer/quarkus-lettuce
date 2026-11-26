@@ -796,13 +796,13 @@ public class LettuceReactiveRedisDataSourceImpl implements ReactiveRedisDataSour
     @Override
     public <K> ReactiveTimeSeriesCommands<K> timeseries(Class<K> redisKeyType) {
         nonNull(redisKeyType, "redisKeyType");
-        return new LettuceReactiveTimeSeriesCommandsImpl<>(this, connection, redisKeyType);
+        return new LettuceReactiveTimeSeriesCommandsImpl<>(this, source, redisKeyType);
     }
 
     @Override
     public <K> ReactiveTimeSeriesCommands<K> timeseries(TypeReference<K> redisKeyType) {
         nonNull(redisKeyType, "redisKeyType");
-        return new LettuceReactiveTimeSeriesCommandsImpl<>(this, connection, redisKeyType.getType());
+        return new LettuceReactiveTimeSeriesCommandsImpl<>(this, source, redisKeyType.getType());
     }
 
     /**

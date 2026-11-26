@@ -548,6 +548,14 @@ class LettuceTimeSeriesCommandsTest extends CommandsTestBase {
     }
 
     @Test
+    void testGetOnSeriesWithoutSamples() {
+        blockingTs.tsCreate(key);
+
+        assertThat(blockingTs.tsGet(key)).isNull();
+        assertThat(blockingTs.tsGet(key, true)).isNull();
+    }
+
+    @Test
     void testIncrementWithCreation() {
         blockingTs.tsIncrBy(key, 10, new IncrementArgs().setTimestamp(1000).label("foo", "bar")
                 .uncompressed().chunkSize(1024).setRetention(Duration.ofDays(1)));

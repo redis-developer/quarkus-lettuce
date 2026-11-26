@@ -45,24 +45,16 @@ import io.quarkus.redis.datasource.timeseries.SeriesSample;
 import io.quarkus.redis.datasource.timeseries.TimeSeriesRange;
 import io.quarkus.redis.lettuce.runtime.internal.AbstractLettuceCommands;
 import io.quarkus.redis.lettuce.runtime.internal.LettuceCommand;
-import io.quarkus.redis.lettuce.runtime.internal.LettuceConnection;
+import io.quarkus.redis.lettuce.runtime.internal.LettuceConnectionSource;
 import io.quarkus.redis.runtime.datasource.Marshaller;
 import io.smallrye.mutiny.Uni;
 
 public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCommands<K, K>
         implements ReactiveTimeSeriesCommands<K> {
 
-    private final ReactiveRedisDataSource dataSource;
-
     public LettuceReactiveTimeSeriesCommandsImpl(ReactiveRedisDataSource dataSource,
-            LettuceConnection connection, Type keyType) {
-        super(connection, keyType, keyType, new Marshaller(keyType));
-        this.dataSource = dataSource;
-    }
-
-    @Override
-    public ReactiveRedisDataSource getDataSource() {
-        return dataSource;
+            LettuceConnectionSource source, Type keyType) {
+        super(dataSource, source, keyType, keyType, new Marshaller(keyType));
     }
 
     @Override
@@ -74,7 +66,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(args, "args");
         TsCreateArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceCreateArgs(args);
-        return LettuceCommand.discarding(() -> async.tsCreate(marshaller.encode(key), lettuceArgs));
+        return discarding(async -> async.tsCreate(marshaller.encode(key), lettuceArgs));
     }
 
     @Override
@@ -96,7 +88,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         positive(timestamp, "timestamp");
         nonNull(args, "args");
         TsAddArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceAddArgs(args);
-        return LettuceCommand.discarding(() -> async.tsAdd(marshaller.encode(key), timestamp, value, lettuceArgs));
+        return discarding(async -> async.tsAdd(marshaller.encode(key), timestamp, value, lettuceArgs));
     }
 
     @Override
@@ -126,7 +118,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(args, "args");
         TsAddArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceAddArgs(args);
-        return LettuceCommand.discarding(() -> async.tsAddNow(marshaller.encode(key), value, lettuceArgs));
+        return discarding(async -> async.tsAddNow(marshaller.encode(key), value, lettuceArgs));
     }
 
     @Override
@@ -138,7 +130,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(args, "args");
         TsAlterArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceAlterArgs(args);
-        return LettuceCommand.discarding(() -> async.tsAlter(marshaller.encode(key), lettuceArgs));
+        return discarding(async -> async.tsAlter(marshaller.encode(key), lettuceArgs));
     }
 
     @Override
@@ -152,7 +144,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(aggregation, "aggregation");
         nonNull(bucketDuration, "bucketDuration");
         TsAggregation lettuceAggregation = LettuceTimeSeriesCommandsConverters.toLettuceAggregation(aggregation);
-        return LettuceCommand.discarding(() -> async.tsCreateRule(marshaller.encode(key), marshaller.encode(destKey),
+        return discarding(async -> async.tsCreateRule(marshaller.encode(key), marshaller.encode(destKey),
                 lettuceAggregation, bucketDuration.toMillis()));
     }
 
@@ -169,7 +161,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(bucketDuration, "bucketDuration");
         positive(alignTimestamp, "alignTimestamp");
         TsAggregation lettuceAggregation = LettuceTimeSeriesCommandsConverters.toLettuceAggregation(aggregation);
-        return LettuceCommand.discarding(() -> async.tsCreateRule(marshaller.encode(key), marshaller.encode(destKey),
+        return discarding(async -> async.tsCreateRule(marshaller.encode(key), marshaller.encode(destKey),
                 lettuceAggregation, bucketDuration.toMillis(), alignTimestamp));
     }
 
@@ -191,7 +183,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(args, "args");
         TsIncrByArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceIncrByArgs(args);
-        return LettuceCommand.discarding(() -> async.tsDecrBy(marshaller.encode(key), value, lettuceArgs));
+        return discarding(async -> async.tsDecrBy(marshaller.encode(key), value, lettuceArgs));
     }
 
     @Override
@@ -204,7 +196,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         positive(fromTimestamp, "fromTimestamp");
         positive(toTimestamp, "toTimestamp");
         Range<Long> range = Range.create(fromTimestamp, toTimestamp);
-        return LettuceCommand.discarding(() -> async.tsDel(marshaller.encode(key), range));
+        return discarding(async -> async.tsDel(marshaller.encode(key), range));
     }
 
     @Override
@@ -215,7 +207,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
     LettuceCommand<String, Void> _tsDeleteRule(K key, K destKey) {
         nonNull(key, "key");
         nonNull(destKey, "destKey");
-        return LettuceCommand.discarding(() -> async.tsDeleteRule(marshaller.encode(key), marshaller.encode(destKey)));
+        return discarding(async -> async.tsDeleteRule(marshaller.encode(key), marshaller.encode(destKey)));
     }
 
     @Override
@@ -225,7 +217,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
 
     LettuceCommand<TsSample, Sample> _tsGet(K key) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.tsGet(marshaller.encode(key)), this::decodeTsSample);
+        return command(async -> async.tsGet(marshaller.encode(key)), this::decodeTsSample);
     }
 
     @Override
@@ -235,7 +227,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
 
     LettuceCommand<TsSample, Sample> _tsGet(K key, boolean latest) {
         nonNull(key, "key");
-        return LettuceCommand.of(() -> async.tsGet(marshaller.encode(key), latest), this::decodeTsSample);
+        return command(async -> async.tsGet(marshaller.encode(key), latest), this::decodeTsSample);
     }
 
     @Override
@@ -256,7 +248,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(args, "args");
         TsIncrByArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceIncrByArgs(args);
-        return LettuceCommand.discarding(() -> async.tsIncrBy(marshaller.encode(key), value, lettuceArgs));
+        return discarding(async -> async.tsIncrBy(marshaller.encode(key), value, lettuceArgs));
     }
 
     @SafeVarargs
@@ -271,7 +263,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
             return LettuceCommand.failing(new IllegalArgumentException("`samples` must not be empty"));
         }
         List<TsMAddValue<byte[]>> lettuceValues = LettuceTimeSeriesCommandsConverters.toLettuceMAddValues(samples, marshaller);
-        return LettuceCommand.discarding(() -> async.tsMAdd(lettuceValues));
+        return discarding(async -> async.tsMAdd(lettuceValues));
     }
 
     @Override
@@ -287,7 +279,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         }
         TsMGetArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceMGetArgs(args);
         TsFilter[] lettuceFilters = LettuceTimeSeriesCommandsConverters.toLettuceFilters(filters);
-        return LettuceCommand.of(() -> async.tsMGet(lettuceArgs, lettuceFilters), this::decodeTsMGetValues);
+        return command(async -> async.tsMGet(lettuceArgs, lettuceFilters), this::decodeTsMGetValues);
     }
 
     @Override
@@ -312,7 +304,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         }
         Range<Long> lettuceRange = LettuceTimeSeriesCommandsConverters.toLettuceRange(range);
         TsFilter[] lettuceFilters = LettuceTimeSeriesCommandsConverters.toLettuceFilters(filters);
-        return LettuceCommand.of(() -> async.tsMRange(lettuceRange, lettuceFilters), this::decodeTsSeries);
+        return command(async -> async.tsMRange(lettuceRange, lettuceFilters), this::decodeTsSeries);
     }
 
     @Override
@@ -331,7 +323,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         Range<Long> lettuceRange = LettuceTimeSeriesCommandsConverters.toLettuceRange(range);
         TsMRangeArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceMRangeArgs(args);
         TsFilter[] lettuceFilters = LettuceTimeSeriesCommandsConverters.toLettuceFilters(filters);
-        return LettuceCommand.of(() -> async.tsMRange(lettuceRange, lettuceArgs, lettuceFilters), this::decodeTsSeries);
+        return command(async -> async.tsMRange(lettuceRange, lettuceArgs, lettuceFilters), this::decodeTsSeries);
     }
 
     @Override
@@ -347,7 +339,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         }
         Range<Long> lettuceRange = LettuceTimeSeriesCommandsConverters.toLettuceRange(range);
         TsFilter[] lettuceFilters = LettuceTimeSeriesCommandsConverters.toLettuceFilters(filters);
-        return LettuceCommand.of(() -> async.tsMRevRange(lettuceRange, lettuceFilters), this::decodeTsSeries);
+        return command(async -> async.tsMRevRange(lettuceRange, lettuceFilters), this::decodeTsSeries);
     }
 
     @Override
@@ -366,7 +358,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         Range<Long> lettuceRange = LettuceTimeSeriesCommandsConverters.toLettuceRange(range);
         TsMRangeArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceMRangeArgs(args);
         TsFilter[] lettuceFilters = LettuceTimeSeriesCommandsConverters.toLettuceFilters(filters);
-        return LettuceCommand.of(() -> async.tsMRevRange(lettuceRange, lettuceArgs, lettuceFilters), this::decodeTsSeries);
+        return command(async -> async.tsMRevRange(lettuceRange, lettuceArgs, lettuceFilters), this::decodeTsSeries);
     }
 
     @Override
@@ -380,7 +372,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
             return LettuceCommand.failing(new IllegalArgumentException("`filters` must not be empty"));
         }
         TsFilter[] lettuceFilters = LettuceTimeSeriesCommandsConverters.toLettuceFilters(filters);
-        return LettuceCommand.of(() -> async.tsQueryIndex(lettuceFilters), this::decodeListOfKeys);
+        return command(async -> async.tsQueryIndex(lettuceFilters), this::decodeListOfKeys);
     }
 
     @Override
@@ -392,7 +384,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(range, "range");
         Range<Long> lettuceRange = LettuceTimeSeriesCommandsConverters.toLettuceRange(range);
-        return LettuceCommand.of(() -> async.tsRange(marshaller.encode(key), lettuceRange), this::decodeTsSamples);
+        return command(async -> async.tsRange(marshaller.encode(key), lettuceRange), this::decodeTsSamples);
     }
 
     @Override
@@ -406,7 +398,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(args, "args");
         Range<Long> lettuceRange = LettuceTimeSeriesCommandsConverters.toLettuceRange(range);
         TsRangeArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceRangeArgs(args);
-        return LettuceCommand.of(() -> async.tsRange(marshaller.encode(key), lettuceRange, lettuceArgs),
+        return command(async -> async.tsRange(marshaller.encode(key), lettuceRange, lettuceArgs),
                 this::decodeTsSamples);
     }
 
@@ -419,7 +411,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(key, "key");
         nonNull(range, "range");
         Range<Long> lettuceRange = LettuceTimeSeriesCommandsConverters.toLettuceRange(range);
-        return LettuceCommand.of(() -> async.tsRevRange(marshaller.encode(key), lettuceRange), this::decodeTsSamples);
+        return command(async -> async.tsRevRange(marshaller.encode(key), lettuceRange), this::decodeTsSamples);
     }
 
     @Override
@@ -433,7 +425,7 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
         nonNull(args, "args");
         Range<Long> lettuceRange = LettuceTimeSeriesCommandsConverters.toLettuceRange(range);
         TsRangeArgs lettuceArgs = LettuceTimeSeriesCommandsConverters.toLettuceRangeArgs(args);
-        return LettuceCommand.of(() -> async.tsRevRange(marshaller.encode(key), lettuceRange, lettuceArgs),
+        return command(async -> async.tsRevRange(marshaller.encode(key), lettuceRange, lettuceArgs),
                 this::decodeTsSamples);
     }
 
@@ -466,6 +458,10 @@ public class LettuceReactiveTimeSeriesCommandsImpl<K> extends AbstractLettuceCom
     }
 
     private Sample decodeTsSample(TsSample sample) {
+        // TS.GET on a series without samples replies with an empty array, which Lettuce surfaces as null
+        if (sample == null) {
+            return null;
+        }
         return new Sample(sample.getTimestamp(), sample.getValue());
     }
 
