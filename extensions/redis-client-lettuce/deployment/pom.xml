@@ -87,8 +87,28 @@
             <artifactId>rest-assured</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- The health, Redis cache and HTTP rate limit extensions are only added to the tests of the Lettuce backend
-             with them, with setForcedDependencies: here only for build ordering -->
+        <!-- The Micrometer API the metrics tests read the meters with; the Micrometer extension itself is only added
+             to those tests, see below -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- The health, Micrometer, Redis cache and HTTP rate limit extensions are only added to the tests of the
+             Lettuce backend with them, with setForcedDependencies: here only for build ordering -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-micrometer-deployment</artifactId>
+            <version>${project.version}</version>
+            <type>pom</type>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-smallrye-health-deployment</artifactId>

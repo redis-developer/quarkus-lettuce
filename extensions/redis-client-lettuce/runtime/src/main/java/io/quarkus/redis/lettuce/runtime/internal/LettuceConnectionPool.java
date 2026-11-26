@@ -5,6 +5,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -25,6 +26,7 @@ import io.smallrye.mutiny.subscription.Cancellable;
 import io.smallrye.mutiny.subscription.UniEmitter;
 import io.vertx.core.Context;
 import io.vertx.core.Vertx;
+import io.vertx.core.spi.metrics.PoolMetrics;
 
 /**
  * Bounded pool of {@link LettuceConnection}s (to a standalone server or to a cluster, see
@@ -89,6 +91,18 @@ public final class LettuceConnectionPool {
     private final long cleanerTimerId;
 
     /**
+     * Told when a request for a connection is made and answered, and when a connection is handed out and comes
+     * back, as the Vert.x client tells the metrics of its pool; {@code null} when the pool is not observed.
+     */
+    private final PoolMetrics<Object, Object> metrics;
+    /**
+     * What {@link #metrics} gave for the connections that are checked out, to be given back when they return;
+     * {@link #NO_USAGE} for metrics that give nothing.
+     */
+    private final Map<LettuceConnection, Object> usages = new ConcurrentHashMap<>();
+    private static final Object NO_USAGE = new Object();
+
+    /**
      * A pool that never recycles its idle connections.
      *
      * @param connector opens a new connection; the connection must start on {@code defaultDatabase}
@@ -103,6 +117,15 @@ public final class LettuceConnectionPool {
     }
 
     /**
+     * A pool that is not observed.
+     */
+    public LettuceConnectionPool(Supplier<CompletionStage<LettuceConnection>> connector,
+            int maxPoolSize, int maxWaiting, int defaultDatabase,
+            Vertx vertx, Duration recycleTimeout, Duration cleanerInterval) {
+        this(connector, maxPoolSize, maxWaiting, defaultDatabase, vertx, recycleTimeout, cleanerInterval, null);
+    }
+
+    /**
      * @param connector opens a new connection; the connection must start on {@code defaultDatabase}
      * @param maxPoolSize maximum number of connections
      * @param maxWaiting maximum number of requests queued once {@code maxPoolSize} are checked out
@@ -112,11 +135,13 @@ public final class LettuceConnectionPool {
      * @param recycleTimeout how long a connection may stay idle before the cleaner closes it; recycling is
      *        off when {@code null} or not positive
      * @param cleanerInterval how often the cleaner runs; recycling is off when {@code null} or not positive
+     * @param metrics observes the requests and the connections in use; {@code null} for a pool that is not observed
      */
     public LettuceConnectionPool(Supplier<CompletionStage<LettuceConnection>> connector,
             int maxPoolSize, int maxWaiting, int defaultDatabase,
-            Vertx vertx, Duration recycleTimeout, Duration cleanerInterval) {
+            Vertx vertx, Duration recycleTimeout, Duration cleanerInterval, PoolMetrics<Object, Object> metrics) {
         this.connector = connector;
+        this.metrics = metrics;
         this.maxPoolSize = maxPoolSize;
         this.maxWaiting = maxWaiting;
         this.defaultDatabase = defaultDatabase;
@@ -186,6 +211,7 @@ public final class LettuceConnectionPool {
      * and so is one released inside a transaction or marked {@link LettuceConnection#markBroken() broken}.
      */
     public Uni<Void> release(LettuceConnection connection) {
+        returned(connection);
         if (connection.isBroken() || connection.isMulti()) {
             LOGGER.warn("Closing a pooled Redis connection released with a transaction left open, or after a "
                     + "transaction that was cancelled or whose cleanup failed, instead of reusing it");
@@ -208,6 +234,7 @@ public final class LettuceConnectionPool {
      * next waiter, if any, gets a fresh connection.
      */
     private CompletableFuture<Void> evict(LettuceConnection connection) {
+        returned(connection);
         synchronized (lock) {
             total--;
         }
@@ -249,6 +276,17 @@ public final class LettuceConnectionPool {
         return Uni.createFrom().completionStage(() -> connection.select(defaultDatabase))
                 .invoke(() -> dirty.remove(connection))
                 .replaceWithVoid();
+    }
+
+    /**
+     * Tells the metrics that a connection is no longer in use: released, or closed instead. Nothing to tell for a
+     * connection that was not handed out, or that was told about already.
+     */
+    private void returned(LettuceConnection connection) {
+        Object usage = usages.remove(connection);
+        if (usage != null) {
+            metrics.end(usage == NO_USAGE ? null : usage);
+        }
     }
 
     private void redrive() {
@@ -496,6 +534,9 @@ public final class LettuceConnectionPool {
         if (vertx != null) {
             vertx.cancelTimer(cleanerTimerId);
         }
+        if (metrics != null) {
+            metrics.close();
+        }
         for (Request waiter : queued) {
             waiter.completeExceptionally(new IllegalStateException("Redis connection pool is closed"));
         }
@@ -526,6 +567,14 @@ public final class LettuceConnectionPool {
     }
 
     private final class Request extends CompletableFuture<LettuceConnection> {
+
+        Request() {
+            if (metrics != null) {
+                // from now until the request is answered, with a connection or a failure, or abandoned
+                Object queued = metrics.enqueue();
+                whenComplete((connection, failure) -> metrics.dequeue(queued));
+            }
+        }
 
         void start() {
             LettuceConnection available = null;
@@ -586,14 +635,14 @@ public final class LettuceConnectionPool {
          */
         boolean deliver(LettuceConnection conn) {
             if (!dirty.contains(conn)) {
-                return complete(conn);
+                return handOut(conn);
             }
             if (isDone()) {
                 return false;
             }
             resetDatabase(conn).subscribe().with(
                     ignored -> {
-                        if (!complete(conn)) {
+                        if (!handOut(conn)) {
                             returnToPool(conn);
                         }
                     },
@@ -602,6 +651,26 @@ public final class LettuceConnectionPool {
                         returnToPool(conn);
                     });
             return true;
+        }
+
+        /**
+         * Completes this request with {@code conn}, in use from then on as far as the metrics are concerned. They
+         * are told first: completing the request runs its borrower, which may release the connection right away.
+         * Returns {@code false} if the request was already abandoned.
+         */
+        private boolean handOut(LettuceConnection conn) {
+            if (isDone()) {
+                return false;
+            }
+            if (metrics != null) {
+                Object usage = metrics.begin();
+                usages.put(conn, usage == null ? NO_USAGE : usage);
+            }
+            if (complete(conn)) {
+                return true;
+            }
+            returned(conn);
+            return false;
         }
 
         void abandon() {

@@ -1300,7 +1300,8 @@ Adding the extension routes every `RedisDataSource` and `ReactiveRedisDataSource
 The Vert.x Redis client is not created for a client that is only used through its data sources.
 It is created for a client that needs it: one injected through a Vert.x client type (see <<Use the Vert.x redis client>>), the one `quarkus-redis-cache` uses, and one that has a load script (see <<Preload data into Redis>>), which is imported through the Vert.x client.
 The <<redis-health-check,health check>> pings a client through its Lettuce data source when it has no Vert.x client, and reports it under the same name; a client that is only injected through the Lettuce types is not checked.
-The Micrometer Redis metrics and the OpenTelemetry spans of the Redis commands are recorded by the Vert.x client, so the commands sent through the Lettuce backend are not measured or traced yet; Lettuce-based metrics and tracing are planned.
+The <<enable-metrics,Micrometer Redis metrics>> are recorded for the Lettuce backend as for the Vert.x client, under the same names and tags (see <<lettuce-metrics>>).
+The OpenTelemetry spans of the Redis commands are recorded by the Vert.x client, so the commands sent through the Lettuce backend are not traced yet; Lettuce-based tracing is planned.
 
 [#connection-pooling-and-blocking-commands]
 === Connection pooling and blocking commands
@@ -1342,6 +1343,22 @@ The extension also exposes the Lettuce client itself as CDI beans for every clie
 The unqualified `ClientResources` bean is the shared instance every client is built on (backed by the Vert.x event loops, see <<lettuce-threading>>).
 `@RedisClientName("my-redis") ClientResources` is the instance the named client was created with: its own, derived from the shared one, when the client sets `reconnect-interval` or a `tcp.*` option (Lettuce takes the reconnect delay and the channel options from the resources, not from the client), the shared instance otherwise.
 Unlike the data sources, an injected connection is opened at startup, so the application does not start when the server cannot be reached; injecting only the client or the `ClientResources` opens no connection.
+
+[[lettuce-metrics]]
+=== Metrics
+
+With the xref:telemetry-micrometer.adoc[`quarkus-micrometer`] extension, the commands sent through the Lettuce backend are recorded by the `redis.commands.*` meters described in <<enable-metrics>>, tagged with the client name, and the pool described in <<connection-pooling-and-blocking-commands>> by the `redis.pool.*` meters, so that a dashboard built for the Vert.x client keeps working.
+`quarkus.micrometer.binder.redis.enabled=false` turns the command meters off, as described in <<disable-metrics>>.
+
+A few details differ from the Vert.x client:
+
+* Every command counts as one operation, the commands of a transaction included, as do `MULTI` and `EXEC`.
+The Vert.x client counts a batch as one operation.
+* The commands of every connection of the client are counted: the shared connection, the pooled ones, the Pub/Sub ones, and the ones sent through the Lettuce beans the extension exposes.
+* The commands Lettuce sends on its own are not counted: the handshake of a connection, and what it sends to discover and follow the topology of a cluster, Sentinel or replication client.
+They are recognised by what they are (`CLUSTER MYID` on a cluster client, `INFO replication` and `ROLE` on a replication client, `SENTINEL` commands on a Sentinel client), so the same command sent by the application to such a client is not counted either.
+* A command is recorded just after it completes, so a meter read immediately after a command returns may not include it yet.
+* The `redis.pool.*` meters describe the pool of the blocking commands and of `withConnection(...)` and `withTransaction(...)`, not the shared connection the ordinary commands use: `redis.pool.active` is the number of pooled connections in use, and `redis.pool.queue.size` the number of callers waiting for one.
 
 [[lettuce-threading]]
 === Threading
