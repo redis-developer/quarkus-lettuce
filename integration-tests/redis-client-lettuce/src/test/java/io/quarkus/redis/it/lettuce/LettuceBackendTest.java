@@ -2444,13 +2444,14 @@ class LettuceBackendTest {
         // without an explicit timestamp the increment is stamped by the server, well after the fixed timestamps above
         String incremented = RestAssured.given().when().post("/lettuce/timeseries/incrby/" + key + "/3").then()
                 .statusCode(200).extract().asString();
-        assertTrue(incremented.endsWith(":4.5"), incremented);
-        assertTrue(Long.parseLong(incremented.substring(0, incremented.indexOf(':'))) > 1_600_000_000_000L, incremented);
+        assertThat(incremented).endsWith(":4.5");
+        assertThat(Long.parseLong(incremented.substring(0, incremented.indexOf(':')))).as(incremented)
+                .isGreaterThan(1_600_000_000_000L);
 
         String now = RestAssured.given().when().post("/lettuce/timeseries/addnow/" + nowKey + "/5").then()
                 .statusCode(200).extract().asString();
-        assertTrue(now.endsWith(":5.0"), now);
-        assertTrue(Long.parseLong(now.substring(0, now.indexOf(':'))) > 1_600_000_000_000L, now);
+        assertThat(now).endsWith(":5.0");
+        assertThat(Long.parseLong(now.substring(0, now.indexOf(':')))).as(now).isGreaterThan(1_600_000_000_000L);
     }
 
     @Test
@@ -2566,11 +2567,11 @@ class LettuceBackendTest {
         // get -> 40:10 (9 incremented by 1), get(other) -> 30:3, range(0..25) -> 10:5;20:7, revrange count 2 -> 40:10;30:9,
         // mget withlabels -> both series with their labels, mrange selected "name" -> both series,
         // mrange groupby tx sum -> one group summing both series, queryindex -> both keys, range after del(1..15) -> 3 left
-        assertEquals("false;16;40:10.0;30:3.0;10:5.0;20:7.0;40:10.0;30:9.0;"
+        assertThat(body).isEqualTo("false;16;40:10.0;30:3.0;10:5.0;20:7.0;40:10.0;30:9.0;"
                 + key + "{name=a, tx=" + label + "}[40:10.0]|" + key + "-other{name=b, tx=" + label + "}[30:3.0];"
                 + key + "{name=a}[10:5.0;20:7.0;30:9.0;40:10.0]|" + key + "-other{name=b}[10:1.0;30:3.0];"
                 + "tx=" + label + "{}[10:6.0;20:7.0;30:12.0;40:10.0];"
-                + "[" + key + ", " + key + "-other];20:7.0;30:9.0;40:10.0", body);
+                + "[" + key + ", " + key + "-other];20:7.0;30:9.0;40:10.0");
         RestAssured.given().when().get("/lettuce/timeseries/get/" + key).then()
                 .statusCode(200).body(CoreMatchers.is("40:10.0"));
     }
@@ -2583,7 +2584,7 @@ class LettuceBackendTest {
                 .post("/lettuce/with-transaction/reactive/timeseries/" + key + "/" + label)
                 .then().statusCode(200).extract().asString();
         // add, add, get -> 20:7, range -> both samples, mget -> the single labelled series
-        assertEquals("false;5;20:7.0;10:5.0;20:7.0;" + key + "{}[20:7.0]", body);
+        assertThat(body).isEqualTo("false;5;20:7.0;10:5.0;20:7.0;" + key + "{}[20:7.0]");
     }
 
 }

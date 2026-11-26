@@ -79,7 +79,7 @@ import io.vertx.redis.client.Command;
  * {@code TransactionResult} once {@code EXEC} has run.
  * <p>
  * The command-group accessors leave the argument checks to the non-transactional accessors they wrap. The
- * {@code graph} and {@code timeseries} groups throw {@link UnsupportedOperationException}, as on the
+ * {@code graph} group throws {@link UnsupportedOperationException}, as on the
  * non-transactional Lettuce data source.
  */
 public class LettuceReactiveTransactionalRedisDataSourceImpl implements ReactiveTransactionalRedisDataSource {
