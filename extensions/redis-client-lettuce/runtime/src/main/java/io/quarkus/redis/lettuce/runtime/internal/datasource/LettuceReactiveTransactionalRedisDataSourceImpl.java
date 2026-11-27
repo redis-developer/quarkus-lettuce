@@ -59,6 +59,8 @@ import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveSorted
 import io.quarkus.redis.lettuce.runtime.internal.sortedset.LettuceReactiveTransactionalSortedSetCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.stream.LettuceReactiveStreamCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.stream.LettuceReactiveTransactionalStreamCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.timeseries.LettuceReactiveTimeSeriesCommandsImpl;
+import io.quarkus.redis.lettuce.runtime.internal.timeseries.LettuceReactiveTransactionalTimeSeriesCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.topk.LettuceReactiveTopKCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.topk.LettuceReactiveTransactionalTopKCommandsImpl;
 import io.quarkus.redis.lettuce.runtime.internal.value.LettuceReactiveTransactionalValueCommandsImpl;
@@ -77,7 +79,7 @@ import io.vertx.redis.client.Command;
  * {@code TransactionResult} once {@code EXEC} has run.
  * <p>
  * The command-group accessors leave the argument checks to the non-transactional accessors they wrap. The
- * {@code graph} and {@code timeseries} groups throw {@link UnsupportedOperationException}, as on the
+ * {@code graph} group throws {@link UnsupportedOperationException}, as on the
  * non-transactional Lettuce data source.
  */
 public class LettuceReactiveTransactionalRedisDataSourceImpl implements ReactiveTransactionalRedisDataSource {
@@ -235,7 +237,7 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K> ReactiveTransactionalGraphCommands<K> graph(Class<K> redisKeyType) {
-        throw groupNotImplemented("graph");
+        throw new UnsupportedOperationException("Lettuce does not support graph commands");
     }
 
     @Override
@@ -254,7 +256,9 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
 
     @Override
     public <K> ReactiveTransactionalTimeSeriesCommands<K> timeseries(Class<K> redisKeyType) {
-        throw groupNotImplemented("timeseries");
+        LettuceReactiveTimeSeriesCommandsImpl<K> reactiveTimeSeries = (LettuceReactiveTimeSeriesCommandsImpl<K>) reactive
+                .timeseries(redisKeyType);
+        return new LettuceReactiveTransactionalTimeSeriesCommandsImpl<>(this, reactiveTimeSeries, tx);
     }
 
     /**
@@ -268,9 +272,4 @@ public class LettuceReactiveTransactionalRedisDataSourceImpl implements Reactive
                 ignored -> output.toVertxResponse()));
     }
 
-    private static UnsupportedOperationException groupNotImplemented(String group) {
-        return new UnsupportedOperationException(
-                "The '" + group + "' transactional command group is not yet implemented on the Lettuce backend. "
-                        + "Remove the quarkus-redis-client-lettuce extension to use the Vert.x backend.");
-    }
 }

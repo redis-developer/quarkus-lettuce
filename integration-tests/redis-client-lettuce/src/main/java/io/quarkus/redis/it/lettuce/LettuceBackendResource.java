@@ -112,6 +112,22 @@ import io.quarkus.redis.datasource.stream.XPendingSummary;
 import io.quarkus.redis.datasource.stream.XReadArgs;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.redis.datasource.stream.XTrimArgs;
+import io.quarkus.redis.datasource.timeseries.AddArgs;
+import io.quarkus.redis.datasource.timeseries.Aggregation;
+import io.quarkus.redis.datasource.timeseries.AlterArgs;
+import io.quarkus.redis.datasource.timeseries.DuplicatePolicy;
+import io.quarkus.redis.datasource.timeseries.Filter;
+import io.quarkus.redis.datasource.timeseries.IncrementArgs;
+import io.quarkus.redis.datasource.timeseries.MGetArgs;
+import io.quarkus.redis.datasource.timeseries.MRangeArgs;
+import io.quarkus.redis.datasource.timeseries.RangeArgs;
+import io.quarkus.redis.datasource.timeseries.ReactiveTimeSeriesCommands;
+import io.quarkus.redis.datasource.timeseries.Reducer;
+import io.quarkus.redis.datasource.timeseries.Sample;
+import io.quarkus.redis.datasource.timeseries.SampleGroup;
+import io.quarkus.redis.datasource.timeseries.SeriesSample;
+import io.quarkus.redis.datasource.timeseries.TimeSeriesCommands;
+import io.quarkus.redis.datasource.timeseries.TimeSeriesRange;
 import io.quarkus.redis.datasource.topk.ReactiveTopKCommands;
 import io.quarkus.redis.datasource.topk.TopKCommands;
 import io.quarkus.redis.datasource.transactions.OptimisticLockingTransactionResult;
@@ -176,6 +192,8 @@ public class LettuceBackendResource {
     private final ReactiveCountMinCommands<String, String> reactiveCountMin;
     private final TopKCommands<String, String> topk;
     private final ReactiveTopKCommands<String, String> reactiveTopK;
+    private final TimeSeriesCommands<String> timeseries;
+    private final ReactiveTimeSeriesCommands<String> reactiveTimeSeries;
 
     private final Map<String, Subscription> subscriptions = new ConcurrentHashMap<>();
     private final AtomicInteger subscriptionIds = new AtomicInteger();
@@ -232,6 +250,8 @@ public class LettuceBackendResource {
         this.reactiveCountMin = reactiveDs.countmin(String.class);
         this.topk = ds.topk(String.class);
         this.reactiveTopK = reactiveDs.topk(String.class);
+        this.timeseries = ds.timeseries(String.class);
+        this.reactiveTimeSeries = reactiveDs.timeseries(String.class);
     }
 
     @GET
@@ -1294,13 +1314,13 @@ public class LettuceBackendResource {
     @GET
     @Path("/geo/hash/{key}/{member}")
     public String geoHash(@PathParam("key") String key, @PathParam("member") String member) {
-        return geo.geohash(key, member).get(0);
+        return geo.geohash(key, member).getFirst();
     }
 
     @GET
     @Path("/geo/pos/{key}/{member}")
     public String geoPos(@PathParam("key") String key, @PathParam("member") String member) {
-        GeoPosition position = geo.geopos(key, member).get(0);
+        GeoPosition position = geo.geopos(key, member).getFirst();
         return position == null ? null : position.longitude() + "," + position.latitude();
     }
 
@@ -2300,7 +2320,7 @@ public class LettuceBackendResource {
     @POST
     @Path("/search/alter/{index}")
     public void searchAlter(@PathParam("index") String index, String field) {
-        search.ftAlter(index, parseFields(field).get(0).toIndexedField());
+        search.ftAlter(index, parseFields(field).getFirst().toIndexedField());
     }
 
     @GET
@@ -2592,6 +2612,344 @@ public class LettuceBackendResource {
                     .chain(() -> b.bfexists(key, "z"));
         }).map(result -> result.discarded() + ";" + result.size() + ";" + result.get(0) + ";" + result.get(1) + ";"
                 + result.get(2));
+    }
+
+    private static String formatSample(Sample sample) {
+        return sample.timestamp() + ":" + sample.value();
+    }
+
+    private static String formatSamples(List<Sample> samples) {
+        return samples.stream().map(LettuceBackendResource::formatSample).collect(Collectors.joining(";"));
+    }
+
+    private static String formatGroups(Map<String, SampleGroup> groups) {
+        return groups.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(e -> e.getKey() + new TreeMap<>(e.getValue().labels()) + "[" + formatSamples(e.getValue().samples())
+                        + "]")
+                .collect(Collectors.joining("|"));
+    }
+
+    @POST
+    @Path("/timeseries/create/{key}")
+    public void timeSeriesCreate(@PathParam("key") String key, @QueryParam("retention") Long retention,
+            @QueryParam("duplicatePolicy") DuplicatePolicy duplicatePolicy, String labels) {
+        var args = new io.quarkus.redis.datasource.timeseries.CreateArgs();
+        if (retention != null) {
+            args.setRetention(Duration.ofMillis(retention));
+        }
+        if (duplicatePolicy != null) {
+            args.duplicatePolicy(duplicatePolicy);
+        }
+        if (labels != null && !labels.isBlank()) {
+            for (String label : labels.split(",")) {
+                String[] parts = label.split("=");
+                args.label(parts[0], parts[1]);
+            }
+        }
+        timeseries.tsCreate(key, args);
+    }
+
+    @POST
+    @Path("/timeseries/alter/{key}/{retention}")
+    public void timeSeriesAlter(@PathParam("key") String key, @PathParam("retention") long retention) {
+        timeseries.tsAlter(key, new AlterArgs().setRetention(Duration.ofMillis(retention)));
+    }
+
+    @POST
+    @Path("/timeseries/add/{key}/{timestamp}/{value}")
+    public void timeSeriesAdd(@PathParam("key") String key, @PathParam("timestamp") long timestamp,
+            @PathParam("value") double value, @QueryParam("onDuplicate") DuplicatePolicy onDuplicate, String labels) {
+        var args = new AddArgs();
+        if (onDuplicate != null) {
+            args.onDuplicate(onDuplicate);
+        }
+        if (labels != null && !labels.isBlank()) {
+            for (String label : labels.split(",")) {
+                String[] parts = label.split("=");
+                args.label(parts[0], parts[1]);
+            }
+        }
+        timeseries.tsAdd(key, timestamp, value, args);
+    }
+
+    @POST
+    @Path("/timeseries/addnow/{key}/{value}")
+    public String timeSeriesAddNow(@PathParam("key") String key, @PathParam("value") double value) {
+        timeseries.tsAdd(key, value);
+        return formatSample(timeseries.tsGet(key));
+    }
+
+    @POST
+    @Path("/timeseries/madd")
+    public void timeSeriesMAdd(String samples) {
+        List<SeriesSample<String>> list = new ArrayList<>();
+        for (String sample : samples.split(",")) {
+            String[] parts = sample.split(":");
+            list.add(SeriesSample.from(parts[0], Long.parseLong(parts[1]), Double.parseDouble(parts[2])));
+        }
+        timeseries.tsMAdd(list.toArray(new SeriesSample[0]));
+    }
+
+    @GET
+    @Path("/timeseries/get/{key}")
+    public String timeSeriesGet(@PathParam("key") String key) {
+        return formatSample(timeseries.tsGet(key));
+    }
+
+    @POST
+    @Path("/timeseries/incrby/{key}/{value}")
+    public String timeSeriesIncrBy(@PathParam("key") String key, @PathParam("value") double value,
+            @QueryParam("timestamp") Long timestamp) {
+        var args = new IncrementArgs();
+        if (timestamp != null) {
+            args.setTimestamp(timestamp);
+        }
+        timeseries.tsIncrBy(key, value, args);
+        return formatSample(timeseries.tsGet(key));
+    }
+
+    @POST
+    @Path("/timeseries/decrby/{key}/{value}")
+    public String timeSeriesDecrBy(@PathParam("key") String key, @PathParam("value") double value,
+            @QueryParam("timestamp") Long timestamp) {
+        var args = new IncrementArgs();
+        if (timestamp != null) {
+            args.setTimestamp(timestamp);
+        }
+        timeseries.tsDecrBy(key, value, args);
+        return formatSample(timeseries.tsGet(key));
+    }
+
+    @DELETE
+    @Path("/timeseries/del/{key}/{from}/{to}")
+    public void timeSeriesDel(@PathParam("key") String key, @PathParam("from") long from, @PathParam("to") long to) {
+        timeseries.tsDel(key, from, to);
+    }
+
+    @POST
+    @Path("/timeseries/rule/{key}/{dest}/{aggregation}/{bucket}")
+    public void timeSeriesCreateRule(@PathParam("key") String key, @PathParam("dest") String dest,
+            @PathParam("aggregation") Aggregation aggregation, @PathParam("bucket") long bucket) {
+        timeseries.tsCreateRule(key, dest, aggregation, Duration.ofMillis(bucket));
+    }
+
+    @DELETE
+    @Path("/timeseries/rule/{key}/{dest}")
+    public void timeSeriesDeleteRule(@PathParam("key") String key, @PathParam("dest") String dest) {
+        timeseries.tsDeleteRule(key, dest);
+    }
+
+    private static TimeSeriesRange toRange(Long from, Long to) {
+        if (from == null && to == null) {
+            return TimeSeriesRange.fromTimeSeries();
+        }
+        if (from == null) {
+            return TimeSeriesRange.fromEarliestToTimestamp(to);
+        }
+        if (to == null) {
+            return TimeSeriesRange.fromTimestampToLatest(from);
+        }
+        return TimeSeriesRange.fromTimestamps(from, to);
+    }
+
+    private static RangeArgs toRangeArgs(Aggregation aggregation, Long bucket, Double min, Double max, Integer count,
+            Long align) {
+        var args = new RangeArgs();
+        if (aggregation != null) {
+            args.aggregation(aggregation, Duration.ofMillis(bucket));
+        }
+        if (min != null) {
+            args.filterByValue(min, max);
+        }
+        if (count != null) {
+            args.count(count);
+        }
+        if (align != null) {
+            args.align(align);
+        }
+        return args;
+    }
+
+    @GET
+    @Path("/timeseries/range/{key}")
+    public String timeSeriesRange(@PathParam("key") String key, @QueryParam("from") Long from, @QueryParam("to") Long to,
+            @QueryParam("aggregation") Aggregation aggregation, @QueryParam("bucket") Long bucket,
+            @QueryParam("min") Double min, @QueryParam("max") Double max, @QueryParam("count") Integer count,
+            @QueryParam("align") Long align) {
+        return formatSamples(timeseries.tsRange(key, toRange(from, to),
+                toRangeArgs(aggregation, bucket, min, max, count, align)));
+    }
+
+    @GET
+    @Path("/timeseries/revrange/{key}")
+    public String timeSeriesRevRange(@PathParam("key") String key, @QueryParam("from") Long from,
+            @QueryParam("to") Long to, @QueryParam("aggregation") Aggregation aggregation,
+            @QueryParam("bucket") Long bucket, @QueryParam("min") Double min, @QueryParam("max") Double max,
+            @QueryParam("count") Integer count, @QueryParam("align") Long align) {
+        return formatSamples(timeseries.tsRevRange(key, toRange(from, to),
+                toRangeArgs(aggregation, bucket, min, max, count, align)));
+    }
+
+    private static Filter[] toFilters(List<String> filters) {
+        return filters.stream().map(f -> {
+            String[] parts = f.split("=");
+            return Filter.withLabel(parts[0], parts[1]);
+        }).toArray(Filter[]::new);
+    }
+
+    @GET
+    @Path("/timeseries/mrange")
+    public String timeSeriesMRange(@QueryParam("filter") List<String> filters, @QueryParam("from") Long from,
+            @QueryParam("to") Long to, @QueryParam("withLabels") boolean withLabels,
+            @QueryParam("selectedLabel") List<String> selectedLabels, @QueryParam("groupBy") String groupBy,
+            @QueryParam("reducer") Reducer reducer, @QueryParam("aggregation") Aggregation aggregation,
+            @QueryParam("bucket") Long bucket, @QueryParam("min") Double min, @QueryParam("max") Double max,
+            @QueryParam("reverse") boolean reverse) {
+        var args = new MRangeArgs();
+        if (withLabels) {
+            args.withLabels();
+        }
+        if (!selectedLabels.isEmpty()) {
+            args.selectedLabels(selectedLabels.toArray(new String[0]));
+        }
+        if (groupBy != null) {
+            args.groupBy(groupBy, reducer);
+        }
+        if (aggregation != null) {
+            args.aggregation(aggregation, Duration.ofMillis(bucket));
+        }
+        if (min != null) {
+            args.filterByValue(min, max);
+        }
+        Map<String, SampleGroup> groups = reverse
+                ? timeseries.tsMRevRange(toRange(from, to), args, toFilters(filters))
+                : timeseries.tsMRange(toRange(from, to), args, toFilters(filters));
+        return formatGroups(groups);
+    }
+
+    @GET
+    @Path("/timeseries/mget")
+    public String timeSeriesMGet(@QueryParam("filter") List<String> filters, @QueryParam("withLabels") boolean withLabels,
+            @QueryParam("selectedLabel") List<String> selectedLabels) {
+        var args = new MGetArgs();
+        if (withLabels) {
+            args.withLabels();
+        }
+        for (String label : selectedLabels) {
+            args.selectedLabel(label);
+        }
+        return formatGroups(timeseries.tsMGet(args, toFilters(filters)));
+    }
+
+    @GET
+    @Path("/timeseries/queryindex")
+    public List<String> timeSeriesQueryIndex(@QueryParam("filter") List<String> filters) {
+        return timeseries.tsQueryIndex(toFilters(filters)).stream().sorted().toList();
+    }
+
+    @POST
+    @Path("/timeseries/reactive/add/{key}/{timestamp}/{value}")
+    public Uni<Void> timeSeriesAddReactive(@PathParam("key") String key, @PathParam("timestamp") long timestamp,
+            @PathParam("value") double value, String labels) {
+        var args = new AddArgs();
+        if (labels != null && !labels.isBlank()) {
+            for (String label : labels.split(",")) {
+                String[] parts = label.split("=");
+                args.label(parts[0], parts[1]);
+            }
+        }
+        return reactiveTimeSeries.tsAdd(key, timestamp, value, args);
+    }
+
+    @GET
+    @Path("/timeseries/reactive/get/{key}")
+    public Uni<String> timeSeriesGetReactive(@PathParam("key") String key) {
+        return reactiveTimeSeries.tsGet(key).map(LettuceBackendResource::formatSample);
+    }
+
+    @GET
+    @Path("/timeseries/reactive/range/{key}")
+    public Uni<String> timeSeriesRangeReactive(@PathParam("key") String key, @QueryParam("from") Long from,
+            @QueryParam("to") Long to) {
+        return reactiveTimeSeries.tsRange(key, toRange(from, to)).map(LettuceBackendResource::formatSamples);
+    }
+
+    @GET
+    @Path("/timeseries/reactive/mrange")
+    public Uni<String> timeSeriesMRangeReactive(@QueryParam("filter") List<String> filters,
+            @QueryParam("withLabels") boolean withLabels) {
+        var args = new MRangeArgs();
+        if (withLabels) {
+            args.withLabels();
+        }
+        return reactiveTimeSeries.tsMRange(TimeSeriesRange.fromTimeSeries(), args, toFilters(filters))
+                .map(LettuceBackendResource::formatGroups);
+    }
+
+    @GET
+    @Path("/timeseries/reactive/queryindex")
+    public Uni<List<String>> timeSeriesQueryIndexReactive(@QueryParam("filter") List<String> filters) {
+        return reactiveTimeSeries.tsQueryIndex(toFilters(filters)).map(keys -> keys.stream().sorted().toList());
+    }
+
+    @POST
+    @Path("/with-transaction/timeseries/{key}/{label}")
+    public String withTransactionTimeSeries(@PathParam("key") String key, @PathParam("label") String label) {
+        String other = key + "-other";
+        TransactionResult result = blocking.withTransaction(tx -> {
+            var ts = tx.timeseries(String.class);
+            ts.tsCreate(key, new io.quarkus.redis.datasource.timeseries.CreateArgs().label("tx", label).label("name", "a"));
+            ts.tsAdd(other, 10, 1, new AddArgs().label("tx", label).label("name", "b"));
+            ts.tsAdd(key, 10, 5);
+            ts.tsAdd(key, 20, 7);
+            ts.tsMAdd(SeriesSample.from(key, 30, 9), SeriesSample.from(other, 30, 3));
+            ts.tsIncrBy(key, 1, new IncrementArgs().setTimestamp(40));
+            ts.tsGet(key);
+            ts.tsGet(other);
+            ts.tsRange(key, TimeSeriesRange.fromTimestamps(0, 25));
+            ts.tsRevRange(key, TimeSeriesRange.fromTimeSeries(), new RangeArgs().count(2));
+            ts.tsMGet(new MGetArgs().withLabels(), Filter.withLabel("tx", label));
+            ts.tsMRange(TimeSeriesRange.fromTimeSeries(), new MRangeArgs().selectedLabels("name"),
+                    Filter.withLabel("tx", label));
+            ts.tsMRange(TimeSeriesRange.fromTimeSeries(), new MRangeArgs().groupBy("tx", Reducer.SUM),
+                    Filter.withLabel("tx", label));
+            ts.tsQueryIndex(Filter.withLabel("tx", label));
+            ts.tsDel(key, 1, 15);
+            ts.tsRange(key, TimeSeriesRange.fromTimeSeries());
+        });
+        Sample get = result.get(6);
+        Sample getOther = result.get(7);
+        List<Sample> range = result.get(8);
+        List<Sample> revRange = result.get(9);
+        Map<String, SampleGroup> mget = result.get(10);
+        Map<String, SampleGroup> mrange = result.get(11);
+        Map<String, SampleGroup> grouped = result.get(12);
+        List<String> index = result.get(13);
+        List<Sample> afterDel = result.get(15);
+        return result.discarded() + ";" + result.size() + ";" + formatSample(get) + ";" + formatSample(getOther) + ";"
+                + formatSamples(range) + ";" + formatSamples(revRange) + ";" + formatGroups(mget) + ";"
+                + formatGroups(mrange) + ";" + formatGroups(grouped) + ";" + index.stream().sorted().toList() + ";"
+                + formatSamples(afterDel);
+    }
+
+    @POST
+    @Path("/with-transaction/reactive/timeseries/{key}/{label}")
+    public Uni<String> withTransactionTimeSeriesReactive(@PathParam("key") String key, @PathParam("label") String label) {
+        return reactive.withTransaction(tx -> {
+            var ts = tx.timeseries(String.class);
+            return ts.tsAdd(key, 10, 5, new AddArgs().label("tx", label))
+                    .chain(() -> ts.tsAdd(key, 20, 7))
+                    .chain(() -> ts.tsGet(key))
+                    .chain(() -> ts.tsRange(key, TimeSeriesRange.fromTimeSeries()))
+                    .chain(() -> ts.tsMGet(Filter.withLabel("tx", label)));
+        }).map(result -> {
+            Sample get = result.get(2);
+            List<Sample> range = result.get(3);
+            Map<String, SampleGroup> mget = result.get(4);
+            return result.discarded() + ";" + result.size() + ";" + formatSample(get) + ";" + formatSamples(range) + ";"
+                    + formatGroups(mget);
+        });
     }
 
 }
