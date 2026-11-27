@@ -1,5 +1,6 @@
 package io.quarkus.security.webauthn.deployment;
 
+import java.net.URI;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 
@@ -33,6 +34,7 @@ import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.IndexDependencyBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveHierarchyBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
+import io.quarkus.deployment.util.UriNormalizationUtil;
 import io.quarkus.security.webauthn.WebAuthn;
 import io.quarkus.security.webauthn.WebAuthnAuthenticationMechanism;
 import io.quarkus.security.webauthn.WebAuthnAuthenticatorStorage;
@@ -41,7 +43,6 @@ import io.quarkus.security.webauthn.WebAuthnRecorder;
 import io.quarkus.security.webauthn.WebAuthnSecurity;
 import io.quarkus.security.webauthn.WebAuthnTrustedIdentityProvider;
 import io.quarkus.vertx.http.deployment.HttpAuthMechanismAnnotationBuildItem;
-import io.quarkus.vertx.http.deployment.NonApplicationRootPathBuildItem;
 import io.quarkus.vertx.http.deployment.VertxWebRouterBuildItem;
 import io.quarkus.vertx.http.runtime.security.HttpAuthenticationMechanism;
 
@@ -107,9 +108,9 @@ class QuarkusSecurityWebAuthnProcessor {
             WebAuthnRecorder recorder,
             VertxWebRouterBuildItem vertxWebRouterBuildItem,
             BeanContainerBuildItem beanContainerBuildItem,
-            NonApplicationRootPathBuildItem nonApplicationRootPathBuildItem) {
+            WebAuthnBuildTimeConfig config) {
         recorder.setupRoutes(beanContainerBuildItem.getValue(), vertxWebRouterBuildItem.getHttpRouter(),
-                nonApplicationRootPathBuildItem.getNonApplicationRootPath());
+                UriNormalizationUtil.normalizeWithBase(URI.create("/"), config.rootPath(), false).getPath());
     }
 
     @BuildStep

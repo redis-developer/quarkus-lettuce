@@ -31,7 +31,7 @@
         <jandex-gradle-plugin.version>2.3.0</jandex-gradle-plugin.version>
 
         <asciidoctorj.version>3.0.1</asciidoctorj.version>
-        <htmlunit.version>5.7.0</htmlunit.version>
+        <htmlunit.version>5.8.0</htmlunit.version>
         <javaparser-core.version>3.28.2</javaparser-core.version>
         <jdeparser2.version>2.1.0</jdeparser2.version>
         <jdeparser.version>3.0.beta1</jdeparser.version>
@@ -39,7 +39,7 @@
 
         <!-- Dev tools -->
         <freemarker.version>2.3.35</freemarker.version>
-        <commonmark.version>0.32.0</commonmark.version>
+        <commonmark.version>0.33.0</commonmark.version>
         <jgit.version>7.8.1.202611041320-r</jgit.version>
 
         <!-- Arquillian BOM -->
@@ -76,12 +76,12 @@
         <volume.access.modifier>:Z</volume.access.modifier>
 
         <!-- Defaults for integration tests -->
-        <elasticsearch-server.version>9.4.1</elasticsearch-server.version>
+        <elasticsearch-server.version>9.5.7</elasticsearch-server.version>
         <elasticsearch.image>docker.io/elastic/elasticsearch:${elasticsearch-server.version}</elasticsearch.image>
         <logstash.image>docker.io/elastic/logstash:${elasticsearch-server.version}</logstash.image>
         <kibana.image>docker.io/elastic/kibana:${elasticsearch-server.version}</kibana.image>
         <elasticsearch.protocol>http</elasticsearch.protocol>
-        <opensearch-server.version>3.6.0</opensearch-server.version>
+        <opensearch-server.version>3.10.0</opensearch-server.version>
         <opensearch.image>docker.io/opensearchproject/opensearch:${opensearch-server.version}</opensearch.image>
         <opensearch.protocol>http</opensearch.protocol>
         <junit-pioneer.version>2.3.0</junit-pioneer.version>
@@ -560,6 +560,10 @@
                             <configuration>
                                 <deployment>${project.groupId}:${project.artifactId}-deployment:${project.version}
                                 </deployment>
+                                <!-- Only resolves to a real file when building this repository itself; harmless
+                                     no-op for consumers of this plugin (e.g. Quarkiverse extensions) since they
+                                     won't have this path relative to their own build root. -->
+                                <localPlatformOverridesFile>${maven.multiModuleProjectDirectory}/devtools/bom-descriptor-json/src/main/resources/catalog-overrides.json</localPlatformOverridesFile>
                             </configuration>
                         </execution>
                     </executions>

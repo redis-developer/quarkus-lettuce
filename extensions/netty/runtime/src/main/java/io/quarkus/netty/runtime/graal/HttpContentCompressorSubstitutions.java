@@ -48,6 +48,28 @@ final class Target_io_netty_handler_codec_compression_ZstdConstants {
 }
 
 @Substitute
+@TargetClass(className = "io.netty.handler.codec.compression.Zstd", onlyWith = IsZstdAbsent.class)
+final class Target_io_netty_handler_codec_compression_Zstd {
+
+    // The original initializer references the optional zstd-jni native loader even when zstd-jni is absent.
+
+    @Substitute
+    public static boolean isAvailable() {
+        return false;
+    }
+
+    @Substitute
+    public static void ensureAvailability() throws Throwable {
+        throw cause();
+    }
+
+    @Substitute
+    public static Throwable cause() {
+        return new ClassNotFoundException("com.github.luben.zstd.Zstd");
+    }
+}
+
+@Substitute
 @TargetClass(className = "io.netty.handler.codec.compression.Brotli", onlyWith = IsBrotli4jAbsent.class)
 final class Target_io_netty_handler_codec_compression_Brotli {
 
@@ -71,22 +93,15 @@ final class Target_io_netty_handler_codec_compression_Brotli {
 
 class IsZstdAbsent implements BooleanSupplier {
 
-    private boolean zstdAbsent;
-
-    public IsZstdAbsent() {
-        try {
-            Class.forName("com.github.luben.zstd.Zstd");
-            zstdAbsent = false;
-        } catch (Exception e) {
-            // It can be a classloading issue (the library is not available), or a native issue
-            // (the library for the current OS/arch is not available)
-            zstdAbsent = true;
-        }
-    }
-
     @Override
     public boolean getAsBoolean() {
-        return zstdAbsent;
+        try {
+            // Do not initialize the class: its static initializer loads the native library.
+            Class.forName("com.github.luben.zstd.Zstd", false, IsZstdAbsent.class.getClassLoader());
+            return false;
+        } catch (ClassNotFoundException e) {
+            return true;
+        }
     }
 }
 

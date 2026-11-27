@@ -419,7 +419,7 @@ export class QwcAgroalDatasource extends observeState(QwcHotReloadElement) {
     
     _saveInsertScript(){
         try {
-            const blob = new Blob([this.value], { type: 'text/sql' });
+            const blob = new Blob([this._insertSQL], { type: 'text/sql' });
             const url = URL.createObjectURL(blob);
 
             const anchor = document.createElement('a');
@@ -766,7 +766,7 @@ export class QwcAgroalDatasource extends observeState(QwcHotReloadElement) {
     }
     
     _renderTextCell(value, colType){
-        if(colType === "bool" || colType === "boolean"){ // TODO: Can we do int(1) and asume this will be a boolean ?
+        if(colType === "bool" || colType === "boolean"){ // TODO: Can we do int(1) and assume this will be a boolean ?
             if(value && value === "true"){
                 return html`<vaadin-icon style="color: var(--lumo-contrast-50pct);" title="${value}" icon="font-awesome-regular:square-check"></vaadin-icon>`;
             }else {
@@ -956,6 +956,8 @@ export class QwcAgroalDatasource extends observeState(QwcHotReloadElement) {
             this.jsonRpc.getInsertScript({datasource:this._selectedDataSource.name}).then(jsonRpcResponse => {
                 this._insertSQL = jsonRpcResponse.result;
                 this._showImportSQLDialog = true;
+            }).catch(error => {
+                notifier.showErrorMessage(msg(str`Failed to create import.sql: ${error?.error?.message || error}`, { id: 'quarkus-agroal-create-import-sql-failed' }));
             });
         }
     }
