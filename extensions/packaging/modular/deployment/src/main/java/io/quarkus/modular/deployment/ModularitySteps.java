@@ -440,14 +440,6 @@ public final class ModularitySteps {
                                 arcRuntimeAdded = true;
                             }
                         }
-                        // TODO: Temporary fixups; remove when we can.
-                        switch (moduleName) {
-                            // todo: needs resteasy release
-                            case "org.jboss.resteasy.core.spi" -> {
-                                mi = mi.withMorePackages(Map.of("org.jboss.resteasy.resteasy_jaxrs.i18n", PackageInfo.of(
-                                        PackageAccess.PRIVATE, Set.of(), Set.of("org.jboss.logging"))));
-                            }
-                        }
                         // Add extra dependencies from build items.
                         mi = mi.withMoreDependencies(extraDepsMap.getOrDefault(mi.name(), Map.of())
                                 .entrySet()
@@ -711,9 +703,7 @@ public final class ModularitySteps {
                 // but allow dependents to be included
                 return true;
             }
-            if (toAdd.modifiers().contains(ModuleDescriptor.Modifier.AUTOMATIC)
-                    // TODO: remove this once this is modular
-                    && !toAdd.name().equals("org.jboss.logmanager.slf4j")) {
+            if (toAdd.modifiers().contains(ModuleDescriptor.Modifier.AUTOMATIC)) {
                 // exclude automatic
                 log.infof("Excluding %s from boot path because it is automatic", toAdd.name());
                 return false;

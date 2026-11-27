@@ -322,6 +322,22 @@ public interface WebAuthnRunTimeConfig {
     Optional<Attestation> attestation();
 
     /**
+     * The name of the TLS configuration whose trust store provides the trust anchors used to verify the attestation
+     * certificates of authenticators. Only useful for attestations different from {@code NONE}. When
+     * {@link #loadMetadata()} is enabled, these trust anchors verify the FIDO metadata instead.
+     * <p>
+     * If a name is configured, it uses the configuration from {@code quarkus.tls.<name>.*}.
+     * If a name is configured, but no TLS configuration is found with that name then an error will be thrown.
+     * <p>
+     * If no name is configured, the TLS configuration named {@code webauthn} is used if it exists. Otherwise, the root
+     * certificates of the Android Keystore, Apple WebAuthn and FIDO Metadata Service attestations are trusted.
+     * <p>
+     * The trust store of the TLS configuration replaces these default root certificates instead of adding to them. To
+     * also trust the default roots, add their certificates to that trust store.
+     */
+    Optional<String> tlsConfigurationName();
+
+    /**
      * Allowed Public Key Credential algorithms by preference order. Webauthn mandates that all authenticators must
      * support at least the following 2 algorithms: {@code ES256} and {@code RS256}.
      *
@@ -446,16 +462,16 @@ public interface WebAuthnRunTimeConfig {
     Optional<Duration> cookieMaxAge();
 
     /**
-     * Set to <code>true</code> if you want to enable the default registration endpoint at <code>/q/webauthn/register</code>, in
-     * which case
+     * Set to <code>true</code> if you want to enable the default registration endpoint, <code>register</code> under
+     * <code>quarkus.webauthn.root-path</code>, in which case
      * you should also implement the <code>WebAuthnUserProvider.store</code> method.
      */
     @WithDefault("false")
     Optional<Boolean> enableRegistrationEndpoint();
 
     /**
-     * Set to <code>true</code> if you want to enable the default login endpoint at <code>/q/webauthn/login</code>, in which
-     * case
+     * Set to <code>true</code> if you want to enable the default login endpoint, <code>login</code> under
+     * <code>quarkus.webauthn.root-path</code>, in which case
      * you should also implement the <code>WebAuthnUserProvider.update</code> method.
      */
     @WithDefault("false")
