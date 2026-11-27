@@ -312,11 +312,11 @@ final class LettuceTimeSeriesCommandsConverters {
                     lettuce.withLabels();
                     break;
                 case "SELECTED_LABELS":
-                    List<String> selected = new ArrayList<>();
-                    while (i + 1 < tokens.size() && !MRANGE_KEYWORDS.contains(String.valueOf(tokens.get(i + 1)))) {
-                        selected.add(String.valueOf(tokens.get(++i)));
+                    String[] selected = new String[selectedLabelsEnd(tokens, i + 1) - i - 1];
+                    for (int j = 0; j < selected.length; j++) {
+                        selected[j] = String.valueOf(tokens.get(++i));
                     }
-                    lettuce.selectedLabels(selected.toArray(new String[0]));
+                    lettuce.selectedLabels(selected);
                     break;
                 case "COUNT":
                     lettuce.count(Long.parseLong(String.valueOf(tokens.get(++i))));
@@ -352,6 +352,70 @@ final class LettuceTimeSeriesCommandsConverters {
 
     private static final Set<String> MRANGE_KEYWORDS = Set.of("LATEST", "FILTER_BY_TS", "FILTER_BY_VALUE", "WITHLABELS",
             "SELECTED_LABELS", "COUNT", "ALIGN", "AGGREGATION", "BUCKETTIMESTAMP", "EMPTY");
+
+    private static int selectedLabelsEnd(List<Object> tokens, int firstLabel) {
+        for (int end = firstLabel + 1; end < tokens.size(); end++) {
+            if (isSelectedLabelsTail(tokens, end)) {
+                return end;
+            }
+        }
+        return tokens.size();
+    }
+
+    private static boolean isSelectedLabelsTail(List<Object> tokens, int from) {
+        int size = tokens.size();
+        int i = from;
+        if (i + 1 < size && "COUNT".equals(tokens.get(i)) && isLong(tokens.get(i + 1))) {
+            i += 2;
+        }
+        if (i == size) {
+            return true;
+        }
+        if (i + 1 < size && "ALIGN".equals(tokens.get(i)) && isAlign(tokens.get(i + 1))) {
+            i += 2;
+        }
+        if (i + 2 >= size || !"AGGREGATION".equals(tokens.get(i)) || !isAggregationType(tokens.get(i + 1))
+                || !isLong(tokens.get(i + 2))) {
+            return false;
+        }
+        i += 3;
+        if (i + 1 < size && "BUCKETTIMESTAMP".equals(tokens.get(i)) && isBucketTimestamp(tokens.get(i + 1))) {
+            i += 2;
+        }
+        if (i < size && "EMPTY".equals(tokens.get(i))) {
+            i++;
+        }
+        return i == size;
+    }
+
+    private static boolean isLong(Object token) {
+        try {
+            Long.parseLong(String.valueOf(token));
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private static boolean isAlign(Object token) {
+        return "-".equals(token) || "+".equals(token) || isLong(token);
+    }
+
+    private static boolean isAggregationType(Object token) {
+        String name = String.valueOf(token).toUpperCase(Locale.ROOT);
+        for (TsAggregationType type : TsAggregationType.values()) {
+            if (type.name().equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isBucketTimestamp(Object token) {
+        return BUCKET_TIMESTAMPS.contains(String.valueOf(token).toLowerCase(Locale.ROOT));
+    }
+
+    private static final Set<String> BUCKET_TIMESTAMPS = Set.of("low", "-", "high", "+", "mid", "~");
 
     private static void applyAlign(String token, Runnable alignStart, Runnable alignEnd, LongConsumer align) {
         switch (token) {
